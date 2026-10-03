@@ -2,6 +2,7 @@
 import * as game from '../engine/game.js';
 import { svc, call, toast, hubSafe } from './app.js';
 import { currentRoute } from './router.js';
+import { ico } from './icons.js';
 
 /** Mount an ad slot element (re-rendered on every ads config change). Returns an unmount function. */
 export function mountAdSlot(el, placement = 'hub_banner') {
@@ -49,7 +50,7 @@ export function rewardedButton(el, onDone) {
   const hub = hubSafe();
   if (!canShowRewardedFor(hub)) { el.hidden = true; el.textContent = ''; return; }
   el.hidden = false;
-  el.innerHTML = '<button type="button" class="btn btn-reward" data-testid="btn-rewarded">🎬 צפה בפרסומת וקבל +15 אנרגיה</button>';
+  el.innerHTML = '<button type="button" class="btn btn-reward" data-testid="btn-rewarded">' + ico('play') + 'צפה בפרסומת וקבל \u2066+15\u2069 אנרגיה</button>';
   const btn = el.querySelector('button');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -58,12 +59,12 @@ export function rewardedButton(el, onDone) {
       const earned = await svc.ads.showRewarded(() => {
         const r = call(() => game.grantReward('energy15'));
         granted = !!(r && r.ok);
-        if (granted) toast('+15 אנרגיה ⚡ (' + r.energy + ')');
+        if (granted) toast('\u2066+15\u2069 אנרגיה (' + r.energy + ')');
       });
       if (earned && !granted) {
         const r = call(() => game.grantReward('energy15'));
         granted = !!(r && r.ok);
-        if (granted) toast('+15 אנרגיה ⚡ (' + r.energy + ')');
+        if (granted) toast('\u2066+15\u2069 אנרגיה (' + r.energy + ')');
       }
     } catch (e) { console.warn(e); }
     if (onDone) onDone(granted);

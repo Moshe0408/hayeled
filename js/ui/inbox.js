@@ -4,6 +4,8 @@ import { esc } from './dom.js';
 import { call, toast, setHeader, reducedMotion } from './app.js';
 import { navigate } from './router.js';
 import { bubble, empty } from './components.js';
+import { personaIco } from './icons.js';
+function avatar(from) { const p = personaIco(from); return `<span class="avatar ${p.tint}" aria-hidden="true">${p.svg}</span>`; }
 
 export function render(root, params = {}) {
   if (params.id) return renderChat(root, params.id);
@@ -17,7 +19,7 @@ function renderList(root) {
     root.innerHTML = `<div class="inbox">
       ${unread ? '<div class="row end"><button type="button" class="btn btn-sm btn-ghost" data-act="allread">סמן הכל כנקרא</button></div>' : ''}
       ${rows.length ? `<div class="chat-list">${rows.map((r) => `<a class="chat-row${r.unread ? ' unread' : ''}" href="#/chat/${encodeURIComponent(r.id)}" data-testid="inbox-item-${esc(r.id)}">
-          <span class="avatar" aria-hidden="true">${esc(r.avatar || '💬')}</span>
+          ${avatar(r.from)}
           <span class="grow cr-body"><span class="cr-top"><b>${esc(r.fromHe)}</b><small class="muted">${esc(r.dateHe || '')}</small></span>
           <span class="cr-prev">${esc(r.previewHe || '')}</span></span>
           <span class="cr-side">${r.needsAnswer ? '<span class="chip warn">מחכה לתשובה</span>' : ''}${r.unread ? '<i class="dot"></i>' : ''}</span>
@@ -44,7 +46,7 @@ function renderChat(root, id) {
   function draw(messages, typing = false, showChoices = true) {
     const msgs = messages || thread.messages || [];
     root.innerHTML = `<div class="chat">
-      <div class="chat-head"><span class="avatar" aria-hidden="true">${esc(thread.avatar || '💬')}</span><b>${esc(thread.fromHe)}</b><small class="muted">${esc(thread.dateHe || '')}</small></div>
+      <div class="chat-head">${avatar(thread.from)}<b>${esc(thread.fromHe)}</b><small class="muted">${esc(thread.dateHe || '')}</small></div>
       <div class="bubbles">${msgs.map((m) => bubble(m, thread.isGroup)).join('')}${typing ? '<div class="bub them typing" aria-label="מקליד"><i></i><i></i><i></i></div>' : ''}</div>
       ${showChoices && thread.choices && thread.choices.length ? `<div class="chat-choices">${thread.choices.map((c, i) => `<button type="button" class="btn chat-choice" data-act="choice" data-i="${esc(c.index ?? i)}" data-testid="chat-choice-${esc(c.index ?? i)}" ${c.disabled ? 'disabled' : ''}>${esc(c.he)}</button>`).join('')}</div>` : ''}
     </div>`;

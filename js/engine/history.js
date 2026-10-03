@@ -18,6 +18,7 @@ const W_AWARDS = {
   top_scorer: 'מלכת השערים', pots: 'שחקנית העונה', tots: 'נבחרת העונה', young_pots: 'השחקנית הצעירה של העונה',
   ucl_top_scorer: 'מלכת שערי ליגת האלופות לנשים', golden_boy: 'פרס הכישרון הצעיר', ballon_dor: 'כדור הזהב לנשים',
   bdo_top3: 'פודיום כדור הזהב לנשים', bdo_top10: 'טופ 10 בכדור הזהב לנשים', golden_boot_tour: 'מלכת שערי הטורניר', motm_final: 'שחקנית הגמר',
+  coach_season: 'מאמנת העונה', coach_year: 'מאמנת השנה',
 };
 const W_TROPHIES = {
   league: 'אליפות', league2: 'עלייה ליגה', cup: 'גביע', ucl: 'ליגת האלופות לנשים', uel: 'הליגה האירופית לנשים', uecl: 'הקונפרנס ליג לנשים',

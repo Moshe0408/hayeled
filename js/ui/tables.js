@@ -4,6 +4,7 @@ import { esc } from './dom.js';
 import { call, setHeader } from './app.js';
 import { tableView, bracketRound, segmented, empty, badge, scoreBox, teamLabel, nationTeam } from './components.js';
 import { COUNTRIES } from '../data/countries.js';
+import { ico } from './icons.js';
 
 function countryCrest(g) {
   const c = COUNTRIES.find((x) => (g.flag && x.flag === g.flag) || x.nameHe === g.countryHe);
@@ -90,7 +91,7 @@ function renderComp(root, compId) {
       if (roundIdx === null) roundIdx = lastKnownRound();
       body = rounds.length ? `<div class="chips wrap">${rounds.map((r, i) => `<button type="button" class="chip chip-btn${i === roundIdx ? ' on' : ''}" data-act="round" data-i="${i}">${esc(r.he)}</button>`).join('')}</div>
         ${bracketRound(rounds[roundIdx])}
-        ${bracket.winner ? `<div class="winner-card">🏆 ${badge(bracket.winner)} <b>${esc(bracket.winner.nameHe)}</b></div>` : ''}` : empty('ההגרלה עוד לא התקיימה', '🎲');
+        ${bracket.winner ? `<div class="winner-card">${ico('trophy', 'gold')} ${badge(bracket.winner)} <b>${esc(bracket.winner.nameHe)}</b></div>` : ''}` : empty('ההגרלה עוד לא התקיימה', '🎲');
     }
     root.innerHTML = `<div class="comp-view">
       ${hasTable && hasBracket ? segmented('view', [{ id: 'table', he: 'טבלה' }, { id: 'bracket', he: 'נוקאאוט' }], view) : ''}

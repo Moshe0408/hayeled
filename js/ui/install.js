@@ -3,6 +3,7 @@ import * as game from '../engine/game.js';
 import * as save from '../core/save.js';
 import { ctx, toast } from './app.js';
 import { g } from './gender.js';
+import { ico } from './icons.js';
 
 // imperative verb in the player's gender
 const FEM = { 'לחץ': 'לחצי', 'גלול': 'גללי', 'ובחר': 'ובחרי', 'בחר': 'בחרי', 'העתק': 'העתיקי', 'פתח': 'פתחי', 'והדבק': 'והדביקי' };
@@ -52,12 +53,12 @@ export function render(root) {
 
   function draw() {
     if (standalone) {
-      root.innerHTML = `<div class="install"><section class="card center"><div class="big-ico">✅</div><h2>כבר מותקן ✓</h2>
+      root.innerHTML = `<div class="install"><section class="card center"><div class="big-ico">${ico('check', 'good')}</div><h2>כבר מותקן</h2>
         <p class="muted">המשחק פתוח מהמסך הראשי. אפשר לשחק גם בלי אינטרנט.</p></section></div>`;
       return;
     }
     const iosBlock = `<section class="card">
-      <h2 class="card-title">📱 אייפון / אייפד (Safari)</h2>
+      <h2 class="card-title">${ico('phone')} אייפון / אייפד (Safari)</h2>
       <ol class="steps">
         <li>${SHARE_SVG}<span>${L('לחץ')} על כפתור <b>השיתוף</b> בתחתית המסך</span></li>
         <li>${ADD_SVG}<span>${L('גלול')} ${L('ובחר')} <b>"הוסף למסך הבית"</b></span></li>
@@ -65,11 +66,11 @@ export function render(root) {
       </ol>
       <div class="note warn"><b>חשוב באייפון:</b> לאפליקציה המותקנת יש אחסון <b>נפרד</b> מ-Safari. קריירה שהתחלת ב-Safari לא תופיע באפליקציה.
         לפני ההתקנה ${L('העתק')} קוד גיבוי, ואחרי ההתקנה ${L('פתח')} את המשחק ← הגדרות ← ייבוא ${L('והדבק')} אותו.</div>
-      ${hasCareer ? '<button type="button" class="btn btn-primary" data-act="copycode" data-testid="btn-install-copy-code">📋 העתק קוד גיבוי</button>' : ''}
+      ${hasCareer ? '<button type="button" class="btn btn-primary" data-act="copycode" data-testid="btn-install-copy-code">' + ico('copy') + 'העתק קוד גיבוי</button>' : ''}
       <p class="muted small">טיפ: Safari עלול למחוק נתוני אתרים אחרי כ-7 ימים בלי ביקור. התקנה למסך הבית מונעת את זה.</p>
     </section>`;
     const androidBlock = `<section class="card">
-      <h2 class="card-title">🤖 אנדרואיד (Chrome)</h2>
+      <h2 class="card-title">${ico('phone')} אנדרואיד (Chrome)</h2>
       ${canInstall() ? '<button type="button" class="btn btn-primary btn-lg" data-act="install" data-testid="btn-install">📲 התקן</button>' : ''}
       <ol class="steps">
         <li>${DOTS_SVG}<span>${L('לחץ')} על <b>⋮</b> (שלוש הנקודות) בפינה</span></li>
@@ -77,11 +78,11 @@ export function render(root) {
       </ol>
       <p class="muted small">באנדרואיד האפליקציה המותקנת חולקת את האחסון עם Chrome, אז ההתקדמות שלך נשארת. אין צורך להעביר כלום.</p>
     </section>`;
-    const desktopBlock = `<section class="card"><h2 class="card-title">💻 מחשב</h2>
+    const desktopBlock = `<section class="card"><h2 class="card-title">${ico('table')} מחשב</h2>
       ${canInstall() ? '<button type="button" class="btn btn-primary" data-act="install" data-testid="btn-install">📲 התקן</button>' : ''}
       <p class="small">ב-Chrome או Edge: ${L('לחץ')} על סמל ההתקנה בשורת הכתובת, או בתפריט ← "התקן את הילד מהשכונה".</p></section>`;
     root.innerHTML = `<div class="install">
-      <section class="card hero-card"><div class="big-ico">📲</div><h2>לשחק כמו באפליקציה</h2>
+      <section class="card hero-card"><div class="big-ico">${ico('phone', 'gold')}</div><h2>לשחק כמו באפליקציה</h2>
         <p class="muted">התקנה למסך הבית: פתיחה במסך מלא, משחק גם בלי אינטרנט, וההתקדמות מוגנת יותר.</p></section>
       ${ios ? iosBlock + androidBlock : isAndroid() ? androidBlock + iosBlock : desktopBlock + androidBlock + iosBlock}
     </div>`;
@@ -105,7 +106,7 @@ export function render(root) {
         const code = await save.exportSlotCode(ctx.activeSlot);
         let copied = false;
         try { await navigator.clipboard.writeText(code); copied = true; } catch { copied = false; }
-        if (copied) toast('קוד הגיבוי הועתק ✓ שמור אותו בפתקים או בוואטסאפ לעצמך');
+        if (copied) toast('קוד הגיבוי הועתק ✓ כדאי לשמור אותו בפתקים או בוואטסאפ');
         else toast('לא הצלחנו להעתיק. אפשר להעתיק מההגדרות ← העתק קוד');
       } catch (err) { console.warn(err); toast('לא הצלחנו ליצור קוד גיבוי'); }
     }

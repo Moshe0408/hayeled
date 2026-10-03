@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>share card 1200x630 (render: node design/render-share.mjs)</title>
+<!-- Social share composition (R7). Rendered to ../share.jpg with headless Chrome. Uses the real logo, the title-screen
+     stadium scene, the real avatar + crest builders and the in-game FUT card component. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=Rubik:wght@500;700;900&display=swap">
+<link rel="stylesheet" href="../css/app.css">
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html,body{margin:0;width:1200px;height:630px;overflow:hidden;background:#050B1A}
+  body::before{display:none}
+  .sh-sc{position:relative;width:1200px;height:630px;overflow:hidden;isolation:isolate;font-family:Heebo,system-ui,sans-serif;color:#EAF1FC}
+  .sh-sc canvas{position:absolute;inset:0;width:1200px;height:630px;z-index:-3;display:block;filter:brightness(1.1) saturate(1.05)}
+  /* legibility: dark wash on the text side (right in RTL), floodlight bloom behind the cards */
+  .sh-wash{position:absolute;inset:0;z-index:-2;
+    background:
+      linear-gradient(270deg,rgba(4,9,22,.9) 0%,rgba(4,9,22,.74) 36%,rgba(4,9,22,.16) 60%,rgba(4,9,22,0) 100%),
+      linear-gradient(0deg,rgba(4,9,22,.7) 0%,rgba(4,9,22,0) 26%)}
+  /* stadium floodlights (top-left) so the arena reads behind the cards */
+  .sh-flood{position:absolute;z-index:-2;top:-60px;width:260px;height:260px;border-radius:50%;background:radial-gradient(closest-side,rgba(255,250,230,.75),rgba(255,236,190,.22) 45%,transparent 75%);mix-blend-mode:screen}
+  .sh-flood.a{left:-40px}.sh-flood.b{left:420px;top:-80px;width:220px;height:220px}
+  .sh-bloom{position:absolute;z-index:-1;left:40px;top:40px;width:520px;height:560px;border-radius:50%;
+    background:radial-gradient(closest-side,rgba(244,195,90,.38),rgba(244,195,90,.10) 55%,transparent 75%);filter:blur(6px)}
+  .sh-floor{position:absolute;z-index:-1;left:0;top:470px;width:620px;height:200px;border-radius:50%;background:radial-gradient(closest-side,rgba(43,208,122,.42),rgba(47,227,207,.12) 60%,transparent 80%)}
+  .sh-floor::after{content:"";position:absolute;left:150px;top:62px;width:330px;height:60px;border-radius:50%;border:2px solid rgba(255,255,255,.22)}
+  .sh-rays{position:absolute;z-index:-1;left:300px;top:-140px;width:10px;height:10px}
+  .sh-rays i{position:absolute;left:0;top:0;width:900px;height:120px;transform-origin:0 50%;background:linear-gradient(90deg,rgba(255,240,200,.28),transparent 80%);filter:blur(8px)}
+
+  .sh-copy{position:absolute;top:44px;right:40px;width:600px;display:flex;flex-direction:column;align-items:center;text-align:center}
+  .sh-logo-clip{width:440px;height:245px;overflow:hidden;filter:drop-shadow(0 18px 30px rgba(0,0,0,.6))}
+  .sh-logo-clip img{width:440px;height:auto;display:block}
+  .sh-tag{margin:6px 0 0;white-space:nowrap;font:900 47px/1.12 Rubik,Heebo,sans-serif;letter-spacing:-.01em;
+    background:linear-gradient(180deg,#FFF3C4 0%,#F4C35A 50%,#C98E2B 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 4px 0 rgba(60,35,5,.55)) drop-shadow(0 10px 24px rgba(0,0,0,.6))}
+  .sh-sub{margin:10px 0 0;font:700 21px/1.4 Heebo,sans-serif;color:#C9D7EE;text-shadow:0 2px 10px rgba(0,0,0,.8)}
+  .sh-sub b{color:#7DF0E2;font-weight:800}
+  .sh-cta{margin-top:20px;display:inline-flex;align-items:center;gap:14px;padding:16px 34px 16px 30px;border-radius:999px;
+    font:900 30px/1 Rubik,Heebo,sans-serif;color:#0A1838;background:linear-gradient(180deg,#FFE7A3 0%,#F4C35A 45%,#D9A23E 100%);
+    box-shadow:0 0 0 2px rgba(255,255,255,.45) inset,0 -4px 0 rgba(120,70,10,.35) inset,0 14px 34px rgba(244,195,90,.45),0 4px 10px rgba(0,0,0,.5)}
+  .sh-cta svg{width:30px;height:30px;fill:#0A1838}
+  .sh-url{margin-top:14px;font:700 17px/1 Heebo,sans-serif;color:#8FA3C6;letter-spacing:.02em;direction:ltr}
+
+  .sh-cards{position:absolute;left:40px;top:40px;width:540px;height:560px}
+  .sh-cards .pcard{position:absolute;--w:236px;filter:drop-shadow(0 26px 30px rgba(0,0,0,.65)) drop-shadow(0 0 30px rgba(244,195,90,.25))}
+  .sh-cards .sh-c-boy{left:4px;top:72px;transform:rotate(-7deg)}
+  .sh-cards .sh-c-girl{left:286px;top:42px;transform:rotate(6deg)}
+  .sh-chip-g{position:absolute;z-index:3;padding:9px 20px;border-radius:999px;font:900 20px/1 Rubik,Heebo,sans-serif;color:#0A1838;
+    background:linear-gradient(180deg,#7DF0E2,#2FE3CF);box-shadow:0 8px 20px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.35) inset}
+  .sh-chip-g.b{left:84px;top:404px;transform:rotate(-7deg)}
+  .sh-chip-g.g{left:356px;top:376px;transform:rotate(6deg);background:linear-gradient(180deg,#FFB3C7,#FF7AA2)}
+  .sh-ball{position:absolute;z-index:4;left:236px;top:456px;width:72px;height:72px;filter:drop-shadow(0 10px 14px rgba(0,0,0,.6))}
+  .sh-trophy{display:none;filter:drop-shadow(0 0 22px rgba(244,195,90,.6))}
+</style>
+</head>
+<body>
+<div class="sh-sc" id="sc">
+  <canvas id="stadium" aria-hidden="true"></canvas>
+  <div class="sh-wash"></div>
+  <div class="sh-flood a"></div><div class="sh-flood b"></div>
+  <div class="sh-bloom"></div>
+  <div class="sh-floor"></div>
+  <div class="sh-rays"><i style="transform:rotate(58deg)"></i><i style="transform:rotate(82deg)"></i><i style="transform:rotate(106deg)"></i></div>
+  <div class="sh-cards" id="cards"></div>
+  <div class="sh-copy">
+    <div class="sh-logo-clip"><img src="../icons/logo.svg" alt="הילד מהשכונה"></div>
+    <div class="sh-tag">מהשכונה ועד הבאלון ד'אור</div>
+    <div class="sh-sub">קריירת כדורגל <b>לבנים ולבנות</b> · מהאקדמיה בגיל 15<br>ועד ליגת האלופות, המונדיאל וכדור הזהב</div>
+    <div class="sh-cta"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>לשחק עכשיו בחינם</div>
+    <div class="sh-url">moshe0408.github.io/hayeled</div>
+  </div>
+</div>
+<script type="module">
+  import { playerCard } from '../js/ui/components.js';
+  import { CLUB_INDEX } from '../js/data/leagues.js';
+  import { playIntro } from '../js/ui/scene/intro.js';
+
+  const team = (id) => { const c = CLUB_INDEX[id].club; return { id: c.id, nameHe: c.nameHe, shortHe: c.shortHe || c.nameHe, colors: c.colors.slice(0, 2) }; };
+  const isr = { id: 'isr', nameHe: 'ישראל', shortHe: 'ישראל', flag: '🇮🇱', colors: ['#0038B8', '#FFFFFF'], nation: 'isr' };
+  const A = (o) => Object.entries(o).map(([key, value]) => ({ key, value }));
+  const boy = playerCard({ name: 'איתי לוי', ovr: 91, pos: 'ST', attrs: A({ pac: 92, sho: 93, pas: 84, dri: 90, def: 41, phy: 82 }),
+    meta: { gender: 'm', careerId: 'share-boy', look: { skin: 2, hair: 'fade', hairColor: 0 } }, club: team('esp_barcelona'), nation: isr }, { size: 'l', tilt: false });
+  const girl = playerCard({ name: 'נועה כהן', ovr: 90, pos: 'CAM', attrs: A({ pac: 88, sho: 87, pas: 93, dri: 92, def: 52, phy: 74 }),
+    meta: { gender: 'f', careerId: 'share-girl', look: { skin: 1, hair: 'ponytail', hairColor: 2 } }, club: team('eng_arsenal'), nation: isr }, { size: 'l', tilt: false });
+  const el = document.getElementById('cards');
+  el.innerHTML = `
+    <svg class="sh-trophy" viewBox="0 0 64 64" aria-hidden="true"><defs><radialGradient id="tb" cx=".38" cy=".32" r=".7"><stop offset="0" stop-color="#FFF6D0"/><stop offset=".5" stop-color="#F4C35A"/><stop offset="1" stop-color="#9A6A16"/></radialGradient></defs>
+      <circle cx="32" cy="24" r="17" fill="url(#tb)"/><path d="M22 23q10 6 20 0M32 7q-6 8 0 34M32 7q6 8 0 34" fill="none" stroke="#9A6A16" stroke-opacity=".55" stroke-width="1.4"/>
+      <path d="M26 40h12l2 8H24z" fill="url(#tb)"/><rect x="19" y="48" width="26" height="8" rx="2" fill="#3A2160"/><rect x="21" y="50" width="22" height="2" fill="#F4C35A"/></svg>
+    ${boy.replace('class="pcard', 'class="sh-c-boy pcard')}${girl.replace('class="pcard', 'class="sh-c-girl pcard')}
+    <span class="sh-chip-g b">שחקן</span><span class="sh-chip-g g">שחקנית</span>
+    <svg class="sh-ball" viewBox="0 0 64 64" aria-hidden="true"><defs><radialGradient id="bl" cx=".35" cy=".3" r=".75"><stop offset="0" stop-color="#fff"/><stop offset=".7" stop-color="#DCE3EE"/><stop offset="1" stop-color="#8E9AAE"/></radialGradient></defs>
+      <circle cx="32" cy="32" r="29" fill="url(#bl)"/><path d="M32 19l11 8-4 13H25l-4-13z" fill="#0B1220"/>
+      <path d="M32 19V5M43 27l13-5M39 40l8 12M25 40l-8 12M21 27 8 22" stroke="#0B1220" stroke-width="2.4"/>
+      <path d="M26 4.5 32 5l6-.5M57 26l-1-4 3.5-6M49 53l-2-1 1.5 7M15 53l2-1-1.5 7M7 26l1-4-3.5-6" fill="none" stroke="#0B1220" stroke-width="3"/></svg>`;
+
+  // background: a frame of the real intro's floodlit stadium (after the smash-cut, before the logo lands)
+  const canvas = document.getElementById('stadium');
+  canvas.width = 1200; canvas.height = 630;
+  const STADIUM_T = Number(new URLSearchParams(location.search).get('t')) || 5.25;
+  const intro = playIntro({ force: true, debug: true });
+  const until = (fn, ms = 8000) => new Promise((res, rej) => { const t0 = performance.now(); (function k() { const v = fn(); if (v) res(v); else if (performance.now() - t0 > ms) rej(new Error('timeout')); else requestAnimationFrame(k); })(); });
+  Promise.all([document.fonts.ready, ...[...document.images].map((i) => i.decode().catch(() => {}))])
+    .then(() => until(() => window.__introDebug))
+    .then((dbg) => {
+      dbg.seek(STADIUM_T);
+      const src = document.querySelector('.hy-intro canvas');
+      canvas.getContext('2d').drawImage(src, 0, 0, src.width, src.height, 0, 0, 1200, 630);
+      dbg.finish();
+      return intro;
+    })
+    .then(() => new Promise((r) => setTimeout(r, 300)))
+    .then(() => { document.querySelectorAll('.hy-intro').forEach((n) => n.remove()); window.__shareReady = true; });
+</script>
+</body>
+</html>

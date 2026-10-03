@@ -1,7 +1,8 @@
 // Game state container, schema version and the engine context.
+import { fmtMoney } from './util.js';
 // The only module-level mutable state of the engine lives in C: the current career (S + its rng) and the signal list.
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const C = {
   S: null,      // current State
@@ -29,7 +30,7 @@ export function emptyStats() {
 }
 
 export const STATE_KEYS = ['v', 'id', 'createdAt', 'seed', 'rng', 'startSeason', 'season', 'week', 'wstep', 'inWeek', 'wsum', 'training',
-  'econ', 'player', 'world', 'comp', 'nt', 'inbox', 'offers', 'live', 'lastMatch', 'pending', 'hist', 'stars', 'ev', 'names', 'ctr', 'retired'];
+  'econ', 'player', 'world', 'comp', 'nt', 'inbox', 'offers', 'live', 'lastMatch', 'pending', 'hist', 'stars', 'ev', 'names', 'ctr', 'retired', 'mgr'];
 
 export function createEmptyState() {
   return {
@@ -41,12 +42,31 @@ export function createEmptyState() {
     stars: [], ev: { cd: {}, once: [], flags: {}, trig: [], q: [] },
     names: { coach: {}, agent: '', journalist: '', friends: ['', '', ''], partner: null },
     ctr: { m: 0, o: 0, t: 0, s: 0 }, retired: null,
+    mgr: null,   // v3: coaching career after retirement (js/engine/manager.js)
   };
 }
 
 export const WOMEN_ECON = 0.12;
 const SHIRT = { GK: 1, RB: 2, LB: 3, CB: 4, CDM: 6, RW: 7, CM: 8, ST: 9, CAM: 10, LW: 11 };
 export function defaultShirt(pos) { return SHIRT[pos] || 10; }
+
+// '€12,500' / '€15.5K' / '€1.2M' (the v2 fmtMoney formats) -> fmtMoney(value), i.e. '₪48,800' / '₪60 אלף' / '₪4.7 מיליון'
+const EURO_RE = /(-?)€\s?(\d[\d,]*(?:\.\d+)?)(?:\s?([KkMm])(?![a-zA-Z]))?/g;
+export function euroToShekelText(t) {
+  if (typeof t !== 'string' || t.indexOf('€') < 0) return t;
+  return t.replace(EURO_RE, (all, neg, n, u) => {
+    const v = Number(n.replace(/,/g, ''));
+    if (!Number.isFinite(v)) return all;
+    const mul = u ? (u === 'K' || u === 'k' ? 1e3 : 1e6) : 1;
+    return fmtMoney((neg ? -1 : 1) * v * mul);
+  });
+}
+function shekelTexts(o, depth) {
+  const d = depth || 0;
+  if (!o || typeof o !== 'object' || d > 12) return;
+  if (Array.isArray(o)) { for (let i = 0; i < o.length; i++) { if (typeof o[i] === 'string') o[i] = euroToShekelText(o[i]); else shekelTexts(o[i], d + 1); } return; }
+  for (const k of Object.keys(o)) { const v = o[k]; if (typeof v === 'string') o[k] = euroToShekelText(v); else if (v && typeof v === 'object') shekelTexts(v, d + 1); }
+}
 
 export function migrateState(data, fromV) {
   if (typeof fromV !== 'number' || !Number.isFinite(fromV)) fromV = data && data.v;
@@ -69,6 +89,12 @@ export function migrateState(data, fromV) {
         if (typeof L.cc !== 'number') L.cc = 0;
         if (!Array.isArray(L.out)) L.out = [];
       }
+    }
+    // v2 -> v3: coaching career (R2). A retired v2 career gets its coaching offers on the retirement screen.
+    if (!(fromV >= 3)) {
+      if (!('mgr' in data)) data.mgr = null;
+      // R3: v2 saves hold already-rendered euro amounts in persisted texts (inbox, timeline...): show them in shekels
+      shekelTexts(data);
     }
     data.v = SCHEMA_VERSION;
   }

@@ -3,7 +3,7 @@
 // 4px rounded data-end, hairline solid gridlines. Every chart has a hover tooltip and a table view.
 
 const NS = 'http://www.w3.org/2000/svg';
-const SURFACE = '#16213a';
+const SURFACE = '#131F35';   // card surface (css/admin.css --card)
 
 function svgEl(tag, attrs = {}) {
   const el = document.createElementNS(NS, tag);
@@ -18,13 +18,15 @@ function htmlEl(tag, cls, text) {
 }
 
 function niceMax(v) {
+  // 4 gridline steps with an integer-friendly step (1, 2, 3, 5, 10, 20, 25, 50, ...): never 1.25 / 3.75 labels
   if (!(v > 0)) return 4;
-  const pow = Math.pow(10, Math.floor(Math.log10(v)));
-  for (const m of [1, 2, 2.5, 4, 5, 10]) {
-    const c = m * pow;
-    if (c >= v) return Math.max(4, c);
+  const raw = v / 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of (pow >= 10 ? [1, 2, 2.5, 5, 10] : [1, 2, 3, 5, 10])) {
+    const step = Math.max(1, m * pow);
+    if (step >= raw) return step * 4;
   }
-  return 10 * pow;
+  return 40 * pow;
 }
 function ticksFor(max) {
   const step = max / 4;
@@ -200,7 +202,7 @@ export function columnChart(items, { height = 170, color = '#3987e5', testid, va
   const bw = Math.min(24, band * 0.6);
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', direction: 'ltr' });
   const base = padT + ih;
-  svg.appendChild(svgEl('line', { x1: padX, x2: W - padX, y1: base, y2: base, stroke: '#24304d', 'stroke-width': 1 }));
+  svg.appendChild(svgEl('line', { x1: padX, x2: W - padX, y1: base, y2: base, stroke: '#22324F', 'stroke-width': 1 }));
   const tip = htmlEl('div', 'adm-tip');
   tip.hidden = true;
 
@@ -255,4 +257,54 @@ export function rankList(items, { empty = 'אין עדיין נתונים', tota
     ul.appendChild(li);
   });
   return ul;
+}
+
+/**
+ * Part-to-whole split bar (2-3 parts) with a 2px surface gap and direct labels (value + %).
+ * parts: [{ name, value, color }] in a FIXED order (identity never follows rank).
+ */
+export function splitBar(parts, { testid, empty = 'אין עדיין נתונים' } = {}) {
+  const wrap = htmlEl('div', 'adm-split');
+  if (testid) wrap.setAttribute('data-testid', testid);
+  const list = (Array.isArray(parts) ? parts : []).map((p) => ({ ...p, value: Math.max(0, Number(p.value) || 0) }));
+  const sum = list.reduce((a, p) => a + p.value, 0);
+  if (!sum) {
+    wrap.appendChild(htmlEl('div', 'adm-empty', empty));
+    return wrap;
+  }
+  const track = htmlEl('div', 'track');
+  track.setAttribute('role', 'img');
+  track.setAttribute('aria-label', list.map((p) => p.name + ' ' + p.value).join(', '));
+  const tip = htmlEl('div', 'adm-tip');
+  tip.hidden = true;
+  list.forEach((p) => {
+    if (!p.value) return;
+    const seg = htmlEl('div', 'seg');
+    seg.style.width = ((p.value / sum) * 100).toFixed(2) + '%';
+    seg.style.background = p.color;
+    const show = (ev) => {
+      tip.textContent = p.name + ': ' + p.value + ' (' + Math.round((p.value / sum) * 100) + '%)';
+      tip.hidden = false;
+      placeTip(tip, wrap, ev.clientX, ev.clientY);
+    };
+    seg.addEventListener('pointermove', show);
+    seg.addEventListener('pointerdown', show);
+    seg.addEventListener('pointerleave', () => { tip.hidden = true; });
+    track.appendChild(seg);
+  });
+  wrap.appendChild(track);
+  const keys = htmlEl('div', 'keys');
+  list.forEach((p) => {
+    const it = htmlEl('span');
+    const k = htmlEl('span', 'key');
+    k.style.background = p.color;
+    it.appendChild(k);
+    it.appendChild(document.createTextNode(p.name + ' '));
+    it.appendChild(htmlEl('b', '', String(p.value)));
+    it.appendChild(document.createTextNode(' · ' + Math.round((p.value / sum) * 100) + '%'));
+    keys.appendChild(it);
+  });
+  wrap.appendChild(keys);
+  wrap.appendChild(tip);
+  return wrap;
 }

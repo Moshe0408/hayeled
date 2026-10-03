@@ -1,5 +1,5 @@
 // tests/e2e.mjs: end-to-end browser test (SPEC §10.2). Integrate agent.
-// Usage: node tests/e2e.mjs [--only a|b|c] [--headful]
+// Usage: node tests/e2e.mjs [--only a|b|c|d] [--headful]
 // Env:   PUPPETEER_CORE_PATH  absolute path of a puppeteer-core package dir (default: tests/node_modules/puppeteer-core)
 //        CHROME_PATH          browser executable (default: installed Chrome, then Edge)
 //        SHOTS_DIR            screenshot directory (default: tests/out)
@@ -7,6 +7,7 @@
 // Scenario group A runs with the shipped (empty) backend config; group B injects the mock backend through the
 // SPEC §1.2 dev override (localStorage 'hy.dev.backend', set with evaluateOnNewDocument in that context only).
 // Group C covers v2: the opening cinematic, a girl career (feminine Hebrew, women's football) and goal celebrations.
+// Group D covers v2.1: the coaching career after retirement (boy and girl), manager screens, HoF "שחקן + מאמן".
 // Every page skips the 8 s intro ('hy.intro.skip'='1') except scenario C1.
 
 import { createRequire } from 'node:module';
@@ -190,6 +191,8 @@ async function click(page, sel, timeout = 10000) {
     const el = await page.waitForSelector(sel, { visible: true, timeout });
     // a full-screen celebration (C9) swallows the first tap like on a phone: tap it away first
     await page.evaluate(() => { for (const c of document.querySelectorAll('[data-testid="celebration"]')) c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+    // the fixed bottom tab bar covers the last line of a screen: centre the target first (a player scrolls too)
+    await el.evaluate((e) => { if (!e.closest('.tabbar, nav.tabs, [data-testid="tabbar"]')) e.scrollIntoView({ block: 'center', inline: 'nearest' }); }).catch(() => {});
     try { await el.click(); return; } catch (e) {
       if (attempt >= 3 || !/detached|not clickable|Node is either not visible/i.test(String(e && e.message))) throw e;
       await sleep(150);
@@ -602,10 +605,16 @@ async function groupA(browser) {
       await noOverflow(page, h);
       const bad = await page.evaluate(() => { const t = document.getElementById('view').innerText; const m = t.match(/NaN|undefined|\[object Object\]|\{[a-z0-9]+\}/); return m ? m[0] + ' in: ' + t.slice(Math.max(0, m.index - 40), m.index + 40) : null; });
       assert(!bad, `${h}: ${bad}`);
+      await noEuro(page, h);
+      if (h === '#/shop') assert(/₪/.test(await docText(page)), 'shop without ₪ prices');
       await shot(page, name);
     }
     // tab bar navigation by clicking
-    for (const t of ['schedule', 'tables', 'career', 'inbox', 'hub']) { await click(page, T('tab-' + t)); await sleep(250); }
+    // v2.1 tab bar: בית, לוח, טבלאות, חנות, קריירה; messages moved to the header bell (btn-inbox)
+    for (const t of ['schedule', 'tables', 'shop', 'career', 'hub']) { await click(page, T('tab-' + t)); await sleep(250); }
+    await click(page, T('btn-inbox')); await sleep(250);
+    assert((await page.evaluate(() => location.hash)).startsWith('#/inbox'), 'bell did not open the inbox');
+    await click(page, T('tab-hub')); await sleep(250);
     // a competition table and a career sub-tab
     await goto(page, '#/tables');
     const comp = await page.$('[data-testid^="comp-"]');
@@ -619,6 +628,36 @@ async function groupA(browser) {
     await setWidth(page, 360); await noOverflow(page, 'table 360'); await shot(page, 'table-league-360'); await setWidth(page, 390);
     await goto(page, '#/settings'); await setWidth(page, 360); await noOverflow(page, 'settings 360'); await shot(page, 'settings-360'); await setWidth(page, 390);
     await goto(page, '#/profile'); await setWidth(page, 360); await shot(page, 'profile-360'); await setWidth(page, 390);
+    await goto(page, '#/hub');
+  });
+
+  await scenario('A5b v2.1 settings: grouped icon list, "איך זה עובד?" sheets, red danger zone last; tab bar + bell', async () => {
+    await goto(page, '#/settings');
+    await closeTopModals(page);
+    const L = await page.evaluate(() => {
+      const groups = [...document.querySelectorAll('#view .set-group')];
+      const last = groups[groups.length - 1];
+      const del = document.querySelector('[data-testid^="btn-delete-slot-"]');
+      return { n: groups.length, lastDanger: !!(last && last.classList.contains('set-danger')), delInDanger: !!(del && del.closest('.set-danger')), text: document.getElementById('view').innerText };
+    });
+    assert(L.n >= 3 && L.lastDanger && L.delInDanger, 'settings layout ' + JSON.stringify({ n: L.n, lastDanger: L.lastDanger, delInDanger: L.delInDanger }));
+    for (const w of ['צליל', 'פתיחה', 'החלטות', 'גיבוי', 'התקנה', 'דרג', 'פרטיות']) assert(L.text.includes(w), 'settings without "' + w + '"');
+    await click(page, T('btn-help-save'));
+    await page.waitForSelector('.modal-wrap:not(.closing) .howto', { visible: true, timeout: 5000 });
+    await noMarkers(page, 'settings help');
+    await shot(page, 'settings-help-save', { full: false });
+    await closeTopModals(page);
+    const tabs = await page.$$eval('[data-testid^="tab-"]', (e) => e.filter((x) => x.getBoundingClientRect().width > 0).map((x) => x.dataset.testid));
+    for (const t of ['tab-hub', 'tab-schedule', 'tab-tables', 'tab-shop', 'tab-career']) assert(tabs.includes(t), 'tab bar without ' + t + ': ' + tabs);
+    assert(await present(page, T('btn-inbox')), 'header bell (btn-inbox) missing');
+    await goto(page, '#/shop');
+    const cats = await page.$$eval('[data-testid^="shop-cat-"]', (e) => e.map((x) => x.dataset.testid.replace('shop-cat-', '')));
+    for (const c of ['cars', 'estate', 'watch', 'gear', 'invest', 'mine']) assert(cats.includes(c), 'store category missing: ' + c + ' (' + cats + ')');
+    await click(page, T('shop-cat-invest'));
+    await sleep(300);
+    assert(await page.evaluate(() => document.querySelectorAll('#view .sitem svg').length >= 3), 'investment cards without illustrations');
+    await noEuro(page, 'shop invest');
+    await shot(page, 'shop-invest');
     await goto(page, '#/hub');
   });
 
@@ -680,7 +719,7 @@ async function groupA(browser) {
     await advanceUI(page, 'auto');
     await flushSave(page);
     const w0 = await meta(page);
-    await goto(page, '#/settings');
+    await goto(page, '#/settings?sec=backup');
     await click(page, T('btn-restore-prev-1'));
     await click(page, T('btn-confirm-yes'));
     await sleep(800);
@@ -694,7 +733,7 @@ async function groupA(browser) {
   await scenario('A10 export code -> import into slot 2 -> slot 2 meta equals slot 1', async () => {
     await goto(page, '#/hub');
     await flushSave(page);
-    await goto(page, '#/settings');
+    await goto(page, '#/settings?sec=backup');
     await click(page, T('btn-export-code-1'));
     await page.waitForFunction(() => { const t = document.querySelector('[data-testid="export-code-text"]'); return t && t.value.length > 10; });
     const code = await page.$eval(T('export-code-text'), (e) => e.value);
@@ -897,7 +936,7 @@ async function noMarkers(page, where) {
 async function groupC(browser) {
   const ctx = await browser.createBrowserContext();
 
-  await scenario('C1 opening cinematic: plays on first launch, skip button works, title after, not again this session', async () => {
+  await scenario('C1 opening cinematic: plays on every app open, skip button works, title screen after', async () => {
     const page = await newPage(ctx, 'C-intro', { intro: true });
     await page.goto(BASE, { waitUntil: 'load' });
     await page.waitForSelector(T('intro'), { visible: true, timeout: 10000 });
@@ -912,11 +951,14 @@ async function groupC(browser) {
     await page.waitForSelector(T('btn-new-career'), { visible: true });
     const flags = await page.evaluate(() => ({ seen: localStorage.getItem('hy.intro.seen'), sess: sessionStorage.getItem('hy.intro.session') }));
     assert(flags.seen && flags.sess, 'intro flags not stored ' + JSON.stringify(flags));
-    // same session: no intro on reload
+    // v2.1 (R1): the intro plays again on every app open (page load / PWA launch)
     await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector(T('intro'), { visible: true, timeout: 10000 });
+    await page.waitForSelector(T('btn-intro-skip'), { visible: true });
+    await click(page, T('btn-intro-skip'));
+    await page.waitForFunction(() => !document.querySelector('[data-testid="intro"]'), { timeout: 3000 });
     await waitBoot(page);
     await page.waitForSelector(T('btn-new-career'), { visible: true });
-    assert(!(await page.$(T('intro'))), 'intro played twice in one session');
     // replay from settings, closed with Esc
     await goto(page, '#/settings');
     await click(page, T('btn-replay-intro'));
@@ -961,6 +1003,39 @@ async function groupC(browser) {
     const art = await page.evaluate(() => ({ av: document.querySelectorAll('#view svg.avatar').length, cr: document.querySelectorAll('#view svg.crest').length }));
     assert(art.av >= 1 && art.cr >= 1, 'hub art ' + JSON.stringify(art));
     await shot(page, 'hub-f');
+  });
+
+  await scenario('C2b app open with a career: intro -> title, gold "המשך קריירה" first', async () => {
+    // own browser context: a second tab on the same slot would trip the other-tab guard of page C
+    const octx = await browser.createBrowserContext();
+    const pa = await newPage(octx, 'C-open-a');
+    await pa.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(pa);
+    await pa.evaluate(async () => {
+      const g = window.__hy.game;
+      const club = g.getAcademyOptions('isr', { gender: 'f' }).groups[0].clubs[0].id;
+      await window.__hy.ctx.hooks.startNewCareer({ first: 'מאיה', last: 'לוי', nick: '', nation: 'isr', pos: 'CM', foot: 'R', club, gender: 'f', look: { skin: 2, hair: 'bun', hairColor: 1 } }, 1);
+    });
+    await flushSave(pa);
+    await pa.close();
+    const p2 = await newPage(octx, 'C-open', { intro: true });
+    await p2.goto(BASE, { waitUntil: 'load' });
+    await p2.waitForSelector(T('intro'), { visible: true, timeout: 10000 });
+    await p2.waitForSelector(T('btn-intro-skip'), { visible: true });
+    await click(p2, T('btn-intro-skip'));
+    await waitBoot(p2);
+    await p2.waitForSelector(T('btn-continue'), { visible: true });
+    const order = await p2.evaluate(() => {
+      const c = document.querySelector('[data-testid="btn-continue"]'), n = document.querySelector('[data-testid="btn-new-career"]');
+      return { first: !!(c && n && (c.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)), gold: c.classList.contains('btn-gold'), hash: location.hash };
+    });
+    assert(order.hash === '#/title', 'app open did not land on the title screen: ' + order.hash);
+    assert(order.first && order.gold, 'continue is not the first gold button');
+    await noMarkers(p2, 'title (f)');
+    await shot(p2, 'title-continue-f', { full: false });
+    await click(p2, T('btn-continue'));
+    await p2.waitForSelector(T('hub'), { visible: true, timeout: 10000 });
+    await octx.close();
   });
 
   await scenario('C3 girl career: watch matches until she scores -> "גוללללל!" celebration overlay', async () => {
@@ -1203,12 +1278,341 @@ async function groupB(browser) {
     await page.waitForFunction(() => !document.querySelector('[data-testid="announcement"]'), { timeout: 10000 });
   });
 
+await scenario('B11 admin v2.1 tools: rating filter, delete feedback (2 taps), CSV export, reset stats (types "איפוס", 2 clicks)', async () => {
+    await fetch(MOCK + '/__mock/seed', { method: 'POST', body: JSON.stringify({ devices: 24 }) });
+    const DL = path.join(SHOTS, 'dl');
+    fs.mkdirSync(DL, { recursive: true });
+    for (const f of fs.readdirSync(DL)) fs.unlinkSync(path.join(DL, f));
+    const cdp = await admin.browser().target().createCDPSession();
+    await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DL, browserContextId: ctx.id });
+    await admin.bringToFront();
+    await admin.setViewport({ width: 1280, height: 900 });
+    await admin.reload({ waitUntil: 'load' });
+    await admin.waitForSelector(`${T('nav-dash')}, ${T('adm-email')}`, { visible: true, timeout: 10000 });
+    if (await present(admin, T('adm-email'))) {
+      await admin.type(T('adm-email'), 'admin@test.local');
+      await admin.type(T('adm-password'), 'test1234');
+      await click(admin, T('adm-login'));
+    }
+    await click(admin, T('nav-dash'));   // the reload keeps the last admin tab (B8 left it on the config screen)
+    await admin.waitForSelector(T('kpi-careers-f'), { visible: true, timeout: 10000 });
+    const kp = await admin.evaluate(() => Object.fromEntries(['kpi-devices', 'kpi-careers-m', 'kpi-careers-f', 'kpi-manager', 'kpi-intro', 'kpi-goals', 'kpi-top5'].map((k) => [k, ((document.querySelector(`[data-testid="${k}"]`) || {}).textContent || '').trim()])));
+    assert(Number(kp['kpi-careers-m']) + Number(kp['kpi-careers-f']) >= 1 && /%$/.test(kp['kpi-intro']), 'v2.1 KPIs ' + JSON.stringify(kp));
+    assert(!(await admin.$(T('adm-schema-banner'))), 'schema banner shown on a 2.1 backend');
+    await noOverflow(admin, 'admin dashboard 1280');
+    await shot(admin, 'admin-v21-dashboard');
+    await click(admin, T('nav-feedback'));
+    await admin.waitForSelector(T('fb-rating-5'), { visible: true });
+    await click(admin, T('fb-rating-5'));
+    await admin.waitForFunction(() => document.querySelector('[data-testid="fb-rating-5"]').classList.contains('on'));
+    await sleep(300);
+    const stars = await admin.$$eval('[data-testid^="fb-row-"] .stars', (e) => e.map((x) => x.textContent.trim()));
+    assert(stars.length > 0 && stars.every((s) => s === '★★★★★'), 'rating filter 5: ' + JSON.stringify(stars));
+    await shot(admin, 'admin-v21-feedback-5');
+    const delTid = await admin.$eval('[data-testid^="btn-delete-"]', (e) => e.dataset.testid);
+    const fbId = Number(delTid.replace('btn-delete-', ''));
+    await click(admin, T(delTid));
+    await sleep(200);
+    assert((await mockState()).feedback.some((f) => f.id === fbId), 'feedback deleted after one tap');
+    await click(admin, T(delTid));
+    await admin.waitForFunction((id) => !document.querySelector(`[data-testid="fb-row-${id}"]`), { timeout: 8000 }, fbId);
+    const st1 = await mockState();
+    assert(!st1.feedback.some((f) => f.id === fbId), 'deleted feedback still in the mock');
+    await click(admin, T('fb-rating-all'));
+    await sleep(300);
+    await click(admin, T('btn-export-csv'));
+    let csv = '';
+    for (let i = 0; i < 50 && !csv; i++) { await sleep(150); const f = fs.readdirSync(DL).find((x) => x.endsWith('.csv')); if (f) csv = fs.readFileSync(path.join(DL, f), 'utf8'); }
+    assert(csv.startsWith('﻿"מזהה"'), 'CSV not downloaded / bad header: ' + JSON.stringify(csv.slice(0, 40)));
+    assert(csv.trim().split('\r\n').length === st1.feedback.length + 1, 'CSV lines ' + (csv.trim().split('\r\n').length - 1) + ' vs ' + st1.feedback.length);
+    await click(admin, T('nav-tools'));
+    await admin.waitForSelector(T('btn-reset-open'), { visible: true });
+    await click(admin, T('btn-reset-open'));
+    assert(await admin.$eval(T('btn-reset-confirm'), (e) => e.disabled), 'reset enabled before typing');
+    await admin.type(T('reset-confirm-input'), 'אפס');
+    assert(await admin.$eval(T('btn-reset-confirm'), (e) => e.disabled), 'reset enabled by a wrong word');
+    await admin.$eval(T('reset-confirm-input'), (e) => { e.value = ''; });
+    await admin.type(T('reset-confirm-input'), 'איפוס');
+    assert(!(await admin.$eval(T('btn-reset-confirm'), (e) => e.disabled)), 'typing איפוס did not enable reset');
+    await click(admin, T('btn-reset-confirm'));
+    await sleep(300);
+    assert((await mockState()).events.length > 0, 'reset ran after the first click');
+    await shot(admin, 'admin-v21-reset-armed', { full: false });
+    const oldEv = new Set((await mockState()).events.map((e) => e.id + '|' + e.created_at));
+    await click(admin, T('btn-reset-confirm'));
+    await admin.waitForSelector(T('reset-result'), { visible: true, timeout: 8000 });
+    const st2 = await mockState();
+    // the game tab may send a heartbeat right after the reset: only rows from before the reset must be gone
+    assert(!st2.events.some((e) => oldEv.has(e.id + '|' + e.created_at)) && !st2.feedback.length && st2.app_config.length >= 1, 'reset result ' + JSON.stringify({ e: st2.events.length, d: st2.devices.length, f: st2.feedback.length, s: st2.sessions.length, c: st2.app_config.length }));
+    await shot(admin, 'admin-v21-reset-done', { full: false });
+    await setWidth(admin, 390);
+    await click(admin, T('nav-dash'));
+    await admin.waitForSelector(T('kpi-devices'), { visible: true });
+    await noOverflow(admin, 'admin dashboard 390');
+  });
+
+  await scenario('B12 telemetry v2.1: career_started{gender}, retired{league,tier,legacy,gender}, manager_started{tier} reach the mock', async () => {
+    await page.bringToFront();
+    await goto(page, '#/settings');
+    const r = await page.evaluate(() => {
+      const g = window.__hy.game;
+      const t = Date.now();
+      while (Date.now() - t < 60000) {
+        const h = g.getHub();
+        if (h.status === 'retired') break;
+        if (h.player.age >= 32 && h.canRetire) { g.retire(); break; }
+        for (const x of g.getInbox()) if (x.needsAnswer) { const th = g.getThread(x.id); const c = (th.choices || []).find((y) => !y.disabled); if (c) g.answerEvent(x.id, c.index); }
+        for (const o of g.getOffers()) if (o.status === 'open') g.respondOffer(o.id, o.canAccept && (!h.club || o.type === 'renewal' || o.type === 'pro' || o.type === 'free') ? 'accept' : 'reject');
+        if (h.status === 'review') { g.ackSeasonReview(); continue; }
+        if (h.status === 'in_week' || h.status === 'match') { g.fastForward({ until: 'weeks', weeks: 1 }); continue; }
+        g.fastForward({ until: 'season_end', maxWeeks: 6 });
+      }
+      const R = g.getRetirement();
+      const o = R && R.coaching && R.coaching.offers && R.coaching.offers[0];
+      if (!o) return { ok: false, why: 'no offers' };
+      return g.mgrRespondOffer(o.id, 'accept');
+    });
+    assert(r && r.ok, 'could not start coaching: ' + JSON.stringify(r));
+    // engine signals are forwarded to telemetry by the UI's facade wrapper (call()): open a screen that uses it
+    await goto(page, '#/manager');
+    await page.waitForSelector(T('manager'), { visible: true, timeout: 10000 });
+    await sleep(600);
+    // keepalive flushes ignore the client's retry backoff (a batch may have failed while the admin reset the tables)
+    let st = null;
+    // a whole simulated career is queued (match_played per match): drain it batch by batch (queue cap 500 < 600/h server limit)
+    for (let i = 0; i < 40; i++) {
+      await page.evaluate(() => window.__hy.telemetry.flush({ keepalive: true }));
+      await sleep(250);
+      st = await mockState();
+      if (st.events.some((e) => e.name === 'manager_started')) break;
+    }
+    const by = (n) => st.events.filter((e) => e.name === n);
+    const cs = by('career_started'); const rt = by('retired'); const ms = by('manager_started');
+    assert(rt.length >= 1 && ms.length >= 1, 'events ' + [...new Set(st.events.map((e) => e.name))].join(','));
+    const rp = rt[rt.length - 1].props || {};
+    assert(['league', 'tier', 'legacy', 'gender'].every((k) => k in rp), 'retired props ' + JSON.stringify(rp));
+    assert(typeof (ms[ms.length - 1].props || {}).tier === 'string', 'manager_started props ' + JSON.stringify(ms[ms.length - 1].props));
+    if (cs.length) assert('gender' in (cs[cs.length - 1].props || {}), 'career_started without gender');
+  });
+
   await scenario('B10 sub-path safety: every request is under /hayeled/, a font, the mock or an ad URL', async () => {
     const bad = allRequests.slice(startReq).filter((u) => !isOurs(u) && !isFont(u) && !isMock(u) && !isAd(u) && !u.startsWith('data:') && !u.startsWith('blob:'));
     assert(!bad.length, 'requests outside the allowed set: ' + [...new Set(bad)].slice(0, 10).join(', '));
   });
 
   await ctx.close();
+}
+
+/* ------------------------------------------------------------------ */
+/* Group D: v2.1 coaching career (R2) for a boy and a girl            */
+/* ------------------------------------------------------------------ */
+
+/** Simulate the career through the facade until age 33, then retire (game.retire()). Returns 'retired' or 'go'. */
+async function simToRetire(page, age = 33, budgetMs = 200000) {
+  await goto(page, '#/settings');   // a light screen: every notify() re-renders the current view
+  const t0 = Date.now();
+  let res = 'go';
+  while (res === 'go' && Date.now() - t0 < budgetMs) {
+    res = await page.evaluate((AGE) => {
+      const g = window.__hy.game;
+      const t = Date.now();
+      while (Date.now() - t < 8000) {
+        const h = g.getHub();
+        if (h.status === 'retired') return 'retired';
+        if (h.player.age >= AGE && h.canRetire) { const r = g.retire(); if (r && r.ok !== false) return 'retired'; }
+        for (const r of g.getInbox()) if (r.needsAnswer) { const th = g.getThread(r.id); const c = (th.choices || []).find((x) => !x.disabled); if (c) g.answerEvent(r.id, c.index); }
+        for (const o of g.getOffers()) {
+          if (o.status !== 'open') continue;
+          const want = o.canAccept && (!h.club || o.type === 'renewal' || o.type === 'pro' || o.type === 'free' || (o.club && o.club.strength > 72));
+          g.respondOffer(o.id, want ? 'accept' : 'reject');
+        }
+        if (h.status === 'review') { g.ackSeasonReview(); continue; }
+        if (h.status === 'in_week' || h.status === 'match') { g.fastForward({ until: 'weeks', weeks: 1 }); continue; }
+        g.fastForward({ until: 'season_end', maxWeeks: 6 });
+      }
+      return 'go';
+    }, age);
+  }
+  step('simToRetire ' + res + ' in ' + ((Date.now() - t0) / 1000).toFixed(0) + 's');
+  return res;
+}
+
+/** No euro sign anywhere in the document (R3: every amount is in shekels). */
+async function noEuro(page, where) {
+  const bad = await page.evaluate(() => { const t = document.body.innerText || ''; const i = t.indexOf('€'); return i >= 0 ? t.slice(Math.max(0, i - 40), i + 20).replace(/\s+/g, ' ') : null; });
+  assert(!bad, `${where}: € on screen: ${bad}`);
+}
+
+/** Play manager weeks (UI) until a match reel shows; skip it, page through the results, close the summary. */
+async function playManagerMatchday(page, tag) {
+  let reel = false;
+  for (let i = 0; i < 14 && !reel; i++) {
+    await click(page, T('mgr-advance'));
+    await sleep(700);
+    reel = await present(page, T('mgr-reel'));
+    if (!reel && await present(page, T('mgr-summary-close'))) { await click(page, T('mgr-summary-close')); await sleep(300); }
+    if (!reel && await present(page, T('mgr-review-ack'))) { await click(page, T('mgr-review-ack')); await sleep(300); }
+  }
+  assert(reel, 'no managed match reel within 14 weeks');
+  await sleep(1800);
+  await noOverflow(page, 'manager reel');
+  await shot(page, 'mgr-reel' + tag, { full: false });
+  await click(page, T('mgr-reel-skip'));
+  await sleep(300);
+  await page.waitForSelector(T('mgr-reel-score'), { visible: true });
+  await shot(page, 'mgr-reel-end' + tag, { full: false });
+  for (let i = 0; i < 8 && await present(page, T('mgr-reel-next')); i++) {
+    await click(page, T('mgr-reel-next')); await sleep(400);
+    if (await present(page, T('mgr-reel-skip'))) await click(page, T('mgr-reel-skip'));
+  }
+  await sleep(400);
+  if (await present(page, T('mgr-summary'))) { await noMarkers(page, 'manager summary' + tag); await noEuro(page, 'manager summary' + tag); await shot(page, 'mgr-summary' + tag, { full: false }); }
+  if (await present(page, T('mgr-summary-close'))) await click(page, T('mgr-summary-close'));
+  await sleep(300);
+}
+
+async function groupD(browser) {
+  const ctx = await browser.createBrowserContext();
+  const page = await newPage(ctx, 'D');
+  let careerId = null;
+
+  await scenario('D1 coaching offers: boy career to 33 via facade -> retire -> reload -> offers on the retirement screen', async () => {
+    await page.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(page);
+    await createCareerUI(page, { first: 'אבי', last: 'מאמן', shotsOn: false, tag: '-d' });
+    const res = await simToRetire(page);
+    assert(res === 'retired', 'did not retire: ' + res);
+    careerId = (await meta(page)).careerId;
+    await flushSave(page);
+    await page.reload({ waitUntil: 'load' });
+    await waitBoot(page);
+    await goto(page, '#/hub');            // the guard sends a retired career with open offers to #/retire
+    await page.waitForSelector(T('retire-screen'), { visible: true, timeout: 15000 });
+    await sleep(1800);
+    await closeTopModals(page);
+    await page.waitForSelector(T('coach-offer'), { visible: true });
+    const n = await page.$$eval('[data-testid^="coach-accept-"]', (e) => e.length);
+    assert(n >= 2, 'expected at least 2 coaching offers, got ' + n);
+    await noMarkers(page, 'retire offers'); await noEuro(page, 'retire offers'); await noOverflow(page, 'retire offers');
+    await shot(page, 'retire-coach-offers');
+  });
+
+  await scenario('D2 accept a coaching job -> office (objective, bars, 5 tactics) -> tactic -> play a managed matchday', async () => {
+    const id = await page.$eval('[data-testid^="coach-accept-"]', (e) => e.dataset.testid);
+    await click(page, T(id));
+    if (await present(page, T('btn-confirm-yes'))) await click(page, T('btn-confirm-yes'));
+    await page.waitForSelector(T('manager'), { visible: true, timeout: 10000 });
+    assert((await page.evaluate(() => location.hash)).startsWith('#/manager'), 'accepting did not open #/manager');
+    for (const tid of ['mgr-hero', 'mgr-objective', 'mgr-bars']) assert(await present(page, T(tid)), tid + ' missing');
+    const tac = await page.$$eval('[data-testid^="mgr-tactic-"]', (e) => e.map((x) => x.dataset.testid.replace('mgr-tactic-', '')));
+    assert(['attack', 'balanced', 'defend', 'press', 'counter'].every((t) => tac.includes(t)), 'tactics ' + tac);
+    const txt = await docText(page);
+    assert(/מאמן/.test(txt), 'no "מאמן" wording in the office');
+    await noMarkers(page, 'office'); await noEuro(page, 'office'); await noOverflow(page, 'office');
+    await shot(page, 'mgr-office');
+    await click(page, T('mgr-tactic-press'));
+    await sleep(300);
+    const cur = await page.evaluate(() => window.__hy.game.getManager().tactic.current);
+    assert(cur === 'press', 'tactic not stored: ' + cur);
+    const g0 = await page.evaluate(() => (window.__hy.game.getCareer().coach || {}).games || 0);
+    await playManagerMatchday(page, '');
+    const g1 = await page.evaluate(() => (window.__hy.game.getCareer().coach || {}).games || 0);
+    assert(g1 > g0, 'coach record did not count the match: ' + g0 + ' -> ' + g1);
+    await shot(page, 'mgr-office-after');
+  });
+
+  await scenario('D3 manager screens: transfers / offers / history, schedule + tables follow the team, reload stays on #/manager', async () => {
+    for (const s of ['squad', 'offers', 'history']) {
+      if (!(await present(page, T('mgr-tab-' + s)))) continue;
+      await click(page, T('mgr-tab-' + s));
+      await sleep(350);
+      await noMarkers(page, 'manager ' + s); await noEuro(page, 'manager ' + s); await noOverflow(page, 'manager ' + s);
+      if (s === 'squad' && await present(page, T('mgr-budget-req'))) {
+        const dis = await page.$eval(T('mgr-budget-req'), (e) => e.disabled);
+        if (!dis) { await click(page, T('mgr-budget-req')); await sleep(500); await closeTopModals(page); }
+      }
+      await shot(page, 'mgr-' + s);
+    }
+    await click(page, T('mgr-tab-office'));
+    for (const [h, name] of [['#/schedule', 'mgr-schedule'], ['#/tables', 'mgr-tables'], ['#/career', 'mgr-career']]) {
+      await goto(page, h); await sleep(300); await closeTopModals(page);
+      await noMarkers(page, h); await noEuro(page, h); await noOverflow(page, h);
+      await shot(page, name);
+    }
+    assert(await present(page, T('career-coach')), 'career screen without the coaching record');
+    await goto(page, '#/hub'); await sleep(500);
+    assert((await page.evaluate(() => location.hash)).startsWith('#/manager'), '#/hub of a coach did not route to #/manager');
+    await flushSave(page);
+    await page.reload({ waitUntil: 'load' });
+    await waitBoot(page);
+    await page.waitForSelector(T('manager'), { visible: true, timeout: 10000 });
+    await setWidth(page, 360); await noOverflow(page, 'office 360'); await shot(page, 'mgr-office-360'); await setWidth(page, 390);
+  });
+
+  await scenario('D4 fast-forward to season end -> season review -> retire from coaching -> HoF "שחקן + מאמן" with both records', async () => {
+    await click(page, T('mgr-ff'));
+    await click(page, T('mgr-ff-season'));
+    await page.waitForFunction(() => !document.querySelector('[data-testid="mgr-ff-overlay"]'), { timeout: 90000 });
+    await sleep(800);
+    if (await present(page, T('mgr-summary-close'))) await click(page, T('mgr-summary-close'));
+    await sleep(500);
+    if (await present(page, T('mgr-review-open'))) { await click(page, T('mgr-review-open')); await sleep(500); }
+    if (await present(page, T('mgr-review'))) { await noMarkers(page, 'manager review'); await noEuro(page, 'manager review'); await shot(page, 'mgr-review', { full: false }); await click(page, T('mgr-review-ack')); await sleep(400); }
+    await page.waitForSelector(T('manager'), { visible: true });
+    await click(page, T('mgr-tab-history'));
+    await click(page, T('mgr-retire'));
+    await click(page, T('btn-confirm-yes'));
+    await page.waitForSelector(T('mgr-done'), { visible: true, timeout: 10000 });
+    await shot(page, 'mgr-done');
+    await click(page, T('mgr-hof'));
+    await page.waitForSelector(T('hof-item-' + careerId), { visible: true, timeout: 10000 });
+    const row = await page.$eval(T('hof-item-' + careerId), (e) => e.innerText);
+    assert(/שחקן \+ מאמן/.test(row), 'HoF row without "שחקן + מאמן": ' + row.replace(/\s+/g, ' '));
+    await click(page, T('hof-item-' + careerId));
+    await page.waitForSelector(T('hof-coach'), { visible: true, timeout: 5000 });
+    await noMarkers(page, 'hof detail');
+    await shot(page, 'hof-detail-coach', { full: false });
+    await closeTopModals(page);
+  });
+
+  await ctx.close();
+
+  await scenario('D5 girl career: coaching in women\'s football with feminine forms ("מאמנת")', async () => {
+    const fctx = await browser.createBrowserContext();
+    const p = await newPage(fctx, 'D-f');
+    await p.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(p);
+    await p.evaluate(async () => {
+      const g = window.__hy.game;
+      const club = g.getAcademyOptions('isr', { gender: 'f' }).groups[0].clubs[0].id;
+      await window.__hy.ctx.hooks.startNewCareer({ first: 'שירה', last: 'בן דוד', nick: '', nation: 'isr', pos: 'CM', foot: 'R', club, gender: 'f', look: { skin: 1, hair: 'bun', hairColor: 0 } }, 1);
+    });
+    await sleep(500);
+    await closeTopModals(p);
+    const res = await simToRetire(p);
+    assert(res === 'retired', 'girl did not retire: ' + res);
+    await goto(p, '#/retire');
+    await p.waitForSelector(T('retire-screen'), { visible: true, timeout: 15000 });
+    await sleep(1800);
+    await closeTopModals(p);
+    await p.waitForSelector(T('coach-offer'), { visible: true });
+    let t = await docText(p);
+    assert(/מאמנת/.test(t), 'girl coaching offers without "מאמנת"');
+    await noMarkers(p, 'retire offers (f)'); await noEuro(p, 'retire offers (f)');
+    await shot(p, 'retire-coach-offers-f');
+    const id = await p.$eval('[data-testid^="coach-accept-"]', (e) => e.dataset.testid);
+    await click(p, T(id));
+    if (await present(p, T('btn-confirm-yes'))) await click(p, T('btn-confirm-yes'));
+    await p.waitForSelector(T('manager'), { visible: true, timeout: 10000 });
+    t = await docText(p);
+    assert(/מאמנת/.test(t), 'girl office without "מאמנת"');
+    await noMarkers(p, 'office (f)'); await noEuro(p, 'office (f)'); await noOverflow(p, 'office (f)');
+    await shot(p, 'mgr-office-f');
+    await playManagerMatchday(p, '-f');
+    await noMarkers(p, 'office after match (f)');
+    await shot(p, 'mgr-office-after-f');
+    await fctx.close();
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1229,6 +1633,7 @@ async function main() {
     if (!ONLY || ONLY === 'a') await groupA(browser);
     if (!ONLY || ONLY === 'c') await groupC(browser);
     if (!ONLY || ONLY === 'b') await groupB(browser);
+    if (!ONLY || ONLY === 'd') await groupD(browser);
   } finally {
     await browser.close().catch(() => {});
     for (const c of children) { try { c.kill(); } catch { /* ignore */ } }

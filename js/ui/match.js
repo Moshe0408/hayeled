@@ -15,6 +15,7 @@ import * as crowd from './scene/crowd-audio.js';
 import { crestSVG } from './crests.js';
 import { celebrate } from './scene/celebration.js';
 import * as genderStatic from './gender.js';
+import { ico } from './icons.js';
 
 /* ------------------------------------------------------------------ shared modules
    Crests (C6), the mega celebration (C9) and gender helpers (C2). Calls stay wrapped in try/catch so a
@@ -54,8 +55,10 @@ const ICON_SND_ON = '<svg class="i" viewBox="0 0 24 24"><path d="M4 9.2h3.6L12.5
 const ICON_SND_OFF = '<svg class="i" viewBox="0 0 24 24"><path d="M4 9.2h3.6L12.5 5v14l-4.9-4.2H4Z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg>';
 const ICON_DRUM = '<svg class="i" viewBox="0 0 24 24"><ellipse cx="12" cy="10" rx="7.5" ry="3"/><path d="M4.5 10v5.5c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V10M7.5 3.5l3 5M16.5 3.5l-3 5"/></svg>';
 const SIDE_HE = { att: 'התקפה', def: 'הגנה', gk: 'שער' };
-const CODE_ICON = { GOAL: '⚽', ASSIST: '🅰️', CHANCE: '👍', MISS: '😬', LOST: '😕', WON: '💪', BEATEN: '😣', CONCEDED: '🥅', SAVE: '🧤', GK_CONCEDED: '🥅', CARD: '🟨' };
-const EV_ICON = { kickoff: '📣', goal: '⚽', sub: '🔁', card: '🟨', ht: '⏱', ft: '⏱', et: '⏱', pens: '🥅', moment: '⚡', info: '📣' };
+// line icons (js/ui/icons.js) instead of emoji: one visual language with the tab bar and the settings list
+const CODE_ICON = { GOAL: 'ball', ASSIST: 'boot', CHANCE: 'spark', MISS: 'cross', LOST: 'cross', WON: 'check', BEATEN: 'cross', CONCEDED: 'cross', SAVE: 'shield', GK_CONCEDED: 'cross', CARD: 'card' };
+const CODE_TONE = { GOAL: 'gold', ASSIST: 'teal', CHANCE: 'teal', WON: 'good', SAVE: 'good', CARD: 'warn' };
+const EV_ICON = { kickoff: 'whistle', goal: 'ball', sub: 'swap', card: 'card', ht: 'clock', ft: 'flag', et: 'clock', pens: 'target', moment: 'spark', info: 'mega' };
 const DEFAULT_NUM = { GK: 1, RB: 2, LB: 3, CB: 4, CDM: 6, RW: 7, CM: 8, ST: 9, CAM: 10, LW: 11 };
 const MIN_PER_SEC = 90 / 30;          // x1: 30 s of running clock (+ goal / sub / whistle sequences ~ 45-60 s per match)
 const SHOT_TYPES = ['dribble_shot', 'cross', 'cutback'];
@@ -353,9 +356,9 @@ export function render(root) {
 
   /* ---------------- feed ---------------- */
   function evIcon(x) {
-    if (x.ev === 'goal') return '⚽';
-    if (x.ev === 'card') return /אדום/.test(x.textHe) ? '🟥' : '🟨';
-    return EV_ICON[x.ev] || '📣';
+    if (x.ev === 'goal') return ico('ball', 'gold');
+    if (x.ev === 'card') return ico('card', /אדום/.test(x.textHe) ? 'bad' : 'warn');
+    return ico(EV_ICON[x.ev] || 'mega');
   }
   function feedRow(x) {
     const cls = x.ev === 'goal' ? (x.side === 'opp' ? 'k-goal_against' : 'k-goal_for') + (x.who === 'me' ? ' me' : '') : x.ev === 'sub' ? 'k-sub' : x.ev === 'moment' ? 'k-moment' : x.ev === 'card' ? 'k-card' : 'k-info';
@@ -435,7 +438,7 @@ export function render(root) {
         <div class="mx-vs-mid"><span class="mx-vs-badge">VS</span><small>${esc(m.dateHe || '')}</small></div>
         <div class="mx-side${!m.isHome ? ' mine' : ''}">${crest(m.away, 64)}<b>${esc(m.away && (m.away.shortHe || m.away.nameHe))}</b><small>חוץ</small></div>
       </div>
-      <div class="mx-venue">🏟 ${esc(venueLine())}</div>
+      <div class="mx-venue">${ico('stadium')} ${esc(venueLine())}</div>
       <div class="mx-pre-grid">
         <div class="mx-status ${m.role === 'starter' ? 'starter' : 'bench'}">${statusHtml()}</div>
         ${formationSVG(P, colors, m.role === 'starter')}
@@ -443,14 +446,14 @@ export function render(root) {
       ${m.introHe ? `<p class="intro mx-intro">${esc(gt(m.introHe))}</p>` : ''}
       <div class="btn-col mx-pre-btns">
         <button type="button" class="btn btn-primary btn-gold btn-xl" data-act="start" data-testid="btn-start-match">${resuming ? '▶ המשך לצפות' : '▶ שריקת פתיחה'}</button>
-        <button type="button" class="btn btn-ghost" data-act="auto" data-testid="btn-autoplay">⏭ לתוצאה</button>
+        <button type="button" class="btn btn-ghost" data-act="auto" data-testid="btn-autoplay">${ico('skip')}לתוצאה</button>
       </div></section>`;
   }
   function replayView() {
     return `<div class="mx-ctrl">
         <span class="mx-onair"><i></i>שידור חי</span>
         <div class="mx-speed" role="group" aria-label="מהירות שידור">${[1, 2, 4].map((v) => `<button type="button" class="${speed === v ? 'on' : ''}" data-act="speed" data-v="${v}" data-testid="speed-${v}" aria-pressed="${speed === v}">x${v}</button>`).join('')}</div>
-        <button type="button" class="mx-skip" data-act="skipend" data-testid="btn-skip-end">⏭ לסיום</button>
+        <button type="button" class="mx-skip" data-act="skipend" data-testid="btn-skip-end">${ico('skip')}לסיום</button>
       </div>
       ${feedHtml(RP ? RP.feed : [])}`;
   }
@@ -461,7 +464,7 @@ export function render(root) {
     if (outcome) {
       const o = outcome;
       return `<section class="card moment outcome ${o.ok ? 'ok' : 'bad'}${o.goalFor ? ' goal' : ''}${o.goalAgainst ? ' conceded' : ''}" data-act="skip" data-testid="moment-outcome">
-        <div class="oc-ico">${esc(CODE_ICON[o.code] || (o.ok ? '✅' : '❌'))}</div>
+        <div class="oc-ico">${ico(CODE_ICON[o.code] || (o.ok ? 'check' : 'cross'), CODE_TONE[o.code] || (o.ok ? 'good' : 'bad'))}</div>
         <p class="oc-text">${esc(gt(o.textHe))}</p>
         <span class="oc-delta num ${o.ratingDelta >= 0 ? 'up' : 'down'}">${esc(signed(o.ratingDelta, 1))} לציון</span>
         <span class="muted small">${esc(g('גע כדי להמשיך', 'געי כדי להמשיך'))}</span>
@@ -481,7 +484,7 @@ export function render(root) {
     return `${momentView()}
       <div class="rating-so-far">ציון עד עכשיו: ${ratingChip(m.ratingSoFar) || '<b>6.0</b>'}</div>
       ${feedHtml(evs)}
-      <button type="button" class="btn btn-ghost" data-act="auto" data-testid="btn-autoplay" ${outcome ? 'disabled' : ''}>שחק אוטומטית את שאר המשחק ⏩</button>`;
+      <button type="button" class="btn btn-ghost" data-act="auto" data-testid="btn-autoplay" ${outcome ? 'disabled' : ''}>${ico('ff')}שחק אוטומטית את שאר המשחק</button>`;
   }
 
   function goalsOf(src) {
@@ -499,7 +502,7 @@ export function render(root) {
   function scorersHtml(src) {
     const { home, away } = goalsOf(src);
     if (!home.length && !away.length) return '<div class="mx-scorers none">בלי שערים</div>';
-    const col = (list) => `<ul>${list.map((s) => `<li class="${s.me ? 'me' : ''}"><span class="num">${esc(s.minute)}'</span> ⚽ ${esc(s.who)}</li>`).join('')}</ul>`;
+    const col = (list) => `<ul>${list.map((s) => `<li class="${s.me ? 'me' : ''}"><span class="num">${esc(s.minute)}'</span> ${ico('ball')} ${esc(s.who)}</li>`).join('')}</ul>`;
     return `<div class="mx-scorers">${col(home)}${col(away)}</div>`;
   }
   function endedView() {
@@ -539,10 +542,10 @@ export function render(root) {
           <div class="mx-ft-num num"><b>${esc(s.score[0])}</b><i>-</i><b>${esc(s.score[1])}</b></div>
           <div class="mx-side${!s.isHome ? ' mine' : ''}">${crest(s.away, 56)}<b>${esc(s.away && s.away.shortHe)}</b></div>
         </div>
-        <div class="chips center">${resChip(s.res)}${s.extraHe ? `<span class="chip">${esc(s.extraHe)}</span>` : ''}${s.motm ? `<span class="chip gold">⭐ ${esc(g('מצטיין המשחק', 'מצטיינת המשחק'))}</span>` : ''}${s.cleanSheet ? '<span class="chip good">🧤 שער נקי</span>' : ''}</div>
+        <div class="chips center">${resChip(s.res)}${s.extraHe ? `<span class="chip">${esc(s.extraHe)}</span>` : ''}${s.motm ? `<span class="chip gold">${ico('star')} ${esc(g('מצטיין המשחק', 'מצטיינת המשחק'))}</span>` : ''}${s.cleanSheet ? '<span class="chip good">' + ico('shield') + ' שער נקי</span>' : ''}</div>
         ${scorersHtml(src)}
         ${s.tieHe ? `<p class="note good">${esc(gt(s.tieHe))}</p>` : ''}
-        ${s.injuryHe ? `<p class="note warn">🤕 ${esc(gt(s.injuryHe))}</p>` : ''}
+        ${s.injuryHe ? `<p class="note warn">${ico('medic', 'bad')} ${esc(gt(s.injuryHe))}</p>` : ''}
       </section>
       <section class="card mx-sum-me">
         <div class="mx-sum-me-head"><span class="mx-shirt num">${esc(P.num)}</span><b>${esc(P.name)}</b>${ratingChip(s.rating)}</div>
@@ -551,7 +554,7 @@ export function render(root) {
         </div>
         ${(s.effectsHe || []).length ? `<div class="chips">${s.effectsHe.map((t) => `<span class="chip">${esc(gt(t))}</span>`).join('')}</div>` : ''}
       </section>
-      ${(s.momentsHe || []).length ? `<section class="card"><h2 class="card-title">הרגעים שלך</h2>${s.momentsHe.map((x) => `<div class="feed-row ${x.ok ? 'k-goal_for' : 'k-goal_against'}"><span class="fm num">${esc(x.minute)}'</span><span>${x.ok ? '✅' : '❌'} ${esc(gt(x.textHe))}</span></div>`).join('')}</section>` : ''}
+      ${(s.momentsHe || []).length ? `<section class="card"><h2 class="card-title">הרגעים שלך</h2>${s.momentsHe.map((x) => `<div class="feed-row ${x.ok ? 'k-goal_for' : 'k-goal_against'}"><span class="fm num">${esc(x.minute)}'</span><span>${x.ok ? ico('check', 'good') : ico('cross', 'bad')} ${esc(gt(x.textHe))}</span></div>`).join('')}</section>` : ''}
       <button type="button" class="btn btn-primary btn-gold btn-xl" data-act="continue" data-testid="btn-match-continue">המשך</button>
     </div>`;
   }

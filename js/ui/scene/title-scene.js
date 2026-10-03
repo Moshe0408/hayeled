@@ -271,7 +271,8 @@
 
     /* ---------------- animated frame ---------------- */
     function firework() {
-      const R = Math.random, x = W * (0.25 + R() * 0.5), y = HY - (110 + R() * 70) * k, gold = R() < .6;
+      // bursts stay at the sides of the sky: the logo sits in the middle and a burst behind it reads as a smudge
+      const R = Math.random, side = R() < .5, x = W * (side ? 0.05 + R() * 0.17 : 0.78 + R() * 0.17), y = HY - (60 + R() * 90) * k, gold = R() < .6;
       for (let i = 0; i < 46; i++) { const a = R() * TAU, v = (30 + R() * 46) * k; sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1.4 + R() * .6, t: 0, gold }); }
     }
 
@@ -336,7 +337,7 @@
         const p = sparks[i]; p.t += dt; if (p.t > p.life) { sparks.splice(i, 1); continue; }
         p.vx *= .985; p.vy = p.vy * .985 + 26 * k * dt; p.x += p.vx * dt; p.y += p.vy * dt;
         const a = 1 - p.t / p.life, sz = 6 * k * a + 2 * k;
-        ctx.globalAlpha = a; ctx.drawImage(p.gold ? glowGold : glowTeal, p.x - sz, p.y - sz, sz * 2, sz * 2);
+        ctx.globalAlpha = a * 0.8; ctx.drawImage(p.gold ? glowGold : glowTeal, p.x - sz, p.y - sz, sz * 2, sz * 2);
       }
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 

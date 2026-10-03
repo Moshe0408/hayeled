@@ -5,6 +5,7 @@ import { call, openModal, hubSafe } from './app.js';
 import { fixtureRow, empty, badge, scoreBox, resChip, statGrid } from './components.js';
 import { rating } from './format.js';
 import { gtext } from './gender.js';
+import { ico } from './icons.js';
 
 function monthKey(dateHe) {
   const parts = String(dateHe || '').split('·').map((s) => s.trim()).filter(Boolean);
@@ -51,7 +52,7 @@ export function render(root) {
 export function showSummary(s) {
   openModal(`<h2 class="modal-title">${esc(s.compHe || '')}${s.roundHe ? ' · ' + esc(s.roundHe) : ''}</h2>
     <div class="ms-teams"><span>${badge(s.home)}<b>${esc(s.home && s.home.shortHe)}</b></span>${scoreBox(s.score)}<span>${badge(s.away)}<b>${esc(s.away && s.away.shortHe)}</b></span></div>
-    <div class="chips center">${resChip(s.res)}${s.extraHe ? `<span class="chip">${esc(s.extraHe)}</span>` : ''}${s.motm ? `<span class="chip gold">⭐ ${esc(gtext('{{מצטיין|מצטיינת}} המשחק'))}</span>` : ''}</div>
+    <div class="chips center">${resChip(s.res)}${s.extraHe ? `<span class="chip">${esc(s.extraHe)}</span>` : ''}${s.motm ? `<span class="chip gold">${ico('star')} ${esc(gtext('{{מצטיין|מצטיינת}} המשחק'))}</span>` : ''}</div>
     ${statGrid([{ label: 'ציון', value: rating(s.rating) }, { label: 'שערים', value: s.goals ?? 0 }, { label: 'בישולים', value: s.assists ?? 0 }, { label: 'דקות', value: s.minutes ?? 0 }])}
     ${(s.momentsHe || []).map((x) => `<div class="feed-row ${x.ok ? 'k-goal_for' : 'k-goal_against'}"><span class="fm num">${esc(x.minute)}'</span><span>${esc(x.textHe)}</span></div>`).join('')}
     <button type="button" class="btn btn-primary" data-close>סגור</button>`, { sheet: true, testid: 'last-match' });

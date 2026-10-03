@@ -1,12 +1,43 @@
-// format.js: display formatting. Wraps fmtMoney / fmtSeason from the facade.
-import { fmtMoney, fmtSeason } from '../engine/game.js';
+// format.js: display formatting. Wraps fmtSeason from the facade; money is shown in Israeli shekels (R3).
+import { fmtSeason } from '../engine/game.js';
+import * as engineUtil from '../engine/util.js';
 
 const isNum = (n) => typeof n === 'number' && isFinite(n);
 
-/** '€1.2M' etc. */
+/** Engine amounts are stored in euros; every amount on screen is shown in shekels at one fixed rate.
+ *  If the engine exports its own rate (EUR_ILS / EUR_TO_ILS) the UI uses that same number. */
+export const EUR_ILS = (() => {
+  const r = Number(engineUtil.EUR_ILS || engineUtil.EUR_TO_ILS || engineUtil.ILS_RATE);
+  return r > 0 ? r : 3.9;
+})();
+
+function thousands(n) { return Math.round(n).toLocaleString('en-US'); }
+function oneDec(x) { const s = (Math.round(x * 10) / 10).toFixed(1); return s.endsWith('.0') ? s.slice(0, -2) : s; }
+
+/** Shekel amount (already converted) -> '₪850', '₪25,000', '₪850 אלף', '₪4.2 מיליון', '₪1.3 מיליארד'. */
+export function shekels(ils) {
+  if (!isNum(ils)) return '-';
+  const neg = ils < 0;
+  // converted amounts are display-rounded so 6,410 euro reads ₪25,000 and not ₪24,999
+  const raw = Math.abs(ils);
+  const a = raw < 1000 ? Math.round(raw) : raw < 10000 ? Math.round(raw / 10) * 10 : Math.round(raw / 100) * 100;
+  let s;
+  if (a < 100000) s = '₪' + thousands(a);
+  else if (a < 999500) s = '₪' + Math.round(a / 1000) + ' אלף';
+  else if (a < 1e9) { const m = a / 1e6; s = '₪' + (m < 100 ? oneDec(m) : String(Math.round(m))) + ' מיליון'; }
+  else s = '₪' + oneDec(a / 1e9) + ' מיליארד';
+  return neg ? '-' + s : s;
+}
+
+/** Engine money (euros) -> shekel label, e.g. 6410 -> '₪25,000', 1.08M -> '₪4.2 מיליון'. */
 export function money(n) {
   if (!isNum(n)) return '-';
-  try { return fmtMoney(Math.round(n)); } catch { return '€' + Math.round(n).toLocaleString('en-US'); }
+  return shekels(n * EUR_ILS);
+}
+
+/** Weekly amount: '₪25,000 לשבוע'. */
+export function moneyWeek(n) {
+  return isNum(n) ? money(n) + ' לשבוע' : '-';
 }
 
 /** '2026/27' */
@@ -34,11 +65,21 @@ export function num(n) {
   return Math.round(n).toLocaleString('en-US');
 }
 
-/** '+3' / '-2' / '0' */
+/** '+3' / '-2' / '0' (LTR-isolated so the sign stays in front of the digits in RTL text) */
 export function signed(n, digits = 0) {
   if (!isNum(n)) return '';
   const v = digits ? n.toFixed(digits) : String(Math.round(n));
-  return n > 0 ? '+' + v : v;
+  return ltr(n > 0 ? '+' + v : v);
+}
+
+/** LTR-isolated text (U+2066 LRI ... U+2069 PDI): keeps '+3' / '-₪1,200' reading left-to-right inside Hebrew text,
+ *  so the sign stays in front of the digits ('+1 מורל', not '1+ מורל'). Safe inside esc(). */
+export function ltr(s) { return '\u2066' + String(s) + '\u2069'; }
+/** Signed number isolated for RTL text: '+3', '-2', '+1.6'. zero -> '0' (or '+0' with plusZero). */
+export function sgn(n, digits = 0, plusZero = false) {
+  if (!isNum(n)) return '';
+  const v = digits ? (Math.round(n * Math.pow(10, digits)) / Math.pow(10, digits)).toString() : String(Math.round(n));
+  return ltr((n > 0 || (plusZero && n === 0) ? '+' : '') + v);
 }
 
 /** Date from ms epoch, e.g. '3.10.2026 14:05' */

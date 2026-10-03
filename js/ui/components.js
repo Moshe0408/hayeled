@@ -3,7 +3,9 @@ import { esc } from './dom.js';
 import { rating as fmtRating, money } from './format.js';
 import { crestSVG, avatarSVG, avatarFromMeta } from './ext.js';
 import { g, gtext } from './gender.js';
+import { emojiIco } from './icons.js';
 import { COUNTRY_BY_ID } from '../data/countries.js';
+import * as game from '../engine/game.js';
 
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 const safeColor = (c, d) => (typeof c === 'string' && HEX.test(c) ? c : d);
@@ -49,6 +51,11 @@ export function shirtNumber(pos, num) { return num || POS_NUM[pos] || 9; }
 
 /** Avatar SVG for a career (meta = getSaveMeta()-like: careerId, gender, look, pos). opts override. */
 export function avatarFor(meta = {}, opts = {}) {
+  // R8: without explicit kit colours, a career without a club (retired) wears the colours of its last club
+  if (!opts.kitColors && meta && !meta.clubId && (meta.retired || meta.stage === 'retired')) {
+    const kit = lastClubKit(meta.careerId);
+    if (kit) opts = { ...opts, kitColors: kit };
+  }
   let base = {};
   try { base = avatarFromMeta(meta) || {}; } catch { base = {}; }
   const look = meta.look || {};
@@ -56,12 +63,28 @@ export function avatarFor(meta = {}, opts = {}) {
   try { return avatarSVG(o) || ''; } catch (e) { console.warn('[hayeled] avatar', e); return ''; }
 }
 
+/** Kit colours of the last (non-loan, if any) club of the career in memory; null if unknown. */
+export function lastClubKit(careerId) {
+  try {
+    if (!game.hasCareer()) return null;
+    if (careerId) { const m = game.getSaveMeta(); if (m && m.careerId !== careerId) return null; }
+    const clubs = (game.getCareer() || {}).clubs || [];
+    const pick = clubs.slice().reverse().find((c) => c && !c.loan && c.club) || clubs[clubs.length - 1];
+    const col = pick && pick.club && pick.club.colors;
+    return Array.isArray(col) && col.length ? col.slice(0, 2) : null;
+  } catch { return null; }
+}
+
 export function cardTier(ovr) {
   const v = Number(ovr) || 0;
   return v >= 85 ? 'icon' : v >= 75 ? 'gold' : v >= 65 ? 'silver' : 'bronze';
 }
 
-const CARD_ATTR = { pac: 'מהי', sho: 'בעט', pas: 'מסר', dri: 'כדר', def: 'הגנ', phy: 'פיז', div: 'צלל', han: 'תפס', ref: 'רפל', gkp: 'מקם', kic: 'בעט' };
+// Hebrew abbreviations with a geresh (מהירות, בעיטה, מסירה, כדרור, הגנה, פיזיות / זינוק, תפיסה, רפלקסים, מיקום)
+const CARD_ATTR = { pac: 'מהי׳', sho: 'בעי׳', pas: 'מסי׳', dri: 'כדר׳', def: 'הגנ׳', phy: 'פיז׳', div: 'זינ׳', han: 'תפי׳', ref: 'רפל׳', gkp: 'מיק׳', kic: 'בעי׳' };
+/** Short Hebrew position code for the card (instead of ST / CAM). */
+const POS_SHORT = { GK: ['שוער', 'שוערת'], CB: ['בלם', 'בלמית'], LB: ['מגן', 'מגנה'], RB: ['מגן', 'מגנה'], CDM: ['קשר', 'קשרית'], CM: ['קשר', 'קשרית'], CAM: ['קשר', 'קשרית'], LW: ['כנף', 'כנף'], RW: ['כנף', 'כנף'], ST: ['חלוץ', 'חלוצה'] };
+export function posShortHe(pos, gender) { const v = POS_SHORT[pos]; if (!v) return pos || ''; return gender === 'f' ? v[1] : gender === 'm' ? v[0] : g(v[0], v[1]); }
 const CARD_ORDER_OUT = ['pac', 'sho', 'pas', 'dri', 'def', 'phy'];
 const CARD_ORDER_GK = ['div', 'han', 'kic', 'ref', 'pac', 'gkp'];
 
@@ -88,7 +111,7 @@ export function playerCard(p, { size = 'm', tilt = true, testid = '', ovrTestid 
       <i class="pc-shine" aria-hidden="true"></i>
       <div class="pc-side">
         <b class="pc-ovr num"${ovrTestid ? ` data-testid="${esc(ovrTestid)}"` : ""}>${p.ovr === null ? "?" : esc(Math.round(Number(p.ovr) || 0))}</b>
-        <span class="pc-pos">${esc(p.pos || '')}</span>
+        <span class="pc-pos">${esc(posShortHe(p.pos, p.gender || (p.meta && p.meta.gender)))}</span>
         ${p.nation ? `<span class="pc-ico">${badge(p.nation, 's')}</span>` : ''}
         ${club ? `<span class="pc-ico">${badge(club, 's')}</span>` : ''}
       </div>
@@ -151,7 +174,7 @@ export function stars(n, label = '') {
 }
 
 /** OVR circle. */
-export function ovrCircle(ovr, { testid = '', size = 'm', label = 'OVR' } = {}) {
+export function ovrCircle(ovr, { testid = '', size = 'm', label = 'דירוג' } = {}) {
   const tid = testid ? ` data-testid="${esc(testid)}"` : '';
   const v = Math.round(Number(ovr) || 0);
   const tone = v >= 85 ? 'elite' : v >= 75 ? 'gold' : v >= 65 ? 'good' : 'base';
@@ -293,7 +316,9 @@ export function segmented(name, options, current) {
 }
 
 export function empty(text, icon = '⚽') {
-  return `<div class="empty"><div class="empty-ico">${esc(icon)}</div><p>${esc(gtext(text))}</p></div>`;
+  // emoji arguments map to the shared line icons (one visual language)
+  const ic = emojiIco(icon) || esc(icon);
+  return `<div class="empty"><div class="empty-ico">${ic}</div><p>${esc(gtext(text))}</p></div>`;
 }
 
 /** Grid of small stat tiles. items: [{label, value}] */

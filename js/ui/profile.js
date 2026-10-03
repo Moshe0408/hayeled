@@ -7,8 +7,26 @@ import { attrRow, attrTable, bar, stars, contractCard, statGrid, card, empty, pl
 import { money, rating } from './format.js';
 import { g, gtext } from './gender.js';
 import { mountTilt } from './fx.js';
+import { storeModel, collectionHTML } from './shop.js';
+import { ico } from './icons.js';
 
-const TABS = [{ id: 'overview', he: 'סקירה' }, { id: 'attrs', he: 'יכולות' }, { id: 'contract', he: 'חוזה וכסף' }, { id: 'stats', he: 'סטטיסטיקה' }];
+const TABS = [{ id: 'overview', he: 'סקירה' }, { id: 'attrs', he: 'יכולות' }, { id: 'contract', he: 'כסף ואוסף' }, { id: 'stats', he: 'סטטיסטיקה' }];
+
+/** "האוסף שלי" with the store illustrations (falls back to chips if the shop VM is unavailable). */
+function collectionCard(p) {
+  let inner = '';
+  let sum = '';
+  const vm = call(() => game.getShop(), { quiet: true });
+  if (vm) {
+    const items = storeModel(vm);
+    const owned = items.filter((x) => x.owned);
+    if (owned.length) sum = `<div class="coll-sum"><span>${owned.length} פריטים</span><span>שווי <b class="num">${esc(money(owned.reduce((a, x) => a + (x.price || 0), 0)))}</b></span></div>`;
+    inner = collectionHTML(items);
+  } else {
+    inner = (p.owned || []).length ? `<div class="chips">${p.owned.map((o) => `<span class="chip">${esc(gtext(o.he))}</span>`).join('')}</div>` : `<p class="muted small">${esc(gtext('עוד לא קנית כלום. החנות מחכה.'))}</p>`;
+  }
+  return card(sum + inner, { title: 'האוסף שלי', cls: 'prof-coll', extra: ' <a class="small" href="#/shop" data-testid="link-shop">לחנות ‹</a>' });
+}
 
 export function render(root, params = {}) {
   let tab = TABS.some((t) => t.id === params.tab) ? params.tab : 'overview';
@@ -54,7 +72,8 @@ export function render(root, params = {}) {
         </div>
         ${bar('אנרגיה', st.energy)}${bar('מורל', st.morale)}${bar('אמון המאמן', st.trust)}${bar('אהבת הקהל', st.fans)}${bar('יחסים בקבוצה', st.mates)}`, { title: 'מצב' })}
         ${card(`${bar('בארץ', rep.l)}${bar('ביבשת', rep.c)}${bar('בעולם', rep.w)}`, { title: 'מוניטין' })}
-        ${card(attrTable(p.attrs || []), { title: p.gk ? 'יכולות שוער' : 'יכולות', extra: '<a class="small" href="#/profile?tab=attrs" data-act="tab" data-v="attrs">לפירוט ‹</a>' })}`;
+        ${card(attrTable(p.attrs || []), { title: p.gk ? 'יכולות שוער' : 'יכולות', extra: '<a class="small" href="#/profile?tab=attrs" data-act="tab" data-v="attrs">לפירוט ‹</a>' })}
+        ${(p.owned || []).length ? collectionCard(p) : ''}`;
     } else if (tab === 'attrs') {
       body = `${card(`<div class="attrs">${(p.attrs || []).map(attrRow).join('')}</div>
         <div class="attr-legend"><span class="av-1">מתחת ל-40</span><span class="av-2">40-59</span><span class="av-3">60-69</span><span class="av-4">70-79</span><span class="av-5">80+</span></div>`, { title: p.gk ? 'יכולות שוער' : 'יכולות' })}
@@ -65,7 +84,7 @@ export function render(root, params = {}) {
           <div class="mr-item"><small>שכר שבועי</small><b class="num">${esc(money(p.wage))}</b></div>
           <div class="mr-item"><small>שווי שוק</small><b class="num">${esc(money(p.value))}</b></div></div>`, { title: 'כסף' })}
         ${card(contractCard(p.contract), { title: 'חוזה' })}
-        ${card((p.owned || []).length ? `<div class="chips">${p.owned.map((o) => `<span class="chip">${esc(gtext(o.he))}</span>`).join('')}</div>` : `<p class="muted small">${esc(g('עוד לא קנית כלום. החנות מחכה.', 'עוד לא קנית כלום. החנות מחכה.'))}</p>`, { title: 'הרכוש שלי', extra: ' <a class="small" href="#/shop">לחנות ‹</a>' })}`;
+        ${collectionCard(p)}`;
     } else {
       body = `${card(statGrid([
         { label: 'הופעות', value: (p.season || {}).apps ?? 0 }, { label: 'שערים', value: (p.season || {}).goals ?? 0 }, { label: 'בישולים', value: (p.season || {}).assists ?? 0 },
@@ -83,9 +102,9 @@ export function render(root, params = {}) {
       ${segmented('ptab', TABS, tab)}
       <div class="tab-body">${body}</div>
       ${retired ? '' : `<div class="btn-col">
-        ${canReq ? '<button type="button" class="btn" data-act="treq" data-testid="btn-transfer-request">📢 בקשת העברה</button>'
+        ${canReq ? '<button type="button" class="btn" data-act="treq" data-testid="btn-transfer-request">' + ico('mega') + 'בקשת העברה</button>'
           : hasClub && p.stageHe && hub.player.stage === 'pro' ? '<button type="button" class="btn btn-ghost" data-act="treq-cancel" data-testid="btn-transfer-cancel">ביטול בקשת העברה</button>' : ''}
-        ${hub && hub.canRetire ? `<button type="button" class="btn btn-danger" data-act="retire" data-testid="btn-retire">👋 ${esc(g('לפרוש', 'לפרוש'))}</button>` : ''}
+        ${hub && hub.canRetire ? `<button type="button" class="btn btn-danger" data-act="retire" data-testid="btn-retire">${ico('wave')}${esc(g('לפרוש', 'לפרוש'))}</button>` : ''}
       </div>`}
     </div>`;
     untilt = mountTilt(root);

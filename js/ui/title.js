@@ -10,6 +10,7 @@ import { createTitleScene } from './scene/title-scene.js';
 import { avatarFor, badge, shirtNumber, cardTier } from './components.js';
 import { gBy, gtext } from './gender.js';
 import { CLUB_INDEX } from '../data/leagues.js';
+import { ico } from './icons.js';
 
 let scene = null;
 function stopScene() { if (scene) { try { scene.destroy(); } catch { /* ignore */ } scene = null; } }
@@ -71,16 +72,16 @@ export async function render(root) {
 
   function slotMenu(s) {
     const items = [];
-    if (!s.empty && !s.corrupt && !s.tooNew) items.push(['load', '▶️ טען קריירה']);
-    if (s.corrupt || s.hasPrev) items.push(['prev', '⏪ שחזר שמירה קודמת']);
-    if (s.corrupt) items.push(['import', '📥 ייבוא גיבוי']);
-    if (s.hasDeleted) items.push(['undelete', '♻️ שחזר קריירה שנמחקה']);
-    if (!s.empty || s.corrupt) items.push(['delete', '🗑️ מחק משבצת']);
-    if (s.empty) items.push(['newhere', '✨ קריירה חדשה כאן']);
+    if (!s.empty && !s.corrupt && !s.tooNew) items.push(['load', 'טען קריירה', 'play']);
+    if (s.corrupt || s.hasPrev) items.push(['prev', 'שחזר שמירה קודמת', 'undo']);
+    if (s.corrupt) items.push(['import', 'ייבוא גיבוי', 'upload']);
+    if (s.hasDeleted) items.push(['undelete', 'שחזר קריירה שנמחקה', 'undo']);
+    if (!s.empty || s.corrupt) items.push(['delete', 'מחק משבצת', 'trash']);
+    if (s.empty) items.push(['newhere', 'קריירה חדשה כאן', 'sparkle']);
     const close = openModal(`<h2 class="modal-title">משבצת ${s.slot}</h2>
       ${s.corrupt ? '<p class="note warn">השמירה נפגמה. אפשר לנסות לשחזר את השמירה הקודמת או לייבא גיבוי.</p>' : ''}
-      ${s.tooNew ? '<p class="note warn">השמירה נוצרה בגרסה חדשה יותר של המשחק. רענן כדי לעדכן.</p>' : ''}
-      <div class="btn-col">${items.map(([k, t]) => `<button type="button" class="btn" data-m="${k}" data-testid="slot-menu-${k}">${esc(t)}</button>`).join('')}
+      ${s.tooNew ? '<p class="note warn">השמירה נוצרה בגרסה חדשה יותר של המשחק. כדאי לרענן כדי לעדכן.</p>' : ''}
+      <div class="btn-col">${items.map(([k, t, ic]) => `<button type="button" class="btn${k === 'delete' ? ' btn-danger' : ''}" data-m="${k}" data-testid="slot-menu-${k}">${ic ? ico(ic) : ''}${esc(t)}</button>`).join('')}
       <button type="button" class="btn btn-ghost" data-close>סגור</button></div>`, { sheet: true });
     close.el.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-m]');
@@ -168,7 +169,7 @@ function slotCard(s) {
     <div class="grow">
       <b class="slot-name">${esc(m.name || '')}${m.nick ? ` <span class="muted">"${esc(m.nick)}"</span>` : ''}</b>
       <div class="small slot-club">${club ? badge(club, 'xs') : ''}<span>${esc(gtext(m.clubHe || 'ללא קבוצה', gd))} · ${esc(gtext(m.posHe || m.pos || '', gd))} · גיל ${esc(m.age)}</span>${m.retired ? ` <span class="chip gold">${gBy(gd, 'פרש', 'פרשה')}</span>` : ''}</div>
-      <div class="muted small">${esc(m.dateHe || '')} · עונה ${esc(m.seasons || 1)}${s.savedAt ? ' · נשמר ' + esc(ago(s.savedAt)) : ''}</div>
+      <div class="muted small">${esc(m.dateHe || '')} · עונה ${esc(m.seasons || 1)}</div>${s.savedAt ? `<div class="muted small">נשמר ${esc(ago(s.savedAt))}</div>` : ''}
     </div>
     <button type="button" class="icon-btn" data-act="menu" data-slot="${s.slot}" aria-label="אפשרויות">⋯</button></div>`;
 }
@@ -179,15 +180,15 @@ function draw(root, slots) {
   root.innerHTML = `<div class="title-screen">
     ${hero(cont ? cont.meta : null)}
     <div class="title-actions">
-      ${cont ? `<button type="button" class="btn btn-gold btn-xl" data-act="continue" data-testid="btn-continue"><span>▶ המשך קריירה</span><small>${esc(cont.meta.name)} · ${esc(gtext(cont.meta.clubHe || '', cont.meta.gender))}</small></button>` : ''}
-      <button type="button" class="btn ${cont ? 'btn-glass' : 'btn-gold btn-xl'}" data-act="new" data-testid="btn-new-career">⚽ קריירה חדשה</button>
+      ${cont ? `<button type="button" class="btn btn-gold btn-xl" data-act="continue" data-testid="btn-continue"><span>${ico('play')}המשך קריירה</span><small>${esc(cont.meta.name)} · ${esc(gtext(cont.meta.clubHe || '', cont.meta.gender))}</small></button>` : ''}
+      <button type="button" class="btn ${cont ? 'btn-glass' : 'btn-gold btn-xl'}" data-act="new" data-testid="btn-new-career">${ico('ball')}קריירה חדשה</button>
     </div>
     <h2 class="section-title"><span>המשבצות שלך</span></h2>
     <div class="slots">${slots.map(slotCard).join('')}</div>
     <div class="title-links">
-      <button type="button" class="btn btn-ghost" data-act="hof" data-testid="btn-hof">🏛️ היכל התהילה</button>
-      <button type="button" class="btn btn-ghost" data-act="settings" data-testid="btn-settings">⚙️ הגדרות וגיבוי</button>
-      ${standalone ? '' : '<button type="button" class="btn btn-ghost" data-act="install">📲 התקנה למסך הבית</button>'}
+      <button type="button" class="btn btn-ghost" data-act="hof" data-testid="btn-hof">${ico('hof')}היכל התהילה</button>
+      <button type="button" class="btn btn-ghost" data-act="settings" data-testid="btn-settings">${ico('gear')}הגדרות וגיבוי</button>
+      ${standalone ? '' : '<button type="button" class="btn btn-ghost" data-act="install">' + ico('phone') + 'התקנה למסך הבית</button>'}
     </div>
     <p class="muted small center">ההתקדמות נשמרת אוטומטית במכשיר הזה. כדאי לייצא גיבוי מדי פעם מההגדרות.</p>
   </div>`;

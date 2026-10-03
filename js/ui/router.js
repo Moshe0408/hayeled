@@ -1,6 +1,6 @@
 // router.js: hash router with lazy screen modules.
 // Dynamic import specifiers below resolve relative to this file (js/ui/).
-import { resetHeader, setTabs, setBannersVisible, showErrorScreen, closeAllModals } from './app.js';
+import { resetHeader, setTabs, setBannersVisible, showErrorScreen, closeAllModals, clearToast } from './app.js';
 import { refreshGender, careerGender } from './gender.js';
 
 const routes = [];
@@ -107,6 +107,7 @@ async function renderCurrent() {
   if (my !== token) return;
   runCleanup();
   closeAllModalsSafe(info);
+  try { clearToast(); } catch { /* ignore */ }
   refreshGender();
   try { document.documentElement.dataset.g = careerGender() || ''; } catch { /* ignore */ }
   const meta = info.route.meta || {};
@@ -152,17 +153,20 @@ route('/match', () => import('./match.js'), { tabs: false, header: false, banner
 route('/season', () => import('./week.js'), { tab: 'hub', title: 'סיכום העונה' });
 route('/inbox', () => import('./inbox.js'), { tab: 'inbox', title: 'הודעות', back: '#/hub' });
 route('/chat/:id', () => import('./inbox.js'), { tab: 'inbox', title: 'צ׳אט', back: '#/inbox' });
-route('/schedule', () => import('./schedule.js'), { tab: 'schedule', title: 'לוח המשחקים', back: '#/hub' });
-route('/tables', () => import('./tables.js'), { tab: 'tables', title: 'טבלאות', back: '#/hub' });
+// tab roots (בית, לוח, טבלאות, חנות, קריירה) share one top bar: bell + gear, no back chevron
+route('/schedule', () => import('./schedule.js'), { tab: 'schedule', title: 'לוח המשחקים', gear: true });
+route('/tables', () => import('./tables.js'), { tab: 'tables', title: 'טבלאות', gear: true });
 route('/tables/:compId', () => import('./tables.js'), { tab: 'tables', title: 'טבלה', back: '#/tables' });
-route('/career', () => import('./career.js'), { tab: 'career', title: 'הקריירה שלי', back: '#/hub' });
+route('/career', () => import('./career.js'), { tab: 'career', title: 'הקריירה שלי', gear: true });
 route('/profile', () => import('./profile.js'), { tab: 'hub', title: 'הפרופיל שלי', back: '#/hub' });
 route('/national', () => import('./national.js'), { tab: 'hub', title: 'הנבחרת', back: '#/hub' });
 route('/offers', () => import('./offers.js'), { tab: 'hub', title: 'הצעות וחוזה', back: '#/hub' });
 route('/awards', () => import('./awards.js'), { tab: 'career', title: 'פרסים', back: '#/career' });
-route('/shop', () => import('./shop.js'), { tab: 'hub', title: 'החנות', back: '#/hub' });
+route('/shop', () => import('./shop.js'), { tab: 'shop', title: 'החנות', gear: true });
 route('/hof', () => import('./hof.js'), { title: 'היכל התהילה', back: 'home' });
 route('/settings', () => import('./settings.js'), { title: 'הגדרות', back: 'home' });
 route('/feedback', () => import('./feedback.js'), { title: 'משוב', back: 'home' });
 route('/install', () => import('./install.js'), { tabs: false, title: 'התקנה למסך הבית', back: 'home' });
 route('/retire', () => import('./retire.js'), { tabs: false, header: false });
+route('/manager', () => import('./manager.js'), { tab: 'hub', title: '{{המאמן|המאמנת}}', gear: true });
+route('/manager/:sec', () => import('./manager.js'), { tab: 'hub', title: '{{המאמן|המאמנת}}', back: '#/manager', gear: true });

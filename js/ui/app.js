@@ -2,6 +2,7 @@
 import * as game from '../engine/game.js';
 import { esc, $, fromHTML } from './dom.js';
 import { gtext } from './gender.js';
+import { ico } from './icons.js';
 
 /* ------------------------------------------------------------------ */
 /* Shared context (filled by main.js)                                  */
@@ -23,7 +24,7 @@ export const ctx = {
 const REMOTE_STUB_CFG = {
   ads: { enabled: false, provider: 'none', placements: { hub_banner: { enabled: true }, interstitial: { enabled: true, everyMatchdays: 4, minMinutesBetween: 3, skipFirstMinutes: 10 }, rewarded: { enabled: false, maxPerDay: 3, energy: 15 } }, house: [], adsense: { client: '', slots: { hub_banner: '', interstitial: '' } } },
   announcement: { enabled: false, id: '', textHe: '', link: '', level: 'info' },
-  version: { min: '0.0.0', latest: '0.0.0', messageHe: 'יש גרסה חדשה. רענן כדי לעדכן' },
+  version: { min: '0.0.0', latest: '0.0.0', messageHe: 'יש גרסה חדשה. מרעננים כדי לעדכן' },
   feedback: { enabled: false, prompt: false },
 };
 const noop = () => {};
@@ -127,21 +128,23 @@ const ICONS = {
   schedule: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2v3M17 2v3M3.5 9h17M5 5h14a1.5 1.5 0 0 1 1.5 1.5V19A1.5 1.5 0 0 1 19 20.5H5A1.5 1.5 0 0 1 3.5 19V6.5A1.5 1.5 0 0 1 5 5zM8 13h3v3H8z"/></svg>',
   tables: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h16M4 20h16M9 3v19"/></svg>',
   career: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 0 1-10 0zM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M12 13v4M8 21h8M9 17h6v4H9z"/></svg>',
-  inbox: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/></svg>',
+  shop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5 5.6 4h12.8L20 9.5"/><path d="M4 9.5c0 1.5 1.2 2.6 2.7 2.6s2.6-1.1 2.6-2.6c0 1.5 1.2 2.6 2.7 2.6s2.7-1.1 2.7-2.6c0 1.5 1.1 2.6 2.6 2.6S20 11 20 9.5"/><path d="M5.5 12v8h13v-8M10 20v-4.5h4V20"/></svg>',
 };
+/* Bottom tab bar (v2.1): בית, לוח, טבלאות, חנות, קריירה. Messages moved to the header bell (always reachable). */
 const TABS = [
   { id: 'hub', he: 'בית', hash: '#/hub' },
   { id: 'schedule', he: 'לוח', hash: '#/schedule' },
   { id: 'tables', he: 'טבלאות', hash: '#/tables' },
+  { id: 'shop', he: 'חנות', hash: '#/shop' },
   { id: 'career', he: 'קריירה', hash: '#/career' },
-  { id: 'inbox', he: 'הודעות', hash: '#/inbox' },
 ];
 
 const SVG_BACK = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+const SVG_BELL = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.6 2H4.4z"/><path d="M10 20.5a2.1 2.1 0 0 0 4 0"/></svg>';
 const SVG_GEAR = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.4A7.4 7.4 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.4 7.4 0 0 0 2.6 1.5l.4 2.4h4l.4-2.4a7.4 7.4 0 0 0 2.6-1.5l2.4.9 2-3.4z"/></svg>';
 
 let els = {};
-let headerState = { title: '', back: null, gear: false };
+let headerState = { title: '', back: null, gear: false, bell: true, tabs: true };
 
 export function initShell(appEl) {
   appEl.innerHTML = `
@@ -151,7 +154,7 @@ export function initShell(appEl) {
       <main id="view" class="view" tabindex="-1"></main>
     </div>
     <nav id="tabbar" class="tabbar" hidden aria-label="ניווט ראשי">
-      ${TABS.map((t) => `<a href="${t.hash}" class="tab" data-tab="${t.id}" data-testid="tab-${t.id}">${ICONS[t.id]}<span>${t.he}</span>${t.id === 'inbox' ? '<b class="tab-badge num" data-testid="inbox-badge" hidden>0</b>' : ''}</a>`).join('')}
+      ${TABS.map((t) => `<a href="${t.hash}" class="tab" data-tab="${t.id}" data-testid="tab-${t.id}">${ICONS[t.id]}<span>${t.he}</span></a>`).join('')}
     </nav>
     <div id="toast" class="toast" data-testid="toast" role="status" aria-live="polite" hidden></div>
     <div id="modals"></div>`;
@@ -161,6 +164,7 @@ export function initShell(appEl) {
     if (!b) return;
     if (b.dataset.act === 'back') goBack();
     else if (b.dataset.act === 'gear') location.hash = '#/settings';
+    else if (b.dataset.act === 'inbox') location.hash = '#/inbox';
   });
   document.body.classList.add('booted');
   return els;
@@ -176,20 +180,26 @@ function goBack() {
   location.hash = target;
 }
 
-/** Header: { title, back: hash|'home'|null, gear: boolean, show: boolean } */
+/** Header: { title, back: hash|'home'|null, gear: boolean, bell: boolean, show: boolean }.
+ *  The messages bell (with the unread badge) shows on every in-career screen that has the tab bar. */
 export function setHeader(opts = {}) {
   headerState = { ...headerState, ...opts };
   const { title, back, gear, show } = headerState;
   if (!els.topbar) return;
+  let hasCareer = false;
+  try { hasCareer = game.hasCareer(); } catch { hasCareer = false; }
+  const bell = headerState.bell !== false && headerState.tabs !== false && hasCareer;
   els.topbar.hidden = show === false;
+  els.topbar.classList.toggle('tb-wide', !!(bell && gear));
   els.topbar.innerHTML = `<i class="tb-lights" aria-hidden="true"></i>
-    ${back ? `<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">${SVG_BACK}</button>` : '<span class="icon-sp"></span>'}
+    <span class="tb-side tb-start">${back ? `<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">${SVG_BACK}</button>` : ''}</span>
     <h1 class="topbar-title">${esc(gtext(title || ''))}</h1>
-    ${gear ? `<button type="button" class="icon-btn" data-act="gear" aria-label="הגדרות" data-testid="btn-gear">${SVG_GEAR}</button>` : '<span class="icon-sp"></span>'}`;
+    <span class="tb-side tb-end">${bell ? `<button type="button" class="icon-btn tb-bell" data-act="inbox" aria-label="הודעות" data-testid="btn-inbox">${SVG_BELL}<b class="tab-badge num" data-testid="inbox-badge" hidden>0</b></button>` : ''}${gear ? `<button type="button" class="icon-btn" data-act="gear" aria-label="הגדרות" data-testid="btn-gear">${SVG_GEAR}</button>` : ''}</span>`;
+  if (bell) refreshChrome();
 }
 
 export function resetHeader(meta = {}) {
-  headerState = { title: meta.title || '', back: meta.back || null, gear: !!meta.gear, show: meta.header !== false };
+  headerState = { title: meta.title || '', back: meta.back || null, gear: !!meta.gear, bell: meta.bell !== false, tabs: meta.tabs !== false, show: meta.header !== false };
   setHeader({});
 }
 
@@ -201,6 +211,8 @@ export function setTabs(visible, activeId) {
   els.tabbar.hidden = !visible;
   document.body.classList.toggle('has-tabs', !!visible);
   for (const a of els.tabbar.querySelectorAll('.tab')) a.classList.toggle('on', a.dataset.tab === activeId);
+  const bellEl = els.topbar && els.topbar.querySelector('.tb-bell');
+  if (bellEl) bellEl.classList.toggle('on', activeId === 'inbox');
   if (visible) refreshChrome();
 }
 
@@ -211,10 +223,9 @@ function queueChromeRefresh() {
   Promise.resolve().then(() => { chromeQueued = false; refreshChrome(); });
 }
 
-/** Update the unread badge. */
+/** Update the unread badge on the header bell. */
 export function refreshChrome() {
-  if (!els.tabbar || els.tabbar.hidden) return;
-  const badgeEl = els.tabbar.querySelector('[data-testid="inbox-badge"]');
+  const badgeEl = els.topbar && els.topbar.querySelector('[data-testid="inbox-badge"]');
   if (!badgeEl) return;
   let n = 0;
   try { if (game.hasCareer()) n = game.getHub().unread || 0; } catch { n = 0; }
@@ -227,11 +238,16 @@ export function refreshChrome() {
 /* ------------------------------------------------------------------ */
 
 let toastTimer = null;
-export function toast(textHe, { ms = 3400, tone = '' } = {}) {
+let toastAt = 0;
+/** Slim snackbar under the header (R8 polish: never covers the primary content near the tab bar). */
+export function toast(textHe, { ms = 0, tone = '' } = {}) {
   if (!textHe) return;
   const t = els.toast || document.getElementById('toast');
   if (!t) return;
-  t.textContent = gtext(String(textHe));
+  const text = gtext(String(textHe));
+  if (!ms) ms = tone === 'good' ? 2200 : Math.min(3600, 2200 + text.length * 25);
+  toastAt = Date.now();
+  t.textContent = text;
   t.className = 'toast show' + (tone ? ' toast-' + tone : '');
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -239,6 +255,15 @@ export function toast(textHe, { ms = 3400, tone = '' } = {}) {
     t.classList.remove('show');
     setTimeout(() => { if (!t.classList.contains('show')) t.hidden = true; }, 260);
   }, ms);
+}
+
+/** Hide a toast that belongs to the previous screen (called on route change; a toast raised right before navigating stays). */
+export function clearToast(minAgeMs = 600) {
+  const t = els.toast || document.getElementById('toast');
+  if (!t || t.hidden || Date.now() - toastAt < minAgeMs) return;
+  clearTimeout(toastTimer);
+  t.classList.remove('show');
+  t.hidden = true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,7 +385,7 @@ export function showUpdateBanner({ text = 'גרסה חדשה זמינה', button
     b.setAttribute('data-testid', 'update-banner');
     els.banners.prepend(b);
   }
-  b.innerHTML = `<span class="banner-ico">🔄</span><span class="banner-text"></span>
+  b.innerHTML = `<span class="banner-ico">${ico('undo')}</span><span class="banner-text"></span>
     <button type="button" class="btn btn-sm btn-primary" data-a="go"></button>
     ${persistent ? '' : '<button type="button" class="icon-btn sm" data-a="x" aria-label="סגור">✕</button>'}`;
   b.querySelector('.banner-text').textContent = text;
@@ -390,7 +415,7 @@ export function showAnnouncement(ann) {
     els.banners.appendChild(b);
   }
   b.className = 'banner banner-ann' + (ann.level === 'warn' ? ' warn' : '');
-  b.innerHTML = '<span class="banner-ico">📣</span><span class="banner-text"></span><button type="button" class="icon-btn sm" data-a="x" aria-label="סגור">✕</button>';
+  b.innerHTML = '<span class="banner-ico">' + ico('mega') + '</span><span class="banner-text"></span><button type="button" class="icon-btn sm" data-a="x" aria-label="סגור">✕</button>';
   const textEl = b.querySelector('.banner-text');
   const link = typeof ann.link === 'string' && (/^https:\/\//i.test(ann.link) || ann.link.startsWith('./') || ann.link.startsWith('#/')) ? ann.link : '';
   if (link) {
@@ -424,12 +449,12 @@ export function showErrorScreen(err, target) {
   const hasCareer = (() => { try { return game.hasCareer(); } catch { return false; } })();
   root.innerHTML = `
     <div class="err-screen">
-      <div class="err-ico">🤕</div>
+      <div class="err-ico">${ico('warn', 'warn')}</div>
       <h1>אופס! משהו השתבש</h1>
       <p>נתקלנו בתקלה בהצגת המסך. ${hasCareer ? 'הקריירה שלך שמורה במכשיר.' : ''}</p>
       <p class="muted small">אם זה חוזר, כדאי לייצא גיבוי של השמירה לפני שממשיכים.</p>
       <div class="btn-col">
-        <button type="button" class="btn btn-primary btn-lg" data-a="reload">נסה שוב</button>
+        <button type="button" class="btn btn-primary btn-lg" data-a="reload">לנסות שוב</button>
         ${hasCareer ? '<button type="button" class="btn" data-a="export">ייצוא שמירה (קובץ)</button>' : ''}
         <button type="button" class="btn btn-ghost" data-a="title">למסך הפתיחה</button>
       </div>

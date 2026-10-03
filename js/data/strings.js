@@ -91,6 +91,7 @@ export const AWARDS = {
   top_scorer: 'מלך השערים', pots: 'שחקן העונה', tots: 'נבחרת העונה', young_pots: 'השחקן הצעיר של העונה',
   ucl_top_scorer: 'מלך שערי ליגת האלופות', golden_boy: 'פרס הגולדן בוי', ballon_dor: 'כדור הזהב', bdo_top3: 'פודיום כדור הזהב',
   bdo_top10: 'טופ 10 בכדור הזהב', golden_boot_tour: 'מלך שערי הטורניר', motm_final: 'שחקן הגמר',
+  coach_season: 'מאמן העונה', coach_year: 'מאמן השנה',
 };
 
 export const TROPHIES = {
@@ -107,6 +108,7 @@ export const AWARDS_W = {
   top_scorer: 'מלכת השערים', pots: 'שחקנית העונה', tots: 'נבחרת העונה', young_pots: 'השחקנית הצעירה של העונה',
   ucl_top_scorer: 'מלכת שערי ליגת האלופות לנשים', golden_boy: 'פרס הכישרון הצעיר', ballon_dor: 'כדור הזהב לנשים', bdo_top3: 'פודיום כדור הזהב לנשים',
   bdo_top10: 'טופ 10 בכדור הזהב לנשים', golden_boot_tour: 'מלכת שערי הטורניר', motm_final: 'שחקנית הגמר',
+  coach_season: 'מאמנת העונה', coach_year: 'מאמנת השנה',
 };
 
 export const TROPHIES_W = {
@@ -240,6 +242,9 @@ export const PERSONAS = {
   doctor:         { he: 'הרופא', avatar: '🩺' },
   club:           { he: 'המועדון', avatar: '🏟️' },
   system:         { he: 'הילד מהשכונה', avatar: '⭐' },
+  board:          { he: 'ההנהלה', avatar: '🏛️' },
+  federation:     { he: 'ההתאחדות לכדורגל', avatar: '🏳️' },
+  staff:          { he: 'הצוות המקצועי', avatar: '📋' },
 };
 
 export const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
@@ -269,6 +274,15 @@ export const SHOP_ITEMS = [
   { id: 'fam_field',      cat: 'family', he: 'מגרש חדש בשכונה',        price: 400000,  upkeep: 0,    morale: 6,  fans: 5,      desc: 'דשא סינתטי, תאורה, ושלט עם השם שלך' },
   { id: 'style_wardrobe', cat: 'style',  he: 'ארון בגדים של מעצבים',   price: 20000,   upkeep: 0,    morale: 1,                desc: '{{החבר׳ה יצחקו. ואז יבקשו לשאול חולצה|החברות יצחקו. ואז יבקשו לשאול שמלה}}' },
   { id: 'style_watch',    cat: 'style',  he: 'שעון יוקרה',             price: 40000,   upkeep: 0,    morale: 2,                desc: 'מראה את השעה. ואת המשכורת' },
+  // v2.1 store (R4): jewellery, gear, investments. Negative upkeep = weekly return.
+  { id: 'jewel_chain',    cat: 'watch',  he: 'שרשרת זהב',              price: 18000,   upkeep: 0,    morale: 1,                desc: 'נוצצת בכל תמונה מהמנהרה' },
+  { id: 'jewel_ring',     cat: 'watch',  he: 'טבעת יהלום',             price: 75000,   upkeep: 0,    morale: 3,  minAge: 18,   desc: 'יהלום אמיתי. מושלם לחגיגת שער' },
+  { id: 'watch_gold',     cat: 'watch',  he: 'שעון זהב במהדורה מוגבלת', price: 220000, upkeep: 0,    morale: 4,  minAge: 18, fans: 1, desc: 'רק 50 נוצרו בעולם. אחד מהם על היד שלך' },
+  { id: 'gear_boots',     cat: 'gear',   he: 'נעליים בעיצוב אישי',     price: 2500,    upkeep: 0,    morale: 1,                desc: 'עם השם שלך רקום בצד' },
+  { id: 'gear_headphones', cat: 'gear',  he: 'אוזניות פרימיום',        price: 1500,    upkeep: 0,    morale: 1,                desc: 'הפלייליסט של לפני המשחק נשמע אחרת' },
+  { id: 'invest_fund',    cat: 'invest', he: 'קרן מדדים',              price: 50000,   upkeep: -60,  morale: 1,  minAge: 18,   desc: 'כסף שעובד בשבילך. תשואה קטנה כל שבוע' },
+  { id: 'biz_cafe',       cat: 'invest', he: 'בית קפה בשכונה',         price: 300000,  upkeep: -420, morale: 2,  minAge: 18, fans: 2, desc: 'הקפה הכי טוב בשכונה, והתמונה שלך על הקיר' },
+  { id: 'academy_kids',   cat: 'invest', he: 'אקדמיית כדורגל לילדים',  price: 1200000, upkeep: -1500, morale: 4, minAge: 21, fans: 5, desc: 'הדור הבא של השכונה מתאמן אצלך' },
 ];
 
 export const RESULT_LABELS = { W: 'ניצחון', D: 'תיקו', L: 'הפסד' };

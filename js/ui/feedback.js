@@ -6,6 +6,7 @@ import { svc, toast, openModal } from './app.js';
 import { gtext } from './gender.js';
 import { navigate } from './router.js';
 import { isStandalone, isIOS } from './install.js';
+import { ico } from './icons.js';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const LABELS = ['', 'לא אהבתי', 'ככה ככה', 'נחמד', 'אהבתי', 'מטורף!'];
@@ -47,7 +48,7 @@ export function render(root, params = {}) {
   function draw() {
     root.innerHTML = `<div class="feedback">
       <section class="card">
-        <h2 class="card-title">איך המשחק? ❤️</h2>
+        <h2 class="card-title">איך המשחק?</h2>
         <p class="muted small">כל משוב נקרא. ספר לנו מה אהבת, מה הציק, ומה היית רוצה לראות.</p>
         <div class="fb-stars-wrap">${starsHtml()}</div>
         <label class="field"><span>מה דעתך? (לא חובה)</span><textarea id="fb-text" data-testid="fb-text" maxlength="2000" rows="5" placeholder="למשל: הייתי רוצה עוד ליגות...">${esc(st.text)}</textarea></label>
@@ -67,7 +68,7 @@ export function render(root, params = {}) {
 
   function done(queued) {
     root.innerHTML = `<div class="feedback"><section class="card center" data-testid="fb-done">
-      <div class="big-ico">🙏</div><h2>תודה! קיבלנו ❤️</h2>
+      <div class="big-ico">${ico('heart', 'gold')}</div><h2>תודה! קיבלנו</h2>
       ${queued ? `<p class="muted">${esc(gtext('המשוב יישלח אוטומטית {{כשתחזור|כשתחזרי}} לרשת'))}</p>` : '<p class="muted">המשוב שלך עוזר לנו לשפר את המשחק.</p>'}
       <button type="button" class="btn btn-primary" data-act="back">חזרה</button></section></div>`;
   }
@@ -97,7 +98,7 @@ export function render(root, params = {}) {
       } catch (err) { console.warn(err); res = null; }
       st.sending = false;
       if (res && res.ok) done(!!res.queued);
-      else { toast('לא הצלחנו לשלוח כרגע. נסה שוב מאוחר יותר.'); draw(); }
+      else { toast('לא הצלחנו לשלוח כרגע. אפשר לנסות שוב מאוחר יותר.'); draw(); }
     }
   });
   draw();

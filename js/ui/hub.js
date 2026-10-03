@@ -10,6 +10,7 @@ import { mountAdSlot, rewardedButton } from './adslots.js';
 import { maybePromptFeedback } from './feedback.js';
 import { g, gtext } from './gender.js';
 import { mountTilt, mountStadium } from './fx.js';
+import { ico } from './icons.js';
 
 const MAIN_BTN = {
   idle: 'שחק{{|י}} את השבוע',
@@ -32,10 +33,11 @@ const QUICK_ICO = {
   national: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.2-4 4-6 7.5-6s6.3 2 7.5 6"/>',
   shop: '<path d="M5 8h14l-1.2 12.5H6.2z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
+  inbox: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/>',
   awards: '<circle cx="12" cy="9" r="5.5"/><path d="M9 13.8 7.5 21l4.5-2.5 4.5 2.5-1.5-7.2"/>',
   hof: '<path d="M3 21h18M5 18h14M6 18V10M10 18V10M14 18V10M18 18V10M3.5 10h17L12 4z"/>',
 };
-const ALERT_ICO = { contract_expiring: '📝', injured: '🤕', callup: '🏳️', window_open: '🔁', offer: '📨', energy_low: '🪫', suspended: '🟥', free_agent: '🆓', season_review: '🏁' };
+const ALERT_ICO = { contract_expiring: ['pen', 'warn'], injured: ['medic', 'bad'], callup: ['flag', 'teal'], window_open: ['swap', 'teal'], offer: ['mail', 'gold'], energy_low: ['battery', 'warn'], suspended: ['card', 'bad'], free_agent: ['briefcase', 'warn'], season_review: ['flag', 'gold'] };
 const svgI = (d) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 
 export function render(root) {
@@ -98,7 +100,7 @@ export function render(root) {
   function openFF() {
     const hub = hubSafe();
     if (!hub) return;
-    const close = openModal(`<h2 class="modal-title">⏩ קפיצה קדימה</h2>
+    const close = openModal(`<h2 class="modal-title">${ico('ff', 'gold')} קפיצה קדימה</h2>
       <p class="muted small">${esc(gtext('המשחקים שלך ישוחקו אוטומטית. נעצור אם תגיע הצעה, הודעה חשובה, פציעה או זימון.'))}</p>
       <div class="btn-col">
         <button type="button" class="btn btn-lg" data-ff="next_match" data-testid="ff-next-match">עד המשחק הבא</button>
@@ -236,7 +238,7 @@ function hero(hub, prof, meta) {
     </div>
     ${c ? `<a class="hh-club" href="#/offers">${badge(c, 'm')}<span class="grow"><b>${esc(c.nameHe)}</b>${c.loan ? ' <span class="chip">השאלה</span>' : ''}
         <small class="muted">${esc(gtext(c.leagueHe || ''))}${c.rank ? ' · מקום ' + esc(c.rank) : ''} · ${esc(gtext(c.roleHe || ''))}</small></span>
-        <span class="hh-wage num">${esc(money(c.wage))}<small class="muted"> /שבוע</small></span></a>`
+        <span class="hh-wage num">${esc(money(c.wage))}<small class="muted"> לשבוע</small></span></a>`
       : `<a class="hh-club free" href="#/offers"><span class="badge badge-m badge-empty">?</span><span class="grow"><b>ללא קבוצה</b><small class="muted">${esc(gtext('בדוק{{|י}} הצעות'))}</small></span></a>`}
   </section>`;
 }
@@ -244,8 +246,8 @@ function hero(hub, prof, meta) {
 function statusPanel(hub) {
   const p = hub.player || {};
   return `<section class="card status-card">
-    ${p.injury ? `<p class="note warn">🤕 ${esc(gtext('פצוע{{|ה}}'))}: ${esc(p.injury.he)} (${esc(p.injury.weeks)} שבועות)</p>` : ''}
-    ${p.susp ? `<p class="note warn">🟥 ${esc(gtext('מורחק{{|ת}}'))} ל-${esc(p.susp)} משחקים</p>` : ''}
+    ${p.injury ? `<p class="note warn">${ico('medic', 'bad')} ${esc(gtext('פצוע{{|ה}}'))}: ${esc(p.injury.he)} (${esc(p.injury.weeks)} שבועות)</p>` : ''}
+    ${p.susp ? `<p class="note warn">${ico('card', 'bad')} ${esc(gtext('מורחק{{|ת}}'))} ל-${esc(p.susp)} משחקים</p>` : ''}
     <div class="hh-bars">
       ${bar('אנרגיה', p.energy, { testid: 'hub-energy', ico: '<i class="bi bi-energy"></i>' })}
       ${bar('מורל', p.morale, { ico: '<i class="bi bi-morale"></i>' })}
@@ -281,7 +283,7 @@ function tpl(hub, training, prof, meta) {
   const nextHtml = main ? matchPreview(main, 'השבוע') : hub.next ? matchPreview(hub.next, hub.next.dateHe || 'המשחק הבא') : `<p class="muted center">${esc(gtext('אין משחקים השבוע. זמן טוב להתאמן.'))}</p>`;
   const weekCard = `<section class="card week-card">
     <h2 class="card-title"><span>${esc(hub.dateHe || '')}</span></h2>
-    ${hub.windowOpen ? '<div class="wc-flags"><span class="chip gold">🔁 חלון העברות פתוח</span></div>' : ''}
+    ${hub.windowOpen ? '<div class="wc-flags"><span class="chip gold">' + ico('swap') + ' חלון העברות פתוח</span></div>' : ''}
     ${nextHtml}
     ${rest}
     ${hub.lastResult && hub.lastResult.textHe ? `<p class="small last-res"><span class="lr-tag">אחרון</span>${esc(hub.lastResult.textHe)}${hub.lastResult.rating ? ' · ציון ' + esc(rating(hub.lastResult.rating)) : ''}</p>` : ''}
@@ -298,14 +300,14 @@ function tpl(hub, training, prof, meta) {
     ${cur && cur.desc ? `<p class="muted small train-desc">${esc(gtext(cur.desc))}</p>` : ''}</section>`;
 
   const alerts = (hub.alerts || []).filter((a) => a && a.textHe);
-  const alertsHtml = alerts.length ? `<div class="alerts">${alerts.map((a) => `<button type="button" class="alert alert-${esc(a.type)}" ${a.route ? `data-act="go" data-to="${esc(a.route)}"` : 'disabled'}><span class="al-ico">${esc(ALERT_ICO[a.type] || 'ℹ️')}</span><span class="grow">${esc(gtext(a.textHe))}</span>${a.route ? '<span class="chev">‹</span>' : ''}</button>`).join('')}</div>` : '';
-  const notes = (hub.announcementsHe || []).length ? `<div class="notes">${hub.announcementsHe.map((t) => `<p class="note">📢 ${esc(gtext(t))}</p>`).join('')}</div>` : '';
+  const alertsHtml = alerts.length ? `<div class="alerts">${alerts.map((a) => `<button type="button" class="alert alert-${esc(a.type)}" ${a.route ? `data-act="go" data-to="${esc(a.route)}"` : 'disabled'}><span class="al-ico">${ico(...(ALERT_ICO[a.type] || ['info', '']))}</span><span class="grow">${esc(gtext(a.textHe))}</span>${a.route ? '<span class="chev">‹</span>' : ''}</button>`).join('')}</div>` : '';
+  const notes = (hub.announcementsHe || []).length ? `<div class="notes">${hub.announcementsHe.map((t) => `<p class="note">${ico('mega', 'gold')} ${esc(gtext(t))}</p>`).join('')}</div>` : '';
 
   const links = [
     ['#/offers', 'offers', 'הצעות', hub.openOffers],
     ['#/national', 'national', 'נבחרת', 0],
     ['#/profile', 'profile', 'פרופיל', 0],
-    ['#/shop', 'shop', 'חנות', 0],
+    ['#/inbox', 'inbox', 'הודעות', hub.unread || 0],
     ['#/awards', 'awards', 'פרסים', 0],
     ['#/hof', 'hof', 'היכל התהילה', 0],
   ];

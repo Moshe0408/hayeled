@@ -1,5 +1,6 @@
 // Headless career simulation through the facade only (SPEC §10.1).
-// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--seed 1] [--quick] [--gender m|f|both]   (default both: every career runs as a boy and as a girl)
+// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--mgr-seasons 6] [--seed 1] [--quick] [--gender m|f|both]   (default both: every career runs as a boy and as a girl)
+// v2.1: every career that retires goes on to a coaching career (best retirement offer -> --mgr-seasons manager seasons).
 import * as game from '../js/engine/game.js';
 import { rngFor, hash32 } from '../js/core/rng.js';
 import { LEAGUES, LEAGUE_BY_ID, CLUB_INDEX, EURO_FILLER_CLUBS } from '../js/data/leagues.js';
@@ -12,12 +13,13 @@ const QUICK = argv.includes('--quick');
 const CAREERS = QUICK ? 3 : arg('careers', 12);
 const SEASONS = QUICK ? 6 : arg('seasons', 25);
 const SEED = arg('seed', 1);
+const MGR_SEASONS = QUICK ? 3 : arg('mgr-seasons', 6);
 const VERBOSE = argv.includes('--verbose');
 const GARG = (() => { const i = argv.indexOf('--gender'); return i >= 0 && argv[i + 1] ? argv[i + 1] : 'both'; })();
 const GENDERS = GARG === 'm' ? ['m'] : GARG === 'f' ? ['f'] : ['m', 'f'];
 
 const violations = [];
-const checkCounts = { seasonEnd: 0, world: 0, purity: 0, schedule: 0, player: 0, walks: 0, matchLogs: 0, women: 0, econ: 0, migrate: 0 };
+const checkCounts = { seasonEnd: 0, world: 0, purity: 0, schedule: 0, player: 0, walks: 0, matchLogs: 0, women: 0, econ: 0, migrate: 0, manager: 0, reels: 0, legend: 0, money: 0 };
 const warnings = [];
 function fail(msg, detail) {
   if (violations.length < 200) violations.push(detail !== undefined ? msg + ' :: ' + JSON.stringify(detail).slice(0, 400) : msg);
@@ -36,6 +38,7 @@ function scanVM(v, where, path = '') {
     if (PH.test(v)) fail('unfilled placeholder in ' + where + ' at ' + path, v);
     if (GM.test(v)) fail('gender marker leak in ' + where + ' at ' + path, v);
     if (CUR_G === 'm' && MEN_ONLY.test(v)) fail("women's name in a men's career " + where + ' at ' + path, v);
+    if (v.indexOf('€') >= 0 || v.indexOf('{eur:') >= 0) fail('euro amount (not shekels) in ' + where + ' at ' + path, v);
     return;
   }
   if (typeof v === 'function') { fail('function in VM ' + where + ' at ' + path); return; }
@@ -196,7 +199,7 @@ const GETTERS = [
   ['getContract', () => game.getContract()], ['getCompetitions', () => game.getCompetitions()], ['getSchedule', () => game.getSchedule()],
   ['getProfile', () => game.getProfile()], ['getCareer', () => game.getCareer()], ['getNational', () => game.getNational()],
   ['getAwards', () => game.getAwards()], ['getShop', () => game.getShop()], ['getRetirement', () => game.getRetirement()],
-  ['getSaveMeta', () => game.getSaveMeta()],
+  ['getSaveMeta', () => game.getSaveMeta()], ['getManager', () => game.getManager()],
 ];
 function purityCheck(tag) {
   checkCounts.purity++;
@@ -208,6 +211,9 @@ function purityCheck(tag) {
   for (const id of ids) { extra.push(['getTable:' + id, () => game.getTable(id)]); extra.push(['getBracket:' + id, () => game.getBracket(id)]); extra.push(['getResults:' + id, () => game.getResults(id)]); }
   const inbox = game.getInbox();
   for (const it of inbox.slice(0, 5)) extra.push(['getThread:' + it.id, () => game.getThread(it.id)]);
+  const mv = game.getManager();
+  if (mv) for (const r of mv.recent.slice(0, 3)) extra.push(['getMatchReel:' + r.key, () => game.getMatchReel(r.key)]);
+  if (game.serialize().retired) extra.push(['previewCoachingOffers', () => game.previewCoachingOffers(400)]);
   for (const [name, fn] of GETTERS.concat(extra)) {
     const a = JSON.stringify(chk(name, fn()));
     const b = JSON.stringify(fn());
@@ -250,6 +256,188 @@ function walkAll(tag) {
   }
 }
 
+
+// ---------------- R2 manager / coach career (after retirement)
+const TIER_RANK = { national: 5, elite: 6, top: 4, lower: 3, assistant: 2, youth: 1 };
+function bestOffer(offers) {
+  return offers.slice().sort((a, b) => ((b.role === 'head' ? 1000 : 0) + b.strength + (TIER_RANK[b.tier] || 0)) - ((a.role === 'head' ? 1000 : 0) + a.strength + (TIER_RANK[a.tier] || 0)) || (a.id < b.id ? -1 : 1))[0];
+}
+function checkManagerVM(M, tag) {
+  checkCounts.manager++;
+  if (!M) { fail(tag + ' getManager null in manager mode'); return; }
+  if (!(M.rep >= 0 && M.rep <= 100)) fail(tag + ' manager rep', M.rep);
+  const R = M.record;
+  if (R.w + R.d + R.l !== R.games) fail(tag + ' manager record w+d+l', R);
+  if (M.job) {
+    for (const b of M.job.bars) if (!(b.value >= 0 && b.value <= 100)) fail(tag + ' manager bar ' + b.key, b.value);
+    if (M.job.transfers && !(M.job.transfers.budget >= 0)) fail(tag + ' manager budget', M.job.transfers.budget);
+    if (!M.job.roleHe || !M.job.team || !M.job.team.nameHe) fail(tag + ' manager job VM', M.job);
+    if (CUR_G === 'f' && /מאמן ראשי|עוזר מאמן|מאמן הנוער|מאמן הנבחרת/.test(M.job.roleHe)) fail(tag + ' masculine role in a women career', M.job.roleHe);
+    if (CUR_G === 'm' && /מאמנת/.test(M.job.roleHe)) fail(tag + ' feminine role in a men career', M.job.roleHe);
+  }
+  const asst = M.job && M.job.role === 'assistant';
+  const expTitle = asst ? (CUR_G === 'f' ? 'עוזרת המאמן' : 'עוזר המאמן') : (CUR_G === 'f' ? 'המאמנת' : 'המאמן');
+  if (M.titleHe !== expTitle) fail(tag + ' manager title gender', M.titleHe);
+  // v2.1 review: a female coach never gets a masculine reputation label / coaching phrase
+  if (CUR_G === 'f' && /מתחיל להתבלט|מוערך מאוד|מוכר בליגה/.test(M.repHe || '')) fail(tag + ' masculine reputation in a women career', M.repHe);
+  if (M.job && M.job.transfers) {
+    // the window's transfer list is frozen: a signed target keeps the OVR / fee it was signed for
+    for (const t of M.job.transfers.targets) {
+      if (!t.signed) continue;
+      const s = M.job.transfers.signed.find((x) => x.name === t.name);
+      if (s && s.ovr !== t.ovr) fail(tag + ' signed target re-rolled', [t.name, s.ovr, t.ovr]);
+    }
+  }
+  const jobGames = M.jobs.reduce((s, j) => s + j.games, 0);
+  if (jobGames !== R.games) fail(tag + ' sum of job games != record', [jobGames, R.games]);
+}
+function checkReel(r, tag) {
+  checkCounts.reels++;
+  const rl = r.reel || [];
+  if (!rl.length || rl[0].ev !== 'kickoff' || rl[rl.length - 1].ev !== 'ft') { fail(tag + ' reel shape', rl.map((e) => e.ev)); return; }
+  let prev = -1, gh = 0, ga = 0;
+  for (const e of rl) {
+    if (e.minute < prev) fail(tag + ' reel minutes not ordered', [prev, e.minute]);
+    prev = e.minute;
+    if (e.ev === 'goal') { if (e.side === 'h') gh++; else ga++; if (!e.nameHe) fail(tag + ' reel goal without scorer', e); }
+  }
+  if (gh !== r.score[0] || ga !== r.score[1]) fail(tag + ' reel goals != score', [gh, ga, r.score]);
+  const last = rl[rl.length - 1].score;
+  if (last[0] !== r.score[0] || last[1] !== r.score[1]) fail(tag + ' reel final score', [last, r.score]);
+}
+const mgrAgg = { careers: 0, seasons: 0, sackings: 0, offers: 0, jobs: 0, trophies: 0, awards: 0, nation: 0, youth: 0, assistant: 0, head: 0, signings: 0, budgetAsks: 0, approved: 0, firstTier: [] };
+
+function runManager(i, gender, pol, take, checks, collect) {
+  const tag0 = 'c' + i + gender + ' mgr';
+  let M = chk('getManager', game.getManager());
+  const R0 = chk('getRetirement', game.getRetirement());
+  if (!R0.coaching || R0.coaching.st !== 'offers' || !R0.coaching.offers.length) { fail(tag0 + ' no coaching offers at retirement', R0.coaching); return null; }
+  if (R0.lastClub && !Array.isArray(R0.lastClub.colors)) fail(tag0 + ' retirement lastClub colours', R0.lastClub);
+  const off = bestOffer(R0.coaching.offers);
+  const a = chk('mgrRespondOffer', game.mgrRespondOffer(off.id, 'accept'));
+  take();
+  if (!a.ok) { fail(tag0 + ' accept coaching offer', a); return null; }
+  if (collect) { mgrAgg.careers++; mgrAgg.firstTier.push([R0.coaching.band, off.tier, off.strength]); }
+  const startSeason = game.serialize().season;
+  let seasonsDone = 0, sacks = 0, offersSeen = new Set(), guard = 0;
+  let prevSeason = startSeason;
+  while (seasonsDone < MGR_SEASONS && guard++ < 60 * (MGR_SEASONS + 2)) {
+    M = chk('getManager', game.getManager());
+    const S = game.serialize();
+    const tag = tag0 + ' ' + S.season + 'w' + S.week;
+    if (checks) checkManagerVM(M, tag);
+    if (M.st === 'done') break;
+    for (const o of M.offers) offersSeen.add(o.id);
+    // offers: unemployed -> take the best; employed -> sometimes move to a stronger team
+    if (M.st === 'unemployed' && M.offers.length) {
+      const o = bestOffer(M.offers);
+      const r = chk('mgrRespondOffer', game.mgrRespondOffer(o.id, 'accept')); take();
+      if (!r.ok) fail(tag + ' accept offer when unemployed', r);
+      continue;
+    }
+    if (M.st === 'active' && M.offers.length) {
+      for (const o of M.offers) {
+        if (o.role === 'head' && M.job && (o.strength > M.job.strength + 3 || M.job.role !== 'head') && pol.chance(0.35)) { chk('mgrRespondOffer', game.mgrRespondOffer(o.id, 'accept')); take(); break; }
+        else if (pol.chance(0.3)) { chk('mgrRespondOffer', game.mgrRespondOffer(o.id, 'reject')); take(); }
+      }
+      M = game.getManager();
+    }
+    // transfers
+    if (M.job && M.job.transfers && M.job.transfers.open) {
+      if (M.job.transfers.canRequest && pol.chance(0.5)) { const r = chk('mgrRequestBudget', game.mgrRequestBudget()); take(); if (collect) { mgrAgg.budgetAsks++; if (r.approved) mgrAgg.approved++; } }
+      const T = game.getManager().job.transfers;
+      for (const t of T.targets) {
+        if (T.used >= T.max) break;
+        if (t.signed || !t.affordable || !pol.chance(0.5)) continue;
+        const r = chk('mgrSign', game.mgrSign(t.id)); take();
+        if (r.ok && collect) mgrAgg.signings++;
+        break;
+      }
+    }
+    // tactic: follow the assistant's recommendation most of the time
+    const rec = M.tactic.recommended;
+    const tac = rec && pol.chance(0.6) ? rec : pol.pick(M.tactic.options).id;
+    // play: mostly week by week (watch mode), sometimes a chunked fast-forward
+    let sums = [];
+    if (pol.chance(0.7)) { const r = chk('mgrAdvance', game.mgrAdvance(tac)); take(); if (!r.ok) { fail(tag + ' mgrAdvance', r); break; } sums = [r.summary]; }
+    else { game.mgrSetTactic(tac); const r = chk('mgrFastForward', game.mgrFastForward({ until: pol.pick(['next_match', 'season_end']), maxWeeks: 3 })); take(); if (!r.ok) { fail(tag + ' mgrFastForward', r); break; } sums = r.summaries; }
+    for (const sm of sums) {
+      if (checks) for (const r of sm.results) checkReel(r, tag);
+      if (sm.sacked) sacks++;
+      if (sm.seasonEnded) {
+        const S2 = game.serialize();
+        if (checks) { checkSeasonEnd(S2, tag + ' mgr-season'); checkSchedule(tag + ' mgr-season'); }
+        const M2 = game.getManager();
+        if (M2.review) { chk('mgrAckReview', game.mgrAckReview()); }
+      }
+    }
+    const S3 = game.serialize();
+    if (checks) checkPlayer(S3, tag);
+    if (S3.season !== prevSeason) {
+      if (S3.season !== prevSeason + 1 || S3.week > 4) fail(tag + ' manager season increment', [prevSeason, S3.season, S3.week]);
+      prevSeason = S3.season;
+      seasonsDone++;
+      if (checks) {
+        checkWorld(S3, tag + ' world');
+        const str = JSON.stringify(S3);
+        if (str.length > 1.5e6) fail(tag + ' save too big', str.length);
+        const lr = game.loadState(JSON.parse(str));
+        if (!lr.ok) fail(tag + ' manager loadState round trip', lr);
+        if (seasonsDone % 3 === 1) purityCheck(tag);
+        walkAll(tag);
+        const sch = game.getSchedule();
+        if (S3.mgr && S3.mgr.st === 'active' && S3.mgr.job.kind === 'club' && S3.mgr.job.role === 'head' && !sch.fixtures.length) fail(tag + ' empty manager schedule');
+        const comps = game.getCompetitions();
+        if (S3.mgr && S3.mgr.st === 'active' && S3.mgr.job.kind === 'club') {
+          const lid = S3.world.clubs[S3.mgr.job.team].lg;
+          if (lid && !comps.mine.some((c) => c.id === lid)) fail(tag + ' managed league not in my competitions', lid);
+          const tb = game.getTable(lid);
+          if (S3.mgr.job.role === 'head' && !tb.groups.some((g) => g.rows.some((r) => r.mine && r.team.id === S3.mgr.job.team))) fail(tag + ' managed team not marked in table');
+        }
+      }
+    }
+  }
+  M = chk('getManager', game.getManager());
+  const S = game.serialize();
+  if (collect) {
+    mgrAgg.seasons += seasonsDone; mgrAgg.sackings += sacks; mgrAgg.offers += Array.from(offersSeen).length;
+    mgrAgg.jobs += S.mgr.jobs.length; mgrAgg.trophies += S.mgr.trophies.length; mgrAgg.awards += S.mgr.awards.length;
+    for (const j of S.mgr.jobs) { if (j.kind === 'nation') mgrAgg.nation++; else if (j.role === 'youth') mgrAgg.youth++; else if (j.role === 'assistant') mgrAgg.assistant++; else mgrAgg.head++; }
+  }
+  if (seasonsDone < MGR_SEASONS && M.st !== 'done') fail(tag0 + ' manager seasons not reached', [seasonsDone, MGR_SEASONS]);
+  // retire from coaching (most careers), check the Hall of Fame entry shows player + coach
+  if (pol.chance(0.8)) {
+    const r = chk('mgrRetire', game.mgrRetire()); take();
+    if (!r.ok) fail(tag0 + ' mgrRetire', r);
+    const M2 = chk('getManager', game.getManager());
+    if (M2.st !== 'done') fail(tag0 + ' manager not done after mgrRetire', M2.st);
+    const a2 = game.mgrAdvance('balanced');
+    if (a2.ok) fail(tag0 + ' mgrAdvance after coaching retirement should fail');
+  }
+  const e = chk('buildHallOfFameEntry', game.buildHallOfFameEntry());
+  if (!e.coach || !(e.coach.games >= 0) || e.roleHe !== (gender === 'f' ? 'שחקנית + מאמנת' : 'שחקן + מאמן')) fail(tag0 + ' HoF entry without the coaching record', e.roleHe);
+  if (!(e.legacy >= e.legacyPlayer)) fail(tag0 + ' HoF legacy', [e.legacy, e.legacyPlayer]);
+  const car = chk('getCareer', game.getCareer());
+  if (!car.coach) fail(tag0 + ' getCareer without coach record');
+  return { seasons: seasonsDone, sacks, jobs: S.mgr.jobs.length, trophies: S.mgr.trophies.length, band: R0.coaching.band, first: off.tier + ':' + off.team.nameHe };
+}
+
+// legends get better jobs (pure preview through the facade)
+function legendCheck(tag) {
+  checkCounts.legend++;
+  const L = chk('previewCoachingOffers', game.previewCoachingOffers(650));
+  const G2 = chk('previewCoachingOffers', game.previewCoachingOffers(170));
+  const A = chk('previewCoachingOffers', game.previewCoachingOffers(15));
+  if (L.band !== 'legend' || A.band !== 'average') fail(tag + ' legacy bands', [L.band, G2.band, A.band]);
+  const bestHead = (o) => Math.max(0, ...o.offers.filter((x) => x.role === 'head').map((x) => x.strength));
+  if (!L.offers.some((x) => x.kind === 'nation')) fail(tag + ' legend without a national-team offer', L.offers);
+  if (!L.offers.some((x) => x.role === 'head' && x.kind === 'club' && x.strength >= 78)) fail(tag + ' legend without a big-club head-coach offer', L.offers);
+  if (!(bestHead(L) > bestHead(A))) fail(tag + ' legend head-coach offers not better than average', [bestHead(L), bestHead(A)]);
+  if (A.offers.some((x) => x.tier === 'elite' || x.kind === 'nation')) fail(tag + ' average player offered an elite job', A.offers);
+  if (!A.offers.some((x) => x.role === 'youth' || x.tier === 'lower')) fail(tag + ' average player without youth / lower-league offer', A.offers);
+  if (!G2.offers.some((x) => x.role === 'assistant' || x.tier === 'lower')) fail(tag + ' good player without assistant / lower-league offer', G2.offers);
+}
+
 // ---------------- policy
 const POS = ['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CAM', 'LW', 'RW', 'ST'];
 function careerOpts(i, gender = 'm') {
@@ -269,7 +457,7 @@ function careerOpts(i, gender = 'm') {
 
 function ageNow() { return game.getHub().player.age; }
 
-function runCareer(i, { roundTrip = false, collect = true, checks = true, gender = 'm' } = {}) {
+function runCareer(i, { roundTrip = false, collect = true, checks = true, gender = 'm', manager = true, full = false } = {}) {
   CUR_G = gender;
   const opts = careerOpts(i, gender);
   const res = chk('newCareer', game.newCareer({ ...opts, seed: hash32(SEED, i, gender === 'f' ? 'f' : ''), now: 0 }));
@@ -289,15 +477,16 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
   const t0 = Date.now();
   let prevSeason = S0.season;
   let retiredAge = null;
-  for (let guard = 0; guard < 60 * SEASONS + 100; guard++) {
+  const SEAS = (QUICK && i === 0 && manager) || full ? 30 : SEASONS;
+  for (let guard = 0; guard < 60 * SEAS + 100; guard++) {
     let S = game.serialize();
     if (S.retired) break;
-    if (S.season >= start + SEASONS) break;
+    if (S.season >= start + SEAS) break;
     // pending review
     if (S.pending.review !== null) {
       chk('getSeasonReview', game.getSeasonReview());
       if (checks && lastSeasonChecked !== S.season) { checkSeasonEnd(S, 'c' + i + ' s' + S.season); lastSeasonChecked = S.season; checkSchedule('c' + i + ' s' + S.season); }
-      if (ageNow() >= 35 && pol.chance(0.3)) { const rr = chk('retire', game.retire()); take(); if (!rr.ok) fail('retire failed', rr); break; }
+      if (ageNow() >= 33 && pol.chance(0.5)) { const rr = chk('retire', game.retire()); take(); if (!rr.ok) fail('retire failed', rr); break; }
       chk('ack', game.ackSeasonReview());
       take();
       continue;
@@ -405,6 +594,12 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
     }
   }
   const elapsed = Date.now() - t0;
+  take();
+  let mgrRes = null;
+  if (manager && game.serialize().retired) {
+    if (checks) legendCheck('c' + i + gender);
+    mgrRes = runManager(i, gender, pol, take, checks, collect);
+  }
   const S = game.serialize();
   take();
   // signals
@@ -415,6 +610,21 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
   if (count('retired') > 1) fail('retired signal > 1');
   if (S.retired && count('retired') !== 1) fail('retired signal missing');
   if (S.retired) {
+    const rp = signals.find((x) => x.name === 'retired').props;
+    if (rp.gender !== gender || !('league' in rp) || !('tier' in rp) || typeof rp.top5 !== 'boolean' || !Number.isFinite(rp.legacy)) fail('retired signal props', rp);
+  }
+  const cs0 = signals.find((x) => x.name === 'career_started');
+  if (cs0 && (cs0.props.gender !== gender || !cs0.props.nation || !cs0.props.position || !cs0.props.club)) fail('career_started props', cs0.props);
+  { let tg = 0; for (const s2 of S.hist.seasons) for (const k of ['lg', 'cup', 'eu', 'nt', 'yth', 'ynt']) tg += s2.stats[k].g; if (!S.hist.seasons.some((x) => x.s === S.season)) for (const k of ['lg', 'cup', 'eu', 'nt', 'yth', 'ynt']) tg += S.player.s[k].g;
+    if (count('goal') !== tg) fail('goal signals != player goals', [count('goal'), tg]);
+    for (const g2 of signals.filter((x) => x.name === 'goal')) if (typeof g2.props.mega !== 'boolean') { fail('goal signal without mega', g2.props); break; } }
+  if (S.mgr) {
+    if (count('manager_started') !== S.mgr.jobs.length) fail('manager_started count != jobs', [count('manager_started'), S.mgr.jobs.length]);
+    for (const ms of signals.filter((x) => x.name === 'manager_started')) if (!ms.props.tier || ms.props.gender !== gender) fail('manager_started props', ms.props);
+    if (count('manager_retired') > 1) fail('manager_retired > 1');
+    if (S.mgr.st === 'done' && S.mgr.jobs.length && count('manager_retired') !== 1) fail('manager_retired missing');
+  }
+  if (S.retired) {
     const e = chk('buildHallOfFameEntry', game.buildHallOfFameEntry());
     if (!e || !Number.isFinite(e.legacy) || e.careerId !== S.id) fail('bad HofEntry', e);
     chk('getRetirement', game.getRetirement());
@@ -424,7 +634,7 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
   // inbox placeholders
   for (const it of S.inbox) for (const l of it.lines) { if (PH.test(l.t)) fail('inbox placeholder', l.t); if (GM.test(l.t)) fail('inbox gender marker', l.t); }
   for (const e of S.hist.timeline) if (GM.test(e.t) || PH.test(e.t)) fail('timeline leak', e.t);
-  return { S, signals, elapsed, weeks, matches: matchCount, maxSize, sizes, midTransfer, retiredAge, opts, gender, seasons: S.season - start + (S.retired ? 1 : 0) };
+  return { S, signals, elapsed, weeks, matches: matchCount, maxSize, sizes, midTransfer, retiredAge, opts, gender, seasons: (S.retired ? S.retired.season : S.season) - start + (S.retired ? 1 : 0), mgr: mgrRes };
 }
 
 function summarize(r, i) {
@@ -444,7 +654,7 @@ function summarize(r, i) {
     career: i, gender: p.gender, nation: p.nation, pos: p.pos, pot: p.pot, academy: r.opts.club, clubs, leagues, apps: tot.apps, goals: tot.g, assists: tot.a,
     trophies, awards, caps: p.caps.senior, intlGoals: p.ig.senior, youthCaps: p.caps.u17 + p.caps.u19 + p.caps.u21, peakOvr: p.peak,
     ballonDor: bdo, retired: S.retired ? S.retired.reason + '@' + S.retired.age : 'active@' + (S.season - p.born), legacy: S.retired ? S.retired.legacy : null,
-    seasons: r.seasons, ms: r.elapsed, maxSaveKB: Math.round(r.maxSize / 1024),
+    seasons: r.seasons, ms: r.elapsed, maxSaveKB: Math.round(r.maxSize / 1024), coach: r.mgr,
     ovrByAge: S.hist.seasons.map((s) => s.age + ':' + s.ovr).join(' '),
   };
 }
@@ -501,7 +711,7 @@ function checkEcon(i, gender) {
   if (S.player.contract.wage !== Math.round((150 + 5 * s0) * e)) fail('c' + i + gender + ' youth wage not scaled', S.player.contract.wage);
   const items = game.getShop().cats.flatMap((c) => c.items);
   const car = items.find((x) => x.id === 'car_old');
-  if (car) { const exp = e === 1 ? 3000 : Number((3000 * e).toPrecision(2)); if (car.price !== exp) fail('c' + i + gender + ' shop price not scaled', [car.price, exp]); }
+  if (car) { const exp = e === 1 ? 3000 : Number((3000 * Math.sqrt(e)).toPrecision(2)); if (car.price !== exp) fail('c' + i + gender + ' shop price not scaled', [car.price, exp]); }
   const v = game.getHub().player.value;
   if (gender === 'f' && v > 2e6) fail('c' + i + ' women value too high', v);
 }
@@ -550,6 +760,155 @@ function migrationCheck() {
   if (!threw) fail('migrateState accepts a newer schema');
 }
 
+// ---------------- v2 -> v3 migration (coaching career state)
+function migrationV3Check() {
+  checkCounts.migrate++;
+  CUR_G = 'm';
+  game.newCareer({ ...careerOpts(3, 'm'), seed: hash32(SEED, 'mig3'), now: 0 });
+  game.fastForward({ until: 'weeks', weeks: 4 });
+  const v2 = JSON.parse(JSON.stringify(game.serialize()));
+  v2.v = 2; delete v2.mgr;
+  const lr = game.loadState(game.migrateState(v2, 2));
+  if (!lr.ok) { fail('migrated v2 state does not load', lr); return; }
+  const S = game.serialize();
+  if (S.v !== 3 || S.mgr !== null) fail('v3 migration defaults', [S.v, S.mgr]);
+  if (game.getManager() !== null) fail('getManager on an active player career should be null');
+  walkAll('migrated-v3');
+  // a retired v2 career (no coaching state) gets its offers on the retirement screen
+  const r2 = JSON.parse(JSON.stringify(S));
+  r2.retired = { season: r2.season, week: r2.week, age: 33, reason: 'voluntary', legacy: 120 };
+  r2.player.stage = 'retired'; r2.player.club = null; r2.player.contract = null; r2.v = 2; delete r2.mgr;
+  const lr2 = game.loadState(game.migrateState(r2, 2));
+  if (!lr2.ok) { fail('migrated retired v2 state does not load', lr2); return; }
+  const e = game.ensureCoachingOffers();
+  if (!e.ok || !e.created) fail('ensureCoachingOffers on a migrated retired career', e);
+  const R = chk('getRetirement(migrated)', game.getRetirement());
+  if (!R.coaching || !R.coaching.offers.length) fail('migrated retired career without coaching offers', R.coaching);
+  const e2 = game.ensureCoachingOffers();
+  if (e2.created) fail('ensureCoachingOffers not idempotent');
+  // v2.1 review: a coaching job with no managed match does not turn the HoF entry into "player + coach"
+  const o0 = R.coaching.offers[0];
+  game.mgrRespondOffer(o0.id, 'accept');
+  const h0 = game.buildHallOfFameEntry();
+  if (h0 && (h0.coach || /מאמן/.test(h0.tierHe || ''))) fail('HoF coach record with zero managed matches', [h0.tierHe, h0.coach]);
+  // v2 saves carry rendered euro amounts in persisted texts: the migration shows them in shekels
+  const r3 = JSON.parse(JSON.stringify(S));
+  r3.v = 2; delete r3.mgr;
+  if (r3.inbox.length && r3.inbox[0].lines && r3.inbox[0].lines.length) r3.inbox[0].lines[0].t = 'בונוס חתימה של €15,000 ושכר €2.5K לשבוע';
+  r3.hist.timeline.push({ id: 'tx', s: r3.season, w: r3.week, icon: 'transfer', t: 'מעבר למכבי תמורת €1.2M' });
+  const lr3 = game.loadState(game.migrateState(r3, 2));
+  if (!lr3.ok) fail('v2 state with euro texts does not load', lr3);
+  const j3 = JSON.stringify(game.serialize());
+  if (j3.indexOf('€') >= 0) fail('euro sign survives the v2 -> v3 migration', j3.slice(j3.indexOf('€') - 40, j3.indexOf('€') + 20));
+  if (j3.indexOf('₪4.7 מיליון') < 0) fail('migrated timeline amount not in shekels');
+  // a forced retirement sits at week 52 after the world rollover: the migrated career must not roll the world twice
+  const r4 = JSON.parse(JSON.stringify(S));
+  r4.v = 2; delete r4.mgr; r4.week = 52;
+  r4.retired = { season: r4.season, week: 52, age: 40, reason: 'age', legacy: 120 };
+  r4.player.stage = 'retired'; r4.player.club = null; r4.player.contract = null;
+  const lr4 = game.loadState(game.migrateState(r4, 2));
+  if (!lr4.ok) { fail('week-52 retired v2 state does not load', lr4); return; }
+  const s4 = game.serialize().season;
+  const strength0 = JSON.stringify(game.serialize().world.clubs);
+  game.ensureCoachingOffers();
+  if (!game.serialize().mgr.roll) fail('week-52 forced retirement: coaching state should finish the pending rollover only');
+  const R4 = game.getRetirement();
+  game.mgrRespondOffer(R4.coaching.offers[0].id, 'accept');
+  const S4 = game.serialize();
+  if (S4.season !== s4 + 1 || S4.week !== 1) fail('week-52 migration: season switch', [s4, S4.season, S4.week]);
+  if (JSON.stringify(Object.fromEntries(Object.entries(S4.world.clubs).map(([k, v]) => [k, v.s]))) !== JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(strength0)).map(([k, v]) => [k, v.s])))) fail('week-52 migration: club strengths evolved a second time');
+  // a job taken after week 40 is not judged on an objective the board sets at week 44
+  const r5 = JSON.parse(JSON.stringify(S));
+  r5.v = 2; delete r5.mgr; r5.week = 41;
+  r5.retired = { season: r5.season, week: 41, age: 34, reason: 'voluntary', legacy: 150 };
+  r5.player.stage = 'retired'; r5.player.club = null; r5.player.contract = null;
+  if (!game.loadState(game.migrateState(r5, 2)).ok) { fail('week-41 retired v2 state does not load'); return; }
+  game.ensureCoachingOffers();
+  game.mgrRespondOffer(game.getRetirement().coaching.offers[0].id, 'accept');
+  const conf0 = game.serialize().mgr.job.conf;
+  for (let k = 0; k < 4; k++) game.mgrAdvance('balanced');
+  const M5 = game.serialize().mgr;
+  const row = M5.seasons.find((x) => x.s === r5.season && !x.part);
+  if (!row) fail('late job: no season row');
+  else if (row.met !== null) fail('late job judged on a week-44 objective', row);
+  if (M5.st !== 'active') fail('late job: sacked / left at the first season end', M5.st);
+  void conf0;
+}
+
+// chunked manager fast-forward == week-by-week, and a save/load round trip mid coaching career keeps the state identical
+function managerDeterminism() {
+  for (const gender of GENDERS) {
+    CUR_G = gender;
+    runCareer(0, { collect: false, checks: false, gender, manager: false, full: true });
+    if (!game.serialize().retired) { const r = game.retire(); if (!r.ok) { warn('manager determinism: could not retire (' + gender + ')'); continue; } }
+    const R = game.getRetirement();
+    const o = bestOffer(R.coaching.offers);
+    game.mgrRespondOffer(o.id, 'accept');
+    game.getAndClearSignals();
+    const snap = JSON.stringify(game.serialize());
+    const weekly = () => { game.loadState(JSON.parse(snap)); for (let k = 0; k < 70; k++) { const r = game.mgrAdvance('press'); if (!r.ok) break; if (game.getManager().st === 'unemployed') break; } return stateHash(); };
+    const chunked = () => { game.loadState(JSON.parse(snap)); game.mgrSetTactic('press'); let n = 0; while (n < 70) { const r = game.mgrFastForward({ until: 'weeks', weeks: Math.min(7, 70 - n), maxWeeks: 7 }); if (!r.ok || !r.weeks) break; n += r.weeks; if (game.getManager().st === 'unemployed') break; } return { h: stateHash(), n }; };
+    const a = weekly();
+    const c = chunked();
+    const nWeekly = (() => { game.loadState(JSON.parse(snap)); let n = 0; for (let k = 0; k < 70; k++) { const r = game.mgrAdvance('press'); if (!r.ok) break; n++; if (game.getManager().st === 'unemployed') break; } return n; })();
+    if (c.n === nWeekly && a !== c.h) fail('manager: chunked fast-forward differs from week-by-week (' + gender + ')', [a, c.h]);
+    // round trip in the middle
+    game.loadState(JSON.parse(snap));
+    for (let k = 0; k < 30; k++) game.mgrAdvance('attack');
+    const mid = JSON.stringify(game.serialize());
+    for (let k = 0; k < 30; k++) game.mgrAdvance('defend');
+    const h1 = stateHash();
+    game.loadState(JSON.parse(mid));
+    for (let k = 0; k < 30; k++) game.mgrAdvance('defend');
+    if (stateHash() !== h1) fail('manager: save/load round trip changes the outcome (' + gender + ')');
+  }
+}
+
+// every kind of coaching job (national team / assistant / youth) through the facade: the retired snapshot gets a
+// different legacy so the retirement offers change (legend -> national team, good -> assistant, average -> youth)
+function coachingRoles() {
+  for (const gender of GENDERS) {
+    CUR_G = gender;
+    runCareer(1, { collect: false, checks: false, gender, manager: false, full: true });
+    if (!game.serialize().retired) { const r = game.retire(); if (!r.ok) { warn('coachingRoles: could not retire (' + gender + ')'); continue; } }
+    const snap = JSON.parse(JSON.stringify(game.serialize()));
+    for (const [legacy, want] of [[650, (o) => o.kind === 'nation'], [170, (o) => o.role === 'assistant'], [15, (o) => o.role === 'youth']]) {
+      const st = JSON.parse(JSON.stringify(snap));
+      st.retired.legacy = legacy; st.mgr = null;
+      const lr = game.loadState(st);
+      if (!lr.ok) { fail('coachingRoles loadState', lr); continue; }
+      game.ensureCoachingOffers();
+      const R = chk('getRetirement', game.getRetirement());
+      const o = R.coaching.offers.find(want);
+      const tag = 'role ' + gender + ' L' + legacy;
+      if (!o) { fail(tag + ' expected offer kind missing', R.coaching.offers.map((x) => x.kind + '/' + x.role)); continue; }
+      game.getAndClearSignals();
+      chk('mgrRespondOffer', game.mgrRespondOffer(o.id, 'accept'));
+      const sig = game.getAndClearSignals().find((x) => x.name === 'manager_started');
+      const expTier = o.kind === 'nation' ? 'national' : o.role;
+      if (!sig || sig.props.tier !== expTier) fail(tag + ' manager_started tier', sig && sig.props);
+      let seasons = 0, played = 0;
+      const s0 = game.serialize().season;
+      for (let k = 0; k < 200 && seasons < 2; k++) {
+        const M = chk('getManager', game.getManager());
+        checkManagerVM(M, tag);
+        if (M.st === 'unemployed') { if (M.offers.length) game.mgrRespondOffer(bestOffer(M.offers).id, 'accept'); }
+        const r = chk('mgrAdvance', game.mgrAdvance(M.tactic.recommended || 'balanced'));
+        if (!r.ok) { fail(tag + ' mgrAdvance', r); break; }
+        for (const x of r.summary.results) { checkReel(x, tag); played++; }
+        if (r.summary.seasonEnded) { checkSeasonEnd(game.serialize(), tag); game.mgrAckReview(); }
+        seasons = game.serialize().season - s0;
+      }
+      if (!played) fail(tag + ' no managed matches in two seasons');
+      walkAll(tag);
+      purityCheck(tag);
+      const S = game.serialize();
+      if (o.kind === 'nation' && S.mgr.res.some((x) => x.k !== 'national' && x.k !== 'friendly')) fail(tag + ' a national-team manager played club matches');
+      if (o.role === 'youth' && S.mgr.res.some((x) => x.k !== 'youth')) fail(tag + ' a youth coach played senior matches');
+    }
+  }
+}
+
 // ---------------- main
 const T0 = Date.now();
 const results = [];
@@ -578,6 +937,9 @@ for (const gender of GENDERS) {
 }
 if (GENDERS.length === 2 && detHashes.m === detHashes.f) fail('boy and girl careers produced the same state');
 migrationCheck();
+migrationV3Check();
+managerDeterminism();
+coachingRoles();
 
 // chunked vs unchunked fast-forward
 for (const gender of GENDERS) {
@@ -606,6 +968,15 @@ for (const gender of GENDERS) {
     fail('fastForward next_match stopped without pending match', r.hub.status);
   }
 }
+
+// ---------------- manager aggregates (R2)
+if (mgrAgg.careers >= 4 && !QUICK) {
+  if (mgrAgg.sackings < 1) fail('no manager was ever sacked', mgrAgg);
+  if (mgrAgg.offers < mgrAgg.careers) fail('too few coaching job offers', mgrAgg);
+  if (mgrAgg.jobs <= mgrAgg.careers) fail('no manager ever changed jobs', mgrAgg);
+}
+if (mgrAgg.careers && mgrAgg.seasons < mgrAgg.careers * MGR_SEASONS * 0.8) fail('manager seasons simulated', [mgrAgg.seasons, mgrAgg.careers * MGR_SEASONS]);
+if (mgrAgg.careers === 0) fail('no coaching career was simulated');
 
 // ---------------- report
 const avgSeasonMs = totalSeasons ? totalMs / totalSeasons : 0;
@@ -652,6 +1023,7 @@ const report = {
   maxSaveKB: Math.round(maxSave / 1024), saveKBBySeason: results[0] ? results[0].sizes.map((x) => Math.round(x / 1024)) : [],
   avgSeasonMs: Math.round(avgSeasonMs), totalSec: +((Date.now() - T0) / 1000).toFixed(1), midSeasonTransfer: midTransfer,
   genders: GENDERS, determinism: detOk ? 'ok' : 'FAIL', checksRun: checkCounts,
+  manager: { ...mgrAgg, firstTier: mgrAgg.firstTier.map((x) => x.join(':')) },
 };
 console.log('REPORT ' + JSON.stringify(report, null, 1));
 if (warnings.length) { console.log('CALIBRATION WARNINGS:'); for (const w of warnings) console.log('  - ' + w); }

@@ -4,6 +4,7 @@ import { esc } from './dom.js';
 import { call } from './app.js';
 import { gtext } from './gender.js';
 import { card, empty, badge, nationTeam } from './components.js';
+import { ico } from './icons.js';
 
 export function render(root) {
   const a = call(() => game.getAwards(), { quiet: true });
@@ -12,7 +13,7 @@ export function render(root) {
   const bdo = a.ballonDor || [];
   const bench = a.seasonBenchmarks || [];
   root.innerHTML = `<div class="awards">
-    ${card(mine.length ? `<div class="award-list">${mine.map((m) => `<div class="award-row"><span class="aw-ico">${m.key === 'ballon_dor' ? '🟡' : '🏅'}</span><div class="grow"><b>${esc(m.he)}</b>${m.detailHe ? `<small class="muted">${esc(m.detailHe)}</small>` : ''}</div><span class="muted small num">${esc(m.seasonHe)}</span></div>`).join('')}</div>` : empty('עוד אין פרסים אישיים. העונה הבאה שלך!', '🏅'), { title: 'הפרסים שלי' })}
+    ${card(mine.length ? `<div class="award-list">${mine.map((m) => `<div class="award-row"><span class="aw-ico">${ico(m.key === 'ballon_dor' ? 'ball' : 'medal', 'gold')}</span><div class="grow"><b>${esc(m.he)}</b>${m.detailHe ? `<small class="muted">${esc(m.detailHe)}</small>` : ''}</div><span class="muted small num">${esc(m.seasonHe)}</span></div>`).join('')}</div>` : empty('עוד אין פרסים אישיים. העונה הבאה שלך!', '🏅'), { title: 'הפרסים שלי' })}
     ${card(bdo.length ? `<div class="bdo-list">${bdo.map((b) => `<div class="bdo-row${b.rank === 1 ? ' won' : ''}"><div class="bdo-top"><b class="num">${esc(b.seasonHe)}</b><span class="chip${b.rank && b.rank <= 3 ? ' gold' : ''}">${esc(gtext(b.rankHe || (b.rank ? 'מקום ' + b.rank : 'לא היית {{מועמד|מועמדת}}')))}</span></div>
         ${(b.top3 || []).length ? `<ol class="top3">${b.top3.map((t) => `<li>${t.nation && nationTeam(t.nation) ? badge(nationTeam(t.nation), 'xs') : esc(t.flag || '')} <b>${esc(t.name)}</b> <small class="muted">${esc(t.clubHe || '')}</small></li>`).join('')}</ol>` : ''}</div>`).join('')}</div>` : empty('טקס כדור הזהב{{| לנשים}} מתקיים בסוף כל קיץ', '🟡'), { title: gtext('🟡 כדור הזהב{{| לנשים}}') })}
     ${bench.length ? card(`<p class="muted small">כדי לזכות בתואר מלך השערים, צריך לעבור את המתחרים האלה:</p>${bench.map((b) => `<div class="kv"><span>${esc(b.compHe)}</span><b>${esc(b.scorerHe)}</b></div>`).join('')}`, { title: 'המתחרים העונה' }) : ''}

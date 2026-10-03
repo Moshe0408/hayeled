@@ -7,10 +7,15 @@
 //   GET  /rest/v1/app_config?select=...
 //   POST /rest/v1/rpc/{heartbeat|track_events|submit_feedback|admin_whoami|admin_stats|
 //                      admin_feedback|admin_mark_read|admin_get_config|admin_set_config}
+//   + supabase/update-2.1.sql: admin_stats_v2, admin_feedback_v2, admin_delete_feedback, admin_reset_stats
 // Test helpers:
 //   GET  /__mock/state   -> { devices, sessions, events, feedback, app_config }
-//   POST /__mock/reset   -> clears everything, re-seeds app_config (ads disabled)
+//   POST /__mock/reset   -> clears everything, re-seeds app_config (ads disabled), schema back to the start value
 //   POST /__mock/fail    -> body {"on":true|false}: make every /rest and /auth call answer 503 (simulate outage)
+//   POST /__mock/schema  -> body {"v":"2.0"|"2.1"}: "2.0" hides the update-2.1.sql RPCs (404 PGRST202, exactly like
+//                           a project where update-2.1.sql was not run yet)
+//   POST /__mock/seed    -> body {"devices":40}: deterministic demo data (devices, sessions, events, feedback)
+// CLI flags: --legacy (start as schema 2.0), --seed (demo data at start).
 // Users: the admin (default admin@test.local / test1234) and a non-admin player@test.local / test1234.
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -62,7 +67,28 @@ function topBy(list, keyFn, limit = 10) {
     .map(([key, count]) => ({ key, count }));
 }
 
-export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {}) {
+const TOP5 = ['eng1', 'esp1', 'ita1', 'ger1', 'fra1'];
+const V21_RPCS = new Set(['admin_stats_v2', 'admin_feedback_v2', 'admin_delete_feedback', 'admin_reset_stats']);
+
+/** Goals an event row stands for (mirrors public.hy_event_n). */
+function eventN(props) {
+  const n = props && typeof props.n === 'number' && Number.isFinite(props.n) ? Math.floor(props.n) : 1;
+  return Math.min(Math.max(n, 1), 500);
+}
+
+/** Tiny deterministic PRNG for demo data. */
+function demoRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function createMockSupabase({ admin = 'admin@test.local:test1234', schema = '2.1' } = {}) {
   const [adminEmail, adminPass] = String(admin).split(':');
   const users = new Map([
     [adminEmail.toLowerCase(), { id: randomUUID(), email: adminEmail, password: adminPass || 'test1234' }],
@@ -72,6 +98,8 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
   const tokens = new Map();     // access_token -> { email, exp }
   const refreshes = new Map();  // refresh_token -> email
   let failMode = false;
+  const initialSchema = schema === '2.0' ? '2.0' : '2.1';
+  let schemaVersion = initialSchema;
 
   let db;
   let eventSeq;
@@ -80,8 +108,65 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
     db = { devices: [], sessions: [], events: [], feedback: [], app_config: defaultConfigRows() };
     eventSeq = 0;
     feedbackSeq = 0;
+    schemaVersion = initialSchema;
   }
   reset();
+
+  /** Deterministic demo data spread over the last 30 days (for screenshots / manual checks of the dashboard). */
+  function seed({ devices: nDev = 40 } = {}) {
+    const rnd = demoRng(2100 + nDev);
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const now = Date.now();
+    const DAY = 86400000;
+    const iso = (t) => new Date(t).toISOString();
+    const nations = ['isr', 'isr', 'isr', 'eng', 'esp', 'bra', 'arg', 'fra'];
+    const positions = ['ST', 'ST', 'CAM', 'LW', 'RW', 'CM', 'CB', 'GK'];
+    const clubs = ['isr_mta', 'isr_mhaifa', 'isr_hbs', 'isr_hta', 'isr_beitar'];
+    const leagues = ['isr1', 'isr1', 'isr2', 'eng1', 'esp1', 'ita1', 'ger1', 'fra1', 'por1', 'ned1', 'tur1', 'ksa1'];
+    const tiers = ['national', 'elite', 'top', 'lower', 'lower', 'assistant', 'assistant', 'youth'];
+    const platforms = ['android', 'android', 'ios', 'ios', 'desktop'];
+    const msgs = ['משחק מעולה! הייתי רוצה עוד ליגות', 'הקריירה כמאמן ממכרת', 'יש באג בחנות אחרי פרישה', 'הפתיחה מדהימה', 'קצת איטי בטלפון ישן', null];
+    const push = (dev, sid, name, props, t) => db.events.push({ id: ++eventSeq, device_id: dev, session_id: sid, name, props, client_ts: iso(t), created_at: iso(t) });
+    for (let i = 0; i < nDev; i++) {
+      const id = 'demo-dev-' + String(i).padStart(4, '0');
+      const first = now - Math.floor(rnd() * 29 * DAY) - 3600000;
+      const last = Math.min(now - 30000, first + Math.floor(rnd() * 6 * DAY));
+      const installed = rnd() < 0.3 ? iso(first + 3600000) : null;
+      db.devices.push({ id, first_seen: iso(first), last_seen: iso(last), platform: pick(platforms), standalone: !!installed,
+        app_version: rnd() < 0.7 ? '2.1.0' : '2.0.0', installed_at: installed, rate_window: iso(last), rate_count: 0, feedback_day: null, feedback_count: 0 });
+      const sid = 'demo-ses-' + String(i).padStart(4, '0');
+      db.sessions.push({ id: sid, device_id: id, started_at: iso(last - Math.floor(rnd() * 1800000)), last_seen: iso(i < 3 ? now - 20000 : last), heartbeats: 5, app_version: '2.1.0', standalone: !!installed });
+      const gender = rnd() < 0.62 ? 'm' : 'f';
+      let t = first + 60000;
+      push(id, sid, 'app_open', { standalone: !!installed, v: '2.1.0', ref: 'browser' }, t);
+      push(id, sid, 'intro', { done: rnd() < 0.58 }, t + 9000);
+      push(id, sid, 'career_started', { gender, nation: pick(nations), position: pick(positions), club: pick(clubs), league: 'isr1' }, t + 20000);
+      const matches = 5 + Math.floor(rnd() * 40);
+      for (let k = 0; k < matches; k++) { t += 60000; push(id, sid, 'match_played', { kind: 'league', result: pick(['W', 'D', 'L']) }, t); }
+      push(id, sid, 'goal', { mega: false, n: 1 + Math.floor(rnd() * 30) }, t + 1000);
+      if (rnd() < 0.7) push(id, sid, 'goal', { mega: true, n: 1 + Math.floor(rnd() * 4) }, t + 2000);
+      if (rnd() < 0.45) {
+        const league = pick(leagues);
+        const top5 = TOP5.includes(league) || rnd() < 0.15;
+        const tier = TOP5.includes(league) ? 'top5' : league.endsWith('2') ? 'tier2' : ['ksa1'].includes(league) ? 'tier1' : 'europe';
+        push(id, sid, 'retired', { age: 33 + Math.floor(rnd() * 6), seasons: 15 + Math.floor(rnd() * 8), legacy: Math.round(rnd() * 600), league, tier, top5, gender, reason: 'age' }, t + 5000);
+        if (rnd() < 0.75) {
+          push(id, sid, 'manager_started', { tier: pick(tiers), gender, first: true }, t + 8000);
+          if (rnd() < 0.4) { push(id, sid, 'manager_sacked', { gender }, t + 9000); push(id, sid, 'manager_started', { tier: pick(tiers), gender, first: false }, t + 10000); }
+          if (rnd() < 0.3) push(id, sid, 'manager_trophy', { key: 'league' }, t + 11000);
+        }
+      }
+    }
+    for (let j = 0; j < Math.max(4, Math.round(nDev / 4)); j++) {
+      const dev = db.devices[j % db.devices.length];
+      const rating = [5, 5, 4, 5, 3, 4, 2, 5, 1, 4][j % 10];
+      const msg = msgs[j % msgs.length];
+      db.feedback.push({ id: ++feedbackSeq, device_id: dev.id, rating, message: msg, email: j % 3 === 0 ? 'player' + j + '@example.com' : null,
+        context: { v: '2.1.0', seasons: 1 + (j % 12), trigger: j % 2 ? 'season1' : 'retired', platform: dev.platform },
+        app_version: '2.1.0', is_read: j % 4 === 3, created_at: iso(now - j * 7200000 - 60000) });
+    }
+    return { ok: true, devices: db.devices.length, events: db.events.length, feedback: db.feedback.length };
+  }
 
   const findDevice = (id) => db.devices.find((d) => d.id === id);
   function upsertDevice(id, meta) {
@@ -325,8 +410,134 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
       else db.app_config.push({ key: p_key, value: p_value, updated_at: at, updated_by: user.email });
       return { ok: true, key: p_key, updated_at: at };
     },
+
+    // ---------- supabase/update-2.1.sql ----------
+    admin_stats_v2(args) {
+      const days = Math.min(Math.max(Number.isFinite(Number(args.p_days)) ? Math.trunc(Number(args.p_days)) : 30, 1), 365);
+      const tz = typeof args.p_tz === 'string' && args.p_tz ? args.p_tz : 'Asia/Jerusalem';
+      const now = Date.now();
+      const DAY = 86400000;
+      const wk = (e) => Date.parse(e.created_at) > now - 7 * DAY;
+      const today = dayIn(tz, new Date(now));
+      const ev = (name) => db.events.filter((e) => e.name === name);
+      const g = (e) => (e.props && e.props.gender) || '';
+      const str = (v) => (v === null || v === undefined || v === '' ? '?' : String(v));
+      const tops = (list, keyFn, limit = 12) => topBy(list, (e) => str(keyFn(e)), limit);
+
+      const careers = ev('career_started');
+      const perDay = new Map();
+      for (const e of careers) {
+        if (Date.parse(e.created_at) < now - (days + 1) * DAY) continue;
+        const k = dayIn(tz, new Date(e.created_at));
+        if (!perDay.has(k)) perDay.set(k, { m: 0, f: 0 });
+        if (g(e) === 'm') perDay.get(k).m++;
+        else if (g(e) === 'f') perDay.get(k).f++;
+      }
+      const careersPerDay = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const day = new Date(new Date(today + 'T12:00:00Z').getTime() - i * DAY).toISOString().slice(0, 10);
+        const c = perDay.get(day) || { m: 0, f: 0 };
+        careersPerDay.push({ day, m: c.m, f: c.f });
+      }
+
+      const mgrJobs = ev('manager_started');
+      const mgr = mgrJobs.filter((e) => !(e.props && e.props.first === false));   // first job of each coaching career
+      const intro = ev('intro');
+      const done = (e) => e.props && e.props.done === true;
+      const skipped = (e) => e.props && e.props.done === false;
+      const goals = ev('goal');
+      const isMega = (e) => e.props && e.props.mega === true;
+      const sumN = (arr) => arr.reduce((a, e) => a + eventN(e.props), 0);
+      const ret = ev('retired');
+      const legacies = ret.map((e) => e.props && e.props.legacy).filter((v) => typeof v === 'number' && Number.isFinite(v));
+
+      return {
+        schema: '2.1',
+        generated_at: new Date(now).toISOString(),
+        days,
+        careers_by_gender: {
+          m: careers.filter((e) => g(e) === 'm').length,
+          f: careers.filter((e) => g(e) === 'f').length,
+          unknown: careers.filter((e) => g(e) !== 'm' && g(e) !== 'f').length,
+          m_7d: careers.filter((e) => g(e) === 'm' && wk(e)).length,
+          f_7d: careers.filter((e) => g(e) === 'f' && wk(e)).length,
+        },
+        careers_per_day: careersPerDay,
+        manager: {
+          started: mgr.length,
+          started_7d: mgr.filter(wk).length,
+          jobs: mgrJobs.length,
+          sacked: ev('manager_sacked').length,
+          trophies: ev('manager_trophy').length,
+          retired: ev('manager_retired').length,
+          by_gender: { m: mgr.filter((e) => g(e) === 'm').length, f: mgr.filter((e) => g(e) === 'f').length },
+          by_tier: tops(mgr, (e) => e.props && e.props.tier),
+        },
+        intro: {
+          done: intro.filter(done).length,
+          skipped: intro.filter(skipped).length,
+          done_7d: intro.filter((e) => done(e) && wk(e)).length,
+          skipped_7d: intro.filter((e) => skipped(e) && wk(e)).length,
+        },
+        goals: {
+          total: sumN(goals),
+          mega: sumN(goals.filter(isMega)),
+          total_7d: sumN(goals.filter(wk)),
+          mega_7d: sumN(goals.filter((e) => isMega(e) && wk(e))),
+        },
+        retired: {
+          total: ret.length,
+          by_gender: { m: ret.filter((e) => g(e) === 'm').length, f: ret.filter((e) => g(e) === 'f').length },
+          top5: ret.filter((e) => e.props && (TOP5.includes(String(e.props.league)) || e.props.top5 === true)).length,
+          final_top5: ret.filter((e) => e.props && TOP5.includes(String(e.props.league))).length,
+          avg_legacy: legacies.length ? Math.round((legacies.reduce((a, b) => a + b, 0) / legacies.length) * 10) / 10 : 0,
+          by_league: tops(ret, (e) => e.props && e.props.league),
+          by_tier: tops(ret, (e) => e.props && e.props.tier),
+        },
+      };
+    },
+
+    admin_feedback_v2(args) {
+      const limit = Math.min(Math.max(Number.isFinite(Number(args.p_limit)) ? Math.trunc(Number(args.p_limit)) : 50, 1), 200);
+      const offset = Math.max(Number.isFinite(Number(args.p_offset)) ? Math.trunc(Number(args.p_offset)) : 0, 0);
+      const unreadOnly = args.p_unread_only === true;
+      const r = Number(args.p_rating);
+      const rating = Number.isInteger(r) && r >= 1 && r <= 5 ? r : null;
+      const base = db.feedback.filter((f) => !unreadOnly || !f.is_read);
+      const list = base
+        .filter((f) => rating === null || f.rating === rating)
+        .sort((a, b) => (Date.parse(b.created_at) - Date.parse(a.created_at)) || (b.id - a.id));
+      const byRating = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      for (const f of base) byRating[f.rating] = (byRating[f.rating] || 0) + 1;
+      return {
+        total: list.length,
+        unread: db.feedback.filter((f) => !f.is_read).length,
+        all: db.feedback.length,
+        by_rating: { '1': byRating[1], '2': byRating[2], '3': byRating[3], '4': byRating[4], '5': byRating[5] },
+        rows: list.slice(offset, offset + limit).map((f) => ({
+          id: f.id, created_at: f.created_at, rating: f.rating, message: f.message, email: f.email,
+          context: f.context, app_version: f.app_version, is_read: f.is_read, device_id: f.device_id,
+        })),
+      };
+    },
+
+    admin_delete_feedback(args) {
+      const id = Number(args.p_id);
+      const before = db.feedback.length;
+      db.feedback = db.feedback.filter((f) => f.id !== id);
+      return { ok: true, deleted: before - db.feedback.length };
+    },
+
+    admin_reset_stats(args) {
+      if (args.p_confirm !== 'RESET') return { ok: false, error: 'bad_confirm' };
+      const deleted = { devices: db.devices.length, sessions: db.sessions.length, events: db.events.length, feedback: db.feedback.length };
+      db.devices = []; db.sessions = []; db.events = []; db.feedback = [];
+      eventSeq = 0; feedbackSeq = 0;   // restart identity
+      return { ok: true, at: new Date().toISOString(), deleted };
+    },
   };
-  const ADMIN_RPCS = new Set(['admin_stats', 'admin_feedback', 'admin_mark_read', 'admin_get_config', 'admin_set_config']);
+  const ADMIN_RPCS = new Set(['admin_stats', 'admin_feedback', 'admin_mark_read', 'admin_get_config', 'admin_set_config',
+    'admin_stats_v2', 'admin_feedback_v2', 'admin_delete_feedback', 'admin_reset_stats']);
   const AUTH_RPCS = new Set(['admin_whoami']);
 
   // ---------- HTTP ----------
@@ -373,6 +584,16 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
       const b = await readBody(req).catch(() => ({}));
       failMode = b.on !== false;
       return send(res, 200, { ok: true, fail: failMode });
+    }
+    if (path === '/__mock/schema' && req.method === 'POST') {
+      const b = await readBody(req).catch(() => ({}));
+      schemaVersion = b.v === '2.0' ? '2.0' : '2.1';
+      return send(res, 200, { ok: true, schema: schemaVersion });
+    }
+    if (path === '/__mock/seed' && req.method === 'POST') {
+      const b = await readBody(req).catch(() => ({}));
+      const n = Math.min(Math.max(Number.isFinite(Number(b.devices)) ? Math.trunc(Number(b.devices)) : 40, 1), 2000);
+      return send(res, 200, seed({ devices: n }));
     }
     if (path === '/' || path === '/__mock') return send(res, 200, { ok: true, name: 'mock-supabase' });
 
@@ -428,10 +649,10 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
     }
 
     // ---- PostgREST: RPC ----
-    const m = /^\/rest\/v1\/rpc\/([a-z_]+)$/.exec(path);
+    const m = /^\/rest\/v1\/rpc\/([a-z0-9_]+)$/.exec(path);
     if (m && req.method === 'POST') {
       const name = m[1];
-      const fn = rpcs[name];
+      const fn = schemaVersion === '2.0' && V21_RPCS.has(name) ? null : rpcs[name];
       if (!fn) return send(res, 404, { code: 'PGRST202', message: 'Could not find the function public.' + name + ' in the schema cache' });
       let args;
       try { args = await readBody(req); } catch { return send(res, 400, { code: 'PGRST102', message: 'Empty or invalid json' }); }
@@ -453,11 +674,12 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234' } = {})
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => { try { send(res, 500, { code: 'XX000', message: String((e && e.message) || e) }); } catch { /* ignore */ } });
   });
-  return { server, reset, get db() { return db; } };
+  return { server, reset, seed, setSchema(v) { schemaVersion = v === "2.0" ? "2.0" : "2.1"; }, get db() { return db; } };
 }
 
-export function startMockSupabase({ port = 54321, admin } = {}) {
-  const mock = createMockSupabase({ admin });
+export function startMockSupabase({ port = 54321, admin, schema, seed = false } = {}) {
+  const mock = createMockSupabase({ admin, schema });
+  if (seed) mock.seed();
   return new Promise((resolve, reject) => {
     mock.server.once('error', reject);
     mock.server.listen(port, () => {
@@ -475,9 +697,13 @@ if (isMain) {
   const argv = process.argv.slice(2);
   let port = 54321;
   let admin = 'admin@test.local:test1234';
+  let schema = '2.1';
+  let seed = false;
   for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--legacy') { schema = '2.0'; continue; }
+    if (argv[i] === '--seed') { seed = true; continue; }
     if (argv[i] === '--admin' && argv[i + 1]) { admin = argv[++i]; continue; }
     if (/^\d+$/.test(argv[i])) port = Number(argv[i]);
   }
-  startMockSupabase({ port, admin }).catch((e) => { console.error('mock-supabase failed to start:', e.message); process.exit(1); });
+  startMockSupabase({ port, admin, schema, seed }).catch((e) => { console.error('mock-supabase failed to start:', e.message); process.exit(1); });
 }

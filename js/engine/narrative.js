@@ -4,7 +4,7 @@ import { PERSONAS } from '../data/strings.js';
 import { PARTNER_NAMES, PARTNER_NAMES_M } from '../data/names.js';
 import { LEAGUE_BY_ID } from '../data/leagues.js';
 import { rngFor } from '../core/rng.js';
-import { clamp, fill, fmtMoney, fmtSeason, round1, gtext, femLabel, econMoney, isF } from './util.js';
+import { clamp, fill, fmtMoney, fmtSeason, round1, gtext, femLabel, econMoney, isF, sgnHe } from './util.js';
 import { nextId, curAw } from './state.js';
 import { clubData, clubLeague, clubCountry, nameFor, nameForG, country, leagueMembers, cs, lgNameHe, lgYouthHe } from './world.js';
 import { ovrOf, ageOf, formAvg, valueOf, ALL_ATTRS } from './player.js';
@@ -90,7 +90,9 @@ function scrub(t) { return gtext(t).replace(/\{[a-z0-9]+\}/gi, ''); }
 // Money effects of events scale with the career economy (C3).
 export function effMoney(S, c) { return c && c.effects && typeof c.effects.money === 'number' ? econMoney(S, c.effects.money) : 0; }
 function cantAfford(S, c) { const m = effMoney(S, c); return m < 0 && S.player.money < -m; }
-function render(t, v) { return scrub(fill(t, v)); }
+// R3: money in event texts is written as {eur:N} (euros, men's scale) and shown in shekels at the career economy.
+export function eurText(S, t) { return typeof t === 'string' && t.indexOf('{eur:') >= 0 ? t.replace(/\{eur:(\d+)\}/g, (m, d) => fmtMoney(econMoney(S, Number(d)))) : t; }
+function render(t, v, S) { return scrub(fill(S ? eurText(S, t) : t, v)); }
 
 function condOk(S, rng, c, ctx) {
   if (!c) return true;
@@ -173,9 +175,9 @@ export function fireEvent(S, rng, e, ctx) {
   const aw = curAw(S);
   if (e.who === 'coach' && S.player.club) coachName(S, S.player.club, true);
   const v = placeholderVars(S, { opp: ctx && ctx.opp, k: rng.int(0, 4) });
-  const lines = (e.messages || []).map((m) => (typeof m === 'string' ? { who: e.who, t: render(m, v) } : { who: m.who || e.who, t: render(m.t || '', v) }));
+  const lines = (e.messages || []).map((m) => (typeof m === 'string' ? { who: e.who, t: render(m, v, S) } : { who: m.who || e.who, t: render(m.t || '', v, S) }));
   const ch = e.choices || [];
-  const choices = ch.length ? ch.map((c) => ({ label: render(c.label || '', v), disabled: cantAfford(S, c) })) : null;
+  const choices = ch.length ? ch.map((c) => ({ label: render(c.label || '', v, S), disabled: cantAfford(S, c) })) : null;
   const it = { id: nextId(S, 'inbox'), aw, from: e.who, ev: e.id, lines, choices, ans: null, exp: choices ? aw + 2 : null, imp: !!(e.trigger && ch.length > 0), read: false };
   S.ev.cd[e.id] = aw;
   if (e.once && S.ev.once.indexOf(e.id) < 0) S.ev.once.push(e.id);
@@ -219,7 +221,7 @@ export function runWeekEvents(S, rng, ctx, onlyTriggers) {
 }
 
 const EFF_HE = { morale: 'מורל', energy: 'אנרגיה', trust: 'אמון המאמן', fans: 'אהדת הקהל', mates: 'יחסים בחדר ההלבשה' };
-function sgn(n) { return (n > 0 ? '+' : '') + n; }
+function sgn(n) { return sgnHe(n); }
 
 export function applyEffects(S, eff) {
   const p = S.player;
@@ -240,7 +242,7 @@ export function applyEffects(S, eff) {
   if (typeof eff.money === 'number' && eff.money !== 0) {
     const m = econMoney(S, eff.money);
     p.money = Math.max(0, Math.round(p.money + m));
-    out.push((m > 0 ? '+' : '-') + fmtMoney(Math.abs(m)));
+    out.push(sgnHe(m, (m > 0 ? '' : '-') + fmtMoney(Math.abs(m))));
   }
   if (typeof eff.form === 'number') {
     p.form.push(round1(clamp(eff.form, 3, 10)));
@@ -285,9 +287,9 @@ export function answerItem(S, rng, item, idx, auto) {
   }
   const v = placeholderVars(S, { k: 0 });
   item.ans = idx;
-  if (c.reply) item.lines.push({ who: 'me', t: render(c.reply, v) });
+  if (c.reply) item.lines.push({ who: 'me', t: render(c.reply, v, S) });
   const eff = applyEffects(S, c.effects || {});
-  if (c.followUp) item.lines.push({ who: e.who, t: render(c.followUp, v) });
+  if (c.followUp) item.lines.push({ who: e.who, t: render(c.followUp, v, S) });
   item.read = true;
   return { ok: true, effectsHe: eff };
 }

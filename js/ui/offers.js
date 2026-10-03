@@ -6,10 +6,11 @@ import { navigate } from './router.js';
 import { badge, contractCard, card, empty } from './components.js';
 import { money } from './format.js';
 import { gtext } from './gender.js';
+import { ico } from './icons.js';
 
 const ROLE_ORDER = ['prospect', 'squad', 'rotation', 'key', 'star'];
 const ROLE_HE = { star: '{{כוכב|כוכבת}} הקבוצה', key: '{{שחקן|שחקנית}} מפתח', rotation: 'רוטציה', squad: '{{שחקן|שחקנית}} סגל', prospect: 'כישרון צעיר' };
-const TYPE_ICO = { transfer: '✈️', loan: '🔁', free: '🆓', precontract: '📝', renewal: '✍️', pro: '⭐' };
+const TYPE_ICO = { transfer: 'plane', loan: 'swap', free: 'briefcase', precontract: 'doc', renewal: 'pen', pro: 'star' };
 
 export function render(root) {
   function draw() {
@@ -20,7 +21,7 @@ export function render(root) {
     const closed = offers.filter((o) => o.status !== 'open');
     root.innerHTML = `<div class="offers">
       ${card(contractCard(contract), { title: 'החוזה הנוכחי' })}
-      ${hub && hub.windowOpen ? '<p class="note good">🔁 חלון ההעברות פתוח</p>' : `<p class="muted small">${esc(gtext('הצעות מגיעות בעיקר בחלונות ההעברות (קיץ וינואר), או בכל שבוע {{כשאתה שחקן חופשי|כשאת שחקנית חופשייה}}.'))}</p>`}
+      ${hub && hub.windowOpen ? '<p class="note good">' + ico('swap') + ' חלון ההעברות פתוח</p>' : `<p class="muted small">${esc(gtext('הצעות מגיעות בעיקר בחלונות ההעברות (קיץ וינואר), או בכל שבוע {{כשאתה שחקן חופשי|כשאת שחקנית חופשייה}}.'))}</p>`}
       <h2 class="section-title">הצעות פתוחות</h2>
       ${open.length ? open.map(offerCard).join('') : empty('אין הצעות פתוחות כרגע. הסוכן עובד על זה...', '📨')}
       ${closed.length ? `<h2 class="section-title">הצעות קודמות</h2>${closed.map(offerCard).join('')}` : ''}
@@ -36,7 +37,7 @@ export function render(root) {
     if (!o) return;
     if (b.dataset.act === 'accept') {
       if (!o.canAccept) { toast('סיים קודם את השבוע'); return; }
-      const ok = await confirmDialog({ title: 'לחתום?', text: `${o.typeHe} · ${o.club.nameHe} · ${money(o.wage)} לשבוע ל-${o.years} שנים`, yes: 'חותמים! ✍️' });
+      const ok = await confirmDialog({ title: 'לחתום?', text: `${o.typeHe} · ${o.club.nameHe} · ${money(o.wage)} לשבוע ל-${o.years} שנים`, yes: 'חותמים!' });
       if (!ok) return;
       const r = call(() => game.respondOffer(id, 'accept'));
       if (r) toast(r.messageHe || (r.ok ? 'סגרנו!' : 'לא הסתדר'), { ms: 4500 });
@@ -59,7 +60,7 @@ function offerCard(o) {
   return `<section class="card offer${isOpen ? '' : ' closed'}" data-testid="offer-${esc(o.id)}">
     <div class="row">${badge(c)}<div class="grow"><b>${esc(c.nameHe || '')}</b>
       <small class="muted">${esc(c.flag || '')} ${esc(c.leagueHe || '')}${c.countryHe ? ' · ' + esc(c.countryHe) : ''}${c.strength ? ' · כוח ' + esc(Math.round(c.strength)) : ''}</small></div>
-      <span class="chip type-${esc(o.type)}">${esc(TYPE_ICO[o.type] || '')} ${esc(o.typeHe || '')}</span></div>
+      <span class="chip type-${esc(o.type)}">${TYPE_ICO[o.type] ? ico(TYPE_ICO[o.type]) : ''} ${esc(o.typeHe || '')}</span></div>
     <div class="offer-terms">
       ${o.fee ? `<div><small>דמי העברה</small><b class="num">${esc(money(o.fee))}</b></div>` : ''}
       <div><small>שכר לשבוע</small><b class="num">${esc(money(o.wage))}</b></div>

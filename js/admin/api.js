@@ -119,3 +119,75 @@ export function getConfig() {
 export function setConfig(key, value) {
   return call('admin_set_config', { p_key: key, p_value: value });
 }
+
+// ---------- v2.1 (supabase/update-2.1.sql) ----------
+// Every v2.1 call reports whether the update is installed: a missing function answers 404 / PGRST202.
+let v21 = null;   // null = unknown, true = update-2.1.sql installed, false = not yet
+
+/** True when the error means "this RPC does not exist on the server" (update-2.1.sql not run yet). */
+export function isMissingFunction(e) {
+  return e instanceof SupaError && (e.status === 404 || e.code === 'PGRST202');
+}
+
+/** Last known state of the 2.1 server update: null (unknown) | true | false. */
+export function v21Status() {
+  return v21;
+}
+
+async function callV21(name, args) {
+  try {
+    const r = await call(name, args);
+    v21 = true;
+    return r;
+  } catch (e) {
+    if (isMissingFunction(e)) v21 = false;
+    throw e;
+  }
+}
+
+/** -> stats object, or null when update-2.1.sql is not installed (other errors are thrown). */
+export async function getStatsV2(days = 30) {
+  try {
+    return await callV21('admin_stats_v2', { p_days: days, p_tz: 'Asia/Jerusalem' });
+  } catch (e) {
+    if (isMissingFunction(e)) return null;
+    throw e;
+  }
+}
+
+/** Ask the server whether the 2.1 functions exist (re-checked on every call: the owner may run the SQL any time). */
+export async function probeV21() {
+  try { await getStatsV2(1); } catch { /* unknown stays null on network errors */ }
+  return v21;
+}
+
+/** Feedback page. rating 1..5 filters exactly (v2.1 only; falls back to the 2.0 RPC when missing). */
+export async function getFeedbackV2({ limit = 50, offset = 0, unreadOnly = false, rating = null } = {}) {
+  try {
+    return await callV21('admin_feedback_v2', { p_limit: limit, p_offset: offset, p_unread_only: !!unreadOnly, p_rating: rating || null });
+  } catch (e) {
+    if (!isMissingFunction(e)) throw e;
+  }
+  return getFeedback({ limit, offset, unreadOnly });
+}
+
+export function deleteFeedback(id) {
+  return callV21('admin_delete_feedback', { p_id: Number(id) });
+}
+
+/** Wipes devices / sessions / events / feedback on the server. confirm must be exactly 'RESET'. */
+export function resetStats(confirm) {
+  return callV21('admin_reset_stats', { p_confirm: String(confirm || '') });
+}
+
+/** All feedback rows for the CSV export (pages of 200, capped at 10,000 rows). */
+export async function fetchAllFeedback({ unreadOnly = false, rating = null } = {}) {
+  const out = [];
+  for (let offset = 0; offset < 10000; offset += 200) {
+    const res = await getFeedbackV2({ limit: 200, offset, unreadOnly, rating });
+    const rows = res && Array.isArray(res.rows) ? res.rows : [];
+    out.push(...rows);
+    if (rows.length < 200) break;
+  }
+  return out;
+}

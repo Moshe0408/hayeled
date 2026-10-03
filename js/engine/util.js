@@ -103,26 +103,26 @@ function thousands(n) {
   }
   return out;
 }
-function trimDec(x, d) {
-  const s = x.toFixed(d);
-  return s.indexOf('.') >= 0 ? s.replace(/\.?0+$/, '') : s;
-}
-export function fmtMoney(n) {
-  n = Number(n) || 0;
-  const neg = n < 0;
-  const a = Math.abs(n);
+/** Signed amount for Hebrew (RTL) text, LTR-isolated (U+2066 ... U+2069) so it reads '+3' and not '3+'. */
+export function sgnHe(n, s) { return '\u2066' + (n > 0 ? '+' : '') + (s === undefined ? String(n) : s) + '\u2069'; }
+// R3: all money is stored in euros and shown in Israeli shekels at one fixed rate (the UI formatter reads EUR_ILS).
+export const EUR_ILS = 3.9;
+function oneDec(x) { const s = (Math.round(x * 10) / 10).toFixed(1); return s.endsWith('.0') ? s.slice(0, -2) : s; }
+/** Shekel amount (already converted) -> '₪850', '₪25,000', '₪850 אלף', '₪4.2 מיליון', '₪1.3 מיליארד'. */
+export function fmtShekels(ils) {
+  ils = Number(ils) || 0;
+  const neg = ils < 0;
+  const raw = Math.abs(ils);
+  const a = raw < 1000 ? Math.round(raw) : raw < 10000 ? Math.round(raw / 10) * 10 : Math.round(raw / 100) * 100;
   let s;
-  if (a < 10000) s = '€' + thousands(a);
-  else if (a < 1e6) {
-    const k = a / 1000;
-    s = '€' + (k < 100 ? trimDec(Math.round(k * 10) / 10, 1) : String(Math.round(k))) + 'K';
-    if (Math.round(k) >= 1000) s = '€1M';
-  } else {
-    const m = a / 1e6;
-    s = '€' + (m < 10 ? trimDec(Math.round(m * 10) / 10, 1) : String(Math.round(m))) + 'M';
-  }
+  if (a < 100000) s = '₪' + thousands(a);
+  else if (a < 999500) s = '₪' + Math.round(a / 1000) + ' אלף';
+  else if (a < 1e9) { const m = a / 1e6; s = '₪' + (m < 100 ? oneDec(m) : String(Math.round(m))) + ' מיליון'; }
+  else s = '₪' + oneDec(a / 1e9) + ' מיליארד';
   return neg ? '-' + s : s;
 }
+/** Engine money (euros) -> shekel label: 6410 -> '₪25,000', 1.08M -> '₪4.2 מיליון'. */
+export function fmtMoney(n) { return fmtShekels((Number(n) || 0) * EUR_ILS); }
 export function fmtSeason(season) {
   const y = Number(season) || 0;
   return y + '/' + String((y + 1) % 100).padStart(2, '0');

@@ -13,8 +13,9 @@
 //            (instanced fans, flashing phone lights, waving flags, red flare smoke), floodlight lens flares.
 //   5.6-8.0  the logo (icons/logo.svg) slams in with a 3D tilt, light sweep and particles, the tagline types
 //            in, then the overlay fades into the title screen.
-// Plays on the first launch and once per browser session ('hy.intro.seen' / 'hy.intro.session');
-// tests set localStorage 'hy.intro.skip' = '1'. Skippable (button "דלג ›", tap after 0.5 s, Esc).
+// Plays on EVERY app open (each page load / PWA launch, v2.1); 'hy.intro.seen' / 'hy.intro.session' are still
+// written for telemetry/debugging. Tests set localStorage 'hy.intro.skip' = '1'. playIntro resolves { done }:
+// done=true when it played to the end, false when it was skipped. Skippable (button "דלג ›", tap after 0.5 s, Esc).
 // prefers-reduced-motion -> a 1.5 s logo reveal instead. Sound only if 'hy.sound' === '1' and the browser
 // lets an AudioContext run (i.e. after a user gesture).
 // Debug (preview page / frame capture): while an intro is mounted, window.__introDebug =
@@ -1377,8 +1378,8 @@ const CSS = `
 .hy-intro-skip{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;z-index:4;font:700 14px/1 Heebo,system-ui,sans-serif;color:#EEF4FF;background:rgba(8,21,48,.55);border:1px solid rgba(255,231,163,.38);border-radius:999px;padding:10px 16px;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);cursor:pointer;letter-spacing:.02em;opacity:0;transition:opacity .4s ease}
 .hy-intro-skip.on{opacity:1}
 .hy-intro-skip:focus-visible{outline:2px solid #F4C35A;outline-offset:2px}
-.hy-intro-cap{position:absolute;right:0;left:0;z-index:2;text-align:center;color:rgba(238,244,255,.86);font:500 13px/1.3 Heebo,system-ui,sans-serif;letter-spacing:.16em;opacity:0;pointer-events:none;direction:rtl}
-.hy-intro-cap b{display:block;font:700 10px/1.6 Rubik,Heebo,system-ui,sans-serif;letter-spacing:.24em;color:rgba(244,195,90,.9)}
+.hy-intro-cap{position:absolute;right:0;left:0;z-index:2;text-align:center;color:rgba(238,244,255,.86);font:500 14px/1.3 Heebo,system-ui,sans-serif;letter-spacing:0;opacity:0;pointer-events:none;direction:rtl}
+.hy-intro-cap b{display:block;font:700 12px/1.6 Rubik,Heebo,system-ui,sans-serif;letter-spacing:0;color:rgba(244,195,90,.9)}
 .hy-intro-logo{position:absolute;left:50%;top:46%;z-index:3;pointer-events:none;opacity:0;will-change:transform,opacity;transform-style:preserve-3d}
 .hy-intro-logo .lg{position:absolute;inset:0}
 .hy-intro-logo img{position:absolute;inset:0;width:100%;height:100%;clip-path:inset(0 0 15% 0);-webkit-clip-path:inset(0 0 15% 0)}
@@ -1412,7 +1413,7 @@ function buildDOM(root) {
   rib.appendChild(box);
   const s2 = document.createElement('i'); s2.textContent = '★'; rib.appendChild(s2);
   const lg = document.createElement('div'); lg.className = 'lg'; lg.append(lgc, rib); logo.append(lg);
-  const skip = document.createElement('button'); skip.type = 'button'; skip.className = 'hy-intro-skip'; skip.dataset.testid = 'btn-intro-skip'; skip.textContent = 'דלג ›'; skip.setAttribute('aria-label', 'דלג על הפתיח');
+  const skip = document.createElement('button'); skip.type = 'button'; skip.className = 'hy-intro-skip'; skip.dataset.testid = 'btn-intro-skip'; skip.innerHTML = 'דלג<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true" style="margin-inline-start:6px;vertical-align:-1px"><path d="M7.6 2.2 3.8 6l3.8 3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'; skip.setAttribute('aria-label', 'דלג על הפתיח');
   root.append(cap, logo, skip);
   const D = { cap, logo, img, lgc, rib, chars, stars: [s1, s2], skip, ready: false, base: null, sweep: -1 };
   const ready = () => { D.ready = true; D.base = null; };
@@ -1482,26 +1483,26 @@ function updateDOM(S, t) {
 let active = null;
 function flag(store, key, val) { try { if (val === undefined) return store.getItem(key); store.setItem(key, val); } catch { /* storage blocked */ } return null; }
 
-/** True if the intro would auto-play now (first launch / first time in this browser session, not disabled by tests). */
+/** True if the intro would auto-play now: on every app open, unless disabled by tests ('hy.intro.skip'). */
 export function introWanted() {
   if (flag(localStorage, 'hy.intro.skip') === '1') return false;
-  if (flag(sessionStorage, 'hy.intro.session')) return false;
   return true;
 }
 export function isIntroPlaying() { return !!active; }
 
 /**
  * Play the opening cinematic. Resolves when it has finished or was skipped (never rejects).
- * opts.force: play even if already seen this session. opts.gender: 'm' | 'f' (hair of the kid).
+ * Resolves { done: boolean } (true = watched to the end, false = skipped / failed); never rejects.
+ * opts.force: play even when disabled by the test flag. opts.gender: 'm' | 'f' (hair of the kid).
  * opts.debug: start paused at t=0 and keep the overlay until finish() (frame capture).
  */
 export function playIntro(opts = {}) {
   const { force = false, debug = false } = opts;
   if (active) return active.promise;
-  if (!force && !introWanted()) return Promise.resolve();
+  if (!force && !introWanted()) return Promise.resolve({ done: false, skipped: true, off: true });
   if (!debug) { flag(localStorage, 'hy.intro.seen', '1'); flag(sessionStorage, 'hy.intro.session', '1'); }
   let resolve; const promise = new Promise((r) => { resolve = r; });
-  try { start(opts, resolve); } catch (e) { console.warn('[intro] failed, skipping', e); cleanupDOM(); active = null; resolve(); }
+  try { start(opts, resolve); } catch (e) { console.warn('[intro] failed, skipping', e); cleanupDOM(); active = null; resolve({ done: false, skipped: false, failed: true }); }
   if (active) active.promise = promise;
   return promise;
 }
@@ -1511,21 +1512,22 @@ function cleanupDOM() { document.querySelectorAll('.hy-intro').forEach((n) => n.
 function reducedMotion() { try { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } }
 
 function start(opts, resolve) {
-  if (typeof document === 'undefined' || !document.body) { resolve(); return; }
+  if (typeof document === 'undefined' || !document.body) { resolve({ done: false, skipped: false, failed: true }); return; }
   injectCSS();
   const root = document.createElement('div'); root.className = 'hy-intro'; root.dataset.testid = 'intro'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', 'פתיח: הילד מהשכונה');
   const listeners = [];
   const on = (el, ev, fn, o) => { el.addEventListener(ev, fn, o); listeners.push([el, ev, fn, o]); };
   let done = false, raf = 0, timer = 0, statsFn = null;
   const S = { gender: opts.gender === 'f' ? 'f' : 'm', lowQ: false };
-  const finish = (fade) => {
+  // failed=true: the cinematic could not render (resolves done:false, failed:true so it is not counted as watched)
+  const finish = (fade, skipped = fade, failed = false) => {
     if (done) return; done = true;
     cancelAnimationFrame(raf); clearTimeout(timer);
     for (const [el, ev, fn, o] of listeners) el.removeEventListener(ev, fn, o);
     if (S.audio) S.audio.stop();
     try { if (statsFn) window.__introLastStats = statsFn(); } catch { /* ignore */ }
     if (window.__introDebug && window.__introDebug._owner === root) delete window.__introDebug;
-    const end = () => { root.remove(); active = null; resolve(); };
+    const end = () => { root.remove(); active = null; resolve(failed ? { done: false, skipped: false, failed: true } : { done: !skipped, skipped: !!skipped }); };
     if (fade) { root.classList.add('out'); setTimeout(end, 360); } else end();
   };
   active = { finish, promise: null };
@@ -1543,7 +1545,7 @@ function start(opts, resolve) {
 
   const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true');
   const g = canvas.getContext && canvas.getContext('2d', { alpha: false });
-  if (!g || typeof g.createPattern !== 'function' || typeof DOMMatrix === 'undefined') { active = null; resolve(); return; }
+  if (!g || typeof g.createPattern !== 'function' || typeof DOMMatrix === 'undefined') { active = null; resolve({ done: false, skipped: false, failed: true }); return; }
   root.appendChild(canvas);
   S.g = g; S.canvas = canvas; S.dom = buildDOM(root);
   document.body.appendChild(root);
@@ -1577,7 +1579,7 @@ function start(opts, resolve) {
       const k = st.t < 4.2 ? 'hood' : st.t < 5.6 ? 'stadium' : 'logo', pf = st.perf[k] || (st.perf[k] = [0, 0, 0, 0]);
       pf[0] += p1 - p0; pf[1] += p2 - p1; pf[2] += performance.now() - p2; pf[3]++;
       st.drawn++;
-    } catch (e) { console.warn('[intro] render error, skipping', e); finish(false); }
+    } catch (e) { console.warn('[intro] render error, skipping', e); finish(false, false, true); }
   };
   const frame = (now) => {
     if (done) return;
@@ -1587,9 +1589,11 @@ function start(opts, resolve) {
     if (st.playing) {
       st.t += dt; st.dts.push(dt); st.ts.push(st.t);
       // adaptive quality: drop resolution if the device cannot keep up
-      if (st.dts.length === 40 && S.dpr > 1) {
-        const avg = st.dts.slice(10).reduce((a, b) => a + b, 0) / 30;
-        if (avg > 0.024) { S.maxDpr = 1; S.lowQ = true; resize(); }
+      if (st.dts.length >= 40 && st.dts.length % 20 === 0 && (S.dpr > 1 || !S.lowQ)) {
+        const win = st.dts.slice(-30);
+        const avg = win.reduce((a, b) => a + b, 0) / win.length;
+        const long = win.filter((x) => x > 0.034).length;
+        if (avg > 0.0215 || long >= 4) { if (S.dpr > 1) { S.maxDpr = 1; resize(); } S.lowQ = true; }
       }
     }
     // build the stadium a slice per frame while the neighbourhood plays

@@ -8,10 +8,11 @@ import { afterWeekAds } from './adslots.js';
 import { money, rating, signed } from './format.js';
 import { gtext, g } from './gender.js';
 import { celebrate } from './scene/celebration.js';
+import { ico } from './icons.js';
 
 const STOP_HE = {
-  until: '', offer: 'עצרנו: הגיעה הצעה חדשה 📨', event: 'עצרנו: יש הודעה שמחכה לתשובה 💬', review: 'העונה הסתיימה 🏁',
-  retired: 'הקריירה הסתיימה', injury: 'עצרנו: נפצעת 🤕', callup: 'עצרנו: זומנת לנבחרת! 🏳️', chunk: 'עצרת את הקפיצה',
+  until: '', offer: 'עצרנו: הגיעה הצעה חדשה', event: 'עצרנו: יש הודעה שמחכה לתשובה', review: 'העונה הסתיימה',
+  retired: 'הקריירה הסתיימה', injury: 'עצרנו: נפצעת', callup: 'עצרנו: זומנת לנבחרת!', chunk: 'עצרת את הקפיצה',
 };
 
 /**
@@ -34,17 +35,17 @@ export function showWeekSummary(summary, extra = {}) {
     <h2 class="modal-title">${extra.ffWeeks > 1 ? `קפצנו ${esc(extra.ffWeeks)} שבועות` : 'סיכום השבוע'}</h2>
     <div class="muted small">${esc(s.dateHe || '')}</div>
     ${stopLine}
-    ${s.callupHe ? `<p class="note good">🏳️ ${esc(s.callupHe)}</p>` : ''}
-    ${s.injuryHe ? `<p class="note warn">🤕 ${esc(s.injuryHe)}</p>` : ''}
+    ${s.callupHe ? `<p class="note good">${ico('flag', 'teal')} ${esc(s.callupHe)}</p>` : ''}
+    ${s.injuryHe ? `<p class="note warn">${ico('medic', 'bad')} ${esc(s.injuryHe)}</p>` : ''}
     ${results ? `<div class="ws-results">${results}</div>` : '<p class="muted">לא היו משחקים השבוע.</p>'}
     <div class="ws-stats">
-      <div class="ws-stat"><small>OVR</small><b class="num">${esc(s.ovrAfter)}</b>${ovrDelta ? `<span class="delta ${ovrDelta > 0 ? 'up' : 'down'}">${esc(signed(ovrDelta))}</span>` : ''}</div>
+      <div class="ws-stat"><small>דירוג</small><b class="num">${esc(s.ovrAfter)}</b>${ovrDelta ? `<span class="delta ${ovrDelta > 0 ? 'up' : 'down'}">${esc(signed(ovrDelta))}</span>` : ''}</div>
       <div class="ws-stat"><small>אנרגיה</small><b class="num">${esc(Math.round(s.energy))}</b></div>
       <div class="ws-stat"><small>מורל</small><b class="num">${esc(Math.round(s.morale))}</b></div>
     </div>
-    ${s.trainingHe ? `<p class="small">🏋️ ${esc(s.trainingHe)}</p>` : ''}
+    ${s.trainingHe ? `<p class="small">${ico('dumbbell', 'teal')} ${esc(s.trainingHe)}</p>` : ''}
     ${(s.linesHe || []).length ? `<ul class="ws-lines">${s.linesHe.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
-    ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">💬 ${s.newMessages === 1 ? 'הודעה חדשה' : esc(s.newMessages) + ' הודעות חדשות'}</span>` : ''}${s.newOffers ? `<span class="chip gold">📨 ${s.newOffers === 1 ? 'הצעה חדשה' : esc(s.newOffers) + ' הצעות חדשות'}</span>` : ''}</div>` : ''}
+    ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">${ico('chat')} ${s.newMessages === 1 ? 'הודעה חדשה' : esc(s.newMessages) + ' הודעות חדשות'}</span>` : ''}${s.newOffers ? `<span class="chip gold">${ico('mail')} ${s.newOffers === 1 ? 'הצעה חדשה' : esc(s.newOffers) + ' הצעות חדשות'}</span>` : ''}</div>` : ''}
     <button type="button" class="btn btn-primary btn-lg" data-testid="btn-week-ok" data-close>המשך</button>`;
   const close = openModal(html, { testid: 'week-summary', sheet: true, onClose: (why) => { if (why !== 'nav') afterSummary(s); } });
   return close;
@@ -83,8 +84,8 @@ export function render(root) {
       <div>${esc(rv.clubHe || '')}${rv.leagueHe ? ' · ' + esc(rv.leagueHe) : ''}</div>
       ${rv.rankHe ? `<div class="rank-line">${esc(rv.rankHe)}</div>` : ''}
     </section>
-    ${(rv.trophies || []).length ? card(`<div class="trophy-row">${rv.trophies.map((t) => `<span class="trophy">🏆<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'תארים', cls: 'gold-card' }) : ''}
-    ${(rv.awards || []).length ? card(`<div class="trophy-row">${rv.awards.map((t) => `<span class="trophy">🏅<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'פרסים אישיים' }) : ''}
+    ${(rv.trophies || []).length ? card(`<div class="trophy-row">${rv.trophies.map((t) => `<span class="trophy">${ico('trophy', 'gold')}<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'תארים', cls: 'gold-card' }) : ''}
+    ${(rv.awards || []).length ? card(`<div class="trophy-row">${rv.awards.map((t) => `<span class="trophy">${ico('medal', 'gold')}<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'פרסים אישיים' }) : ''}
     ${card(statGrid([
       { label: 'הופעות', value: st.apps ?? 0 }, { label: 'שערים', value: st.goals ?? 0 }, { label: 'בישולים', value: st.assists ?? 0 },
       { label: 'ציון ממוצע', value: rating(st.avgRating) }, { label: gtext('{{מצטיין|מצטיינת}} המשחק'), value: st.motm ?? 0 }, { label: 'שער נקי', value: st.cleanSheets ?? 0 },
@@ -92,7 +93,7 @@ export function render(root) {
     ${(rv.byComp || []).length ? card(`<table class="tbl simple"><thead><tr><th class="tm">מסגרת</th><th>הופ׳</th><th>שע׳</th><th>בי׳</th><th>ציון</th></tr></thead><tbody>
       ${rv.byComp.map((c) => `<tr><td class="tm">${esc(c.compHe)}</td><td class="num">${esc(c.apps)}</td><td class="num">${esc(c.goals)}</td><td class="num">${esc(c.assists)}</td><td class="num">${esc(rating(c.avgRating))}</td></tr>`).join('')}
       </tbody></table>`, { title: 'לפי מסגרת' }) : ''}
-    ${card(`<div class="kv"><span>OVR</span><b class="num">${esc(rv.ovrStart)} ← ${esc(rv.ovrEnd)} ${ovrD ? `<span class="delta ${ovrD > 0 ? 'up' : 'down'}">${esc(signed(ovrD))}</span>` : ''}</b></div>
+    ${card(`<div class="kv"><span>דירוג כללי</span><b class="num">${esc(rv.ovrStart)} ← ${esc(rv.ovrEnd)} ${ovrD ? `<span class="delta ${ovrD > 0 ? 'up' : 'down'}">${esc(signed(ovrD))}</span>` : ''}</b></div>
       <div class="kv"><span>שווי שוק</span><b class="num">${esc(money(rv.valueEnd))}</b></div>`, { title: 'ההתפתחות שלך' })}
     ${(rv.highlightsHe || []).length ? card(`<ul class="ws-lines">${rv.highlightsHe.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`, { title: 'רגעים מהעונה' }) : ''}
     ${(rv.nextHe || []).length ? card(`<ul class="ws-lines">${rv.nextHe.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`, { title: 'מה הלאה' }) : ''}

@@ -1,6 +1,6 @@
 // Lifestyle shop (SPEC §5.15).
 import { SHOP_ITEMS } from '../data/strings.js';
-import { fmtMoney, econMoney } from './util.js';
+import { fmtMoney, econOf, sigRound } from './util.js';
 import { ageOf } from './player.js';
 import { raise } from './narrative.js';
 
@@ -9,14 +9,14 @@ const NUM = {
   home_room: [8000, 0, 2, 0], home_apt: [250000, 400, 4, 18], home_pent: [1800000, 2500, 7, 18], home_villa: [6000000, 6000, 10, 18],
   fam_trip: [12000, 0, 2, 0], fam_parents: [90000, 0, 5, 0], fam_field: [400000, 0, 6, 0], style_wardrobe: [20000, 0, 1, 0], style_watch: [40000, 0, 2, 0],
 };
-const CAT_HE = { car: 'רכבים', home: 'בית', family: 'משפחה', style: 'סטייל' };
-const CATS = ['car', 'home', 'family', 'style'];
+const CAT_HE = { car: 'רכבים', home: 'בית', family: 'משפחה', style: 'סטייל', watch: 'שעונים ותכשיטים', gear: 'ציוד ונעליים', invest: 'השקעות' };
+const CATS = ['car', 'home', 'family', 'style', 'watch', 'gear', 'invest'];
 
 export function shopItems() {
   const list = (SHOP_ITEMS && SHOP_ITEMS.length) ? SHOP_ITEMS : [];
   const out = list.map((it) => {
     const n = NUM[it.id];
-    return { id: it.id, cat: it.cat, he: it.he, price: n ? n[0] : it.price, upkeep: n ? n[1] : (it.upkeep || 0), morale: n ? n[2] : (it.morale || 0), minAge: n ? n[3] : (it.minAge || 0) };
+    return { id: it.id, cat: it.cat, he: it.he, price: n ? n[0] : it.price, upkeep: n ? n[1] : (it.upkeep || 0), morale: n ? n[2] : (it.morale || 0), minAge: n ? n[3] : (it.minAge || 0), fans: it.id === 'fam_field' ? 5 : (it.fans || 0) };
   });
   for (const id of Object.keys(NUM)) {
     if (!out.some((x) => x.id === id)) {
@@ -27,7 +27,17 @@ export function shopItems() {
   return out;
 }
 // Prices and upkeep scale with the career economy (C3); S optional (unscaled without it).
-function scaled(S, it) { if (!S || !it) return it; return Object.assign({}, it, { price: econMoney(S, it.price), upkeep: econMoney(S, it.upkeep) }); }
+// Lifestyle prices scale softer than wages (sqrt of the economy: ~0.35 in women's careers) so a car still costs like a car.
+export function shopScale(S) { const e = econOf(S); return e === 1 ? 1 : Math.sqrt(e); }
+function shopMoney(S, n) {
+  const k = shopScale(S);
+  if (k === 1 || !n) return n || 0;
+  const v = Math.max(1, sigRound(Math.abs(n) * k, 2));
+  return n < 0 ? -v : v;
+}
+function scaled(S, it) { if (!S || !it) return it; return Object.assign({}, it, { price: shopMoney(S, it.price), upkeep: shopMoney(S, it.upkeep) }); }
+/** Shop open: a player career, or a coaching career that is still running (the coach's wallet keeps working). */
+function coaching(S) { const M = S.mgr; return !!(M && (M.st === 'active' || M.st === 'unemployed')); }
 export function itemById(id, S) { return scaled(S, shopItems().find((x) => x.id === id) || null); }
 export function weeklyUpkeep(S) { let u = 0; for (const id of S.player.owned) { const it = itemById(id, S); if (it) u += it.upkeep; } return u; }
 export function moraleBonus(S) { let m = 0; for (const id of S.player.owned) { const it = itemById(id, S); if (it) m += it.morale; } return Math.min(25, m); }
@@ -35,7 +45,7 @@ export function moraleBonus(S) { let m = 0; for (const id of S.player.owned) { c
 function reason(S, it) {
   const p = S.player;
   if (p.owned.indexOf(it.id) >= 0) return 'כבר שלך';
-  if (p.stage === 'retired') return 'הקריירה הסתיימה';
+  if (p.stage === 'retired' && !coaching(S)) return 'הקריירה הסתיימה';
   if (it.minAge && ageOf(S) < it.minAge) return 'מגיל ' + it.minAge;
   if (p.money < it.price) return 'חסר לך ' + fmtMoney(it.price - p.money);
   return null;
@@ -50,8 +60,8 @@ export function buy(S, id) {
   p.money -= it.price;
   p.owned.push(it.id);
   p.morale = Math.min(100, p.morale + it.morale);
-  if (it.id === 'fam_field') p.fans = Math.min(100, p.fans + 5);
-  if (it.price >= econMoney(S, 100000)) raise(S, 'big_purchase');
+  if (it.fans) p.fans = Math.min(100, p.fans + it.fans);
+  if (it.price >= shopMoney(S, 100000) && p.stage !== 'retired') raise(S, 'big_purchase');
   return { ok: true, messageHe: 'קנית: ' + it.he + '!' };
 }
 export function sell(S, id) {
@@ -59,7 +69,7 @@ export function sell(S, id) {
   const p = S.player;
   if (!it || p.owned.indexOf(id) < 0) return { ok: false, messageHe: 'הפריט לא שלך' };
   if (it.cat === 'family') return { ok: false, messageHe: 'את זה לא מוכרים' };
-  if (p.stage === 'retired') return { ok: false, messageHe: 'הקריירה הסתיימה' };
+  if (p.stage === 'retired' && !coaching(S)) return { ok: false, messageHe: 'הקריירה הסתיימה' };
   p.owned = p.owned.filter((x) => x !== id);
   p.money += Math.round(it.price * 0.6);
   return { ok: true, messageHe: 'מכרת את ' + it.he + ' ב-' + fmtMoney(Math.round(it.price * 0.6)) };
@@ -72,7 +82,7 @@ export function shopVM(S) {
     cats: CATS.map((c) => ({ id: c, he: CAT_HE[c], items: items.filter((x) => x.cat === c).map((x) => {
       const owned = S.player.owned.indexOf(x.id) >= 0;
       const r = reason(S, x);
-      return { id: x.id, he: x.he, price: x.price, upkeep: x.upkeep, morale: x.morale, owned, canBuy: !r, reasonHe: r };
+      return { id: x.id, he: x.he, price: x.price, upkeep: x.upkeep, morale: x.morale, fans: x.fans || 0, owned, canBuy: !r, reasonHe: r };
     }) })),
   };
 }

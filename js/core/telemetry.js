@@ -196,25 +196,65 @@ function active() {
   return BACKEND_ENABLED && getConsent();
 }
 
+// ---------- v2.1 event shapes (supabase/update-2.1.sql admin_stats_v2 reads these exact props) ----------
+//   career_started  {gender, nation, position, club, league}   gender: 'm' | 'f'
+//   intro           {done: true|false}                         true = watched to the end, false = skipped
+//   goal            {mega: true|false, n}                      n = goals batched into this row (default 1)
+//   manager_started {tier, gender, ...}
+//   retired         {league, tier, legacy, gender, ...}        optional top5:true = played in a top-5 league
+function normGender(g) {
+  const v = String(g == null ? '' : g).toLowerCase();
+  if (v === 'm' || v === 'male' || v === 'boy') return 'm';
+  if (v === 'f' || v === 'female' || v === 'girl' || v === 'w') return 'f';
+  return g == null ? undefined : String(g).slice(0, 8);
+}
+function normProps(name, props) {
+  const p = props && typeof props === 'object' ? { ...props } : {};
+  if ('gender' in p) p.gender = normGender(p.gender);
+  if (name === 'intro') p.done = p.done === true || p.done === 'true' || p.done === 1;
+  if (name === 'goal') {
+    p.mega = p.mega === true || p.mega === 'true' || p.mega === 1;
+    if (p.n !== undefined) p.n = Math.max(1, Math.min(500, Math.floor(Number(p.n) || 1)));
+  }
+  if (name === 'retired' && p.top5 !== undefined) p.top5 = !!p.top5;
+  return p;
+}
+
 export function track(name, props = {}) {
   try {
     if (!active()) return;
     if (typeof name !== 'string' || !NAME_RE.test(name)) return;
     const q = readQueue();
-    q.push({ i: eid(), n: name, p: cleanProps(props), t: new Date().toISOString(), s: getSessionId() });
+    q.push({ i: eid(), n: name, p: cleanProps(normProps(name, props)), t: new Date().toISOString(), s: getSessionId() });
     writeQueue(q);
     touchSession();
     if (q.length >= FLUSH_AT && inited) flush().catch(() => {});
   } catch { /* never throw */ }
 }
 
+/** Forward engine signals ({name, props}). Goal signals are batched into at most two rows per call
+ *  (goal {mega:false, n} and goal {mega:true, n}) so a simulated season never floods the queue. */
 export function trackSignals(signals) {
   try {
     if (!active() || !Array.isArray(signals)) return;
+    const goals = [0, 0];   // [normal, mega]
     for (const s of signals) {
-      if (s && typeof s.name === 'string') track(s.name, s.props || {});
+      if (!s || typeof s.name !== 'string') continue;
+      if (s.name === 'goal') {
+        const p = normProps('goal', s.props || {});
+        goals[p.mega ? 1 : 0] += p.n || 1;
+        continue;
+      }
+      track(s.name, s.props || {});
     }
+    if (goals[0]) track('goal', { mega: false, n: goals[0] });
+    if (goals[1]) track('goal', { mega: true, n: goals[1] });
   } catch { /* never throw */ }
+}
+
+/** The intro finished (done=true) or was skipped (done=false). Safe to call before initTelemetry(). */
+export function trackIntro(done) {
+  track('intro', { done: !!done });
 }
 
 const inflight = new Set();   // queue ids currently being sent (never sent twice concurrently)

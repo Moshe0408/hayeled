@@ -6,6 +6,7 @@ import { NICKNAMES, FRIEND_NAMES, AGENT_NAMES, JOURNALIST_NAMES, NICKNAMES_F, FR
 import { POSITIONS, ATTRS, TRAINING, ROLES, STAGES, SELECTION, EURO_COMPS, ROUND_NAMES, TOURNAMENTS, ALERTS, FORMAT_LABELS, RESULT_LABELS } from '../data/strings.js';
 import { clamp, round1, avg, fmtMoney as _fmtMoney, fmtSeason as _fmtSeason, sortIds, deepClone, hePrefix, gtext, gdeep, femLabel, econOf, curGender, isF } from './util.js';
 import { C, SCHEMA_VERSION as SV, emit, curAw, createEmptyState, migrateState as _migrate, emptyStats, STATE_KEYS, WOMEN_ECON, defaultShirt } from './state.js';
+import { EUR_ILS as _EUR_ILS, fmtShekels as _fmtShekels, sgnHe } from './util.js';
 import { weekLabelHe, isWindowOpen, isIntlWeek, intlSlotIndex, leagueRoundSlots, cupRoundSlots, tournamentSlots, EURO_WEEKS, summerTournaments, INTL_WEEKS } from './calendar.js';
 import { simScore, simKnockout, koWinner } from './sim.js';
 import {
@@ -17,7 +18,7 @@ import { buildCups, cupFixturesInSlot, cupApply, cupsAfterSlot, cupIds, cupDef, 
 import { EC, buildEurope, firstSeasonEntrants, computeNextEntrants, euroFixturesInSlot, euroApply, euroAfterSlot, lpRanking, twoLegWinner } from './europe.js';
 import {
   initNational, buildNationalSeason, buildSummerTournament, buildYouthTournament, natFixturesInSlot, natApply, natAfterSlot, yntFixture,
-  nstr, youthNStr, nationInTour, nationAlive, driftNational, qualifierQualified, tourStr,
+  nstr, youthNStr, nationInTour, nationAlive, driftNational, qualifierQualified, tourStr, intlSlotOf,
 } from './national.js';
 import { createPlayer, ovrOf, ageOf, formAvg, formAvgOr, potStars, updatePotSeen, developWeek, potentialDrift, valueOf, fairWage, injuryChanceMatch, rollInjury, injuryHe, clampStatus, POS_W, OUT_ATTRS, GK_ATTRS, posGroup } from './player.js';
 import { clubSelection, youthSelection, nationalSelection, seniorScore, youthThreshold } from './selection.js';
@@ -27,9 +28,13 @@ import { createStars, evolveStars, buildBenchmarks, seasonEndAwards, ballonDor, 
 import { raise, sysMsg, runWeekEvents, autoAnswerExpired, answerItem, inboxRows, threadVM, awLabel, coachName } from './narrative.js';
 import { addTimeline, openSpell, closeSpell, creditSpell, recordMatch, pruneMatches, archiveSeason, careerTotals, legacyScore, legacyTierHe, careerVM, hofEntry, trophiesVM, awardsListVM, sumLines, ALL_LINES, CLUB_LINES, lineAvg } from './history.js';
 import { buy, sell, shopVM, moraleBonus, weeklyUpkeep } from './shop.js';
+import * as MG from './manager.js';
 
 export const SCHEMA_VERSION = SV;
+/** R3: engine money is in euros; every label is in shekels (fixed rate EUR_ILS). */
 export function fmtMoney(n) { return _fmtMoney(n); }
+export const EUR_ILS = _EUR_ILS;
+export function fmtShekels(ils) { return _fmtShekels(ils); }
 export function fmtSeason(s) { return _fmtSeason(s); }
 // Every Hebrew string the facade returns has its {{male|female}} markers resolved (C2).
 function G(v, g) { return gdeep(v, g); }
@@ -570,7 +575,7 @@ function weekEnd(S, ff) {
   if (ch.length) {
     const k = ch[0];
     const d = dev.attrs[k];
-    W.trainHe = trainName + ': ' + (d > 0 ? '+' : '') + d + ' ' + ((ATTRS && ATTRS[k] && ATTRS[k].he) || k);
+    W.trainHe = trainName + ': ' + sgnHe(d) + ' ' + ((ATTRS && ATTRS[k] && ATTRS[k].he) || k);
   } else W.trainHe = trainName;
   p.energy = clamp(p.energy - (tr === 'rest' ? 0 : tr === 'balanced' ? 5 : 7), 0, 100);
   if (!p.injury && tr !== 'rest' && S.week <= 44 && p.stage !== 'free' && p.stage !== 'retired' && rng.chance(0.002)) {
@@ -591,7 +596,7 @@ function weekEnd(S, ff) {
   if (up > 0) {
     if (p.money >= up) p.money -= up;
     else { p.money = 0; p.morale -= 2; raise(S, 'money_low'); }
-  }
+  } else if (up < 0) p.money -= up;     // investments return more than the upkeep of everything else
   // minutes / bench / free
   if (S.week <= 44) { p.mins.push(Math.min(180, W.min)); while (p.mins.length > 8) p.mins.shift(); }
   if (W.clubFx) {
@@ -728,6 +733,9 @@ function retireNow(S, reason, forced) {
   const p = S.player;
   const rng = R();
   if (!S.hist.seasons.some((x) => x.s === S.season)) archiveSeason(S, S.comp && S.comp.end ? S.comp.end : { club: p.club, lg: p.club ? clubLeague(S, p.club) : null, rank: null, loan: !!(p.contract && p.contract.loan) });
+  const lastSp = S.hist.clubs[S.hist.clubs.length - 1];
+  const lastClub = p.club || (lastSp ? lastSp.club : null);
+  const lastLg = lastClub ? clubLeague(S, lastClub) : null;
   closeSpell(S, S.season);
   for (const o of S.offers) if (o.status === 'open') { o.status = 'withdrawn'; o.cl = curAw(S); }
   autoAnswerExpired(S, rng, true);
@@ -741,7 +749,15 @@ function retireNow(S, reason, forced) {
   addTimeline(S, 'retired', 'פרישה מכדורגל בגיל ' + ageOf(S) + '. תודה על הכול!');
   S.ev.trig = ['retired'];
   runWeekEvents(S, rng, { opp: null, derby: false }, true);
-  emit('retired', { age: ageOf(S), seasons: S.season - S.startSeason + 1, legacy, reason });
+  // R6 telemetry: final league / tier and whether the player ever reached a European top-5 league
+  const lgSeen = new Set(S.hist.seasons.map((x) => x.lg).filter(Boolean));
+  const top5 = Array.from(lgSeen).some((l) => MG.isTop5(l));
+  const llg = lastLg ? LEAGUE_BY_ID[lastLg] : null;
+  const tier = !llg ? 'none' : MG.isTop5(lastLg) ? 'top5' : llg.tier === 1 && llg.euro ? 'europe' : llg.tier === 1 ? 'tier1' : 'tier2';
+  emit('retired', { age: ageOf(S), seasons: S.season - S.startSeason + 1, legacy, reason, league: lastLg || null, tier, top5, gender: p.gender === 'f' ? 'f' : 'm', club: lastClub || null });
+  S.retired.club = lastClub || null;
+  // R2: coaching offers (the world keeps running in manager mode)
+  MG.initRetirementOffers(S, !!(forced && S.week === 52));
 }
 
 // ---------------------------------------------------------------- facade: hub and time
@@ -869,7 +885,7 @@ function finishInternal(S) {
   let dm = res === 'W' ? 3 : res === 'L' ? -3 : 0;
   if (rating >= 8) dm += 4; else if (rating <= 5.5) dm -= 4;
   p.morale = clamp(p.morale + dm, 0, 100);
-  if (dm) eff.push((dm > 0 ? '+' : '') + dm + ' מורל');
+  if (dm) eff.push(sgnHe(dm) + ' מורל');
   if (fx.kind === 'league' || fx.kind === 'cup' || fx.kind === 'europe') {
     const dt = (rating - 6.6) * 4;
     p.trust = clamp(p.trust + dt, 0, 100);
@@ -945,6 +961,8 @@ function finishInternal(S) {
     W.results.push(resultRow(S, fx, L.sc[0], L.sc[1], extra, true, rating, L.role === 'bench' ? 'נכנסת מהספסל' : ''));
     W.sel[fxKey(fx)] = L.role;
   }
+  // R6 telemetry: one signal per goal of the player ({ mega } = the goal got the mega celebration)
+  for (const e of summary.log) if (e.ev === 'goal' && e.who === 'me') emit('goal', { mega: !!e.mega });
   if (fx.ref && fx.ref.t === 'gen') recordRes(S, Object.assign({}, fx), L.sc[0], L.sc[1], extra, L.role, rating);
   else if (W) W.pr = { key: fxKey(fx), sel: L.role, rt: rating };
   // youth: pro offer after the 3rd first-team appearance
@@ -1045,6 +1063,8 @@ export function getSeasonReview(season) {
     if (S.hist.seasons.length === 0 && !(S.week > 44)) return null;
     s = S.week > 44 ? S.season : S.hist.seasons[S.hist.seasons.length - 1].s;
   }
+  // manager mode: the player's last season is the latest player review
+  if (S.retired && s > S.retired.season) s = S.retired.season;
   const live = s === S.season && !S.hist.seasons.some((x) => x.s === s);
   const arch = S.hist.seasons.find((x) => x.s === s) || null;
   if (!live && !arch) return null;
@@ -1135,11 +1155,30 @@ export function getRetirement() {
     ok: true, name: p.first + ' ' + p.last, gender: p.gender === 'f' ? 'f' : 'm', age: S.retired.age, seasons: S.retired.season - S.startSeason + 1, reason: S.retired.reason,
     reasonHe: REASON_HE[S.retired.reason] || '', legacy: S.retired.legacy, tierHe: legacyTierHe(S.retired.legacy),
     totals: cv.totals, trophies: cv.trophies, awards: cv.awards, peakOvr: p.peak, clubsHe, farewellHe: farewell,
+    // R8: the farewell avatar wears the last club's kit
+    lastClub: S.retired.club ? teamVM(S.retired.club) : (S.hist.clubs.length ? teamVM(S.hist.clubs[S.hist.clubs.length - 1].club) : null),
+    // R2: coaching career
+    coaching: S.mgr ? { st: S.mgr.st, band: S.mgr.band || null, offers: MG.offersVM(S), record: MG.coachRecord(S) } : null,
   });
 }
 export function buildHallOfFameEntry() {
   const S = need();
-  return G(hofEntry(S, Date.now()));
+  const e = hofEntry(S, Date.now());
+  if (!e) return null;
+  // R2: player + coach. legacy = player legacy + coaching legacy; the player-only score stays in legacyPlayer.
+  const ch = S.mgr ? MG.coachHof(S) : null;
+  if (ch && ch.games > 0) {   // a coaching career with no managed match does not change the entry
+    const f = S.player.gender === 'f';
+    e.v = 2;
+    e.coach = ch;
+    e.roleHe = f ? 'שחקנית + מאמנת' : 'שחקן + מאמן';
+    e.legacyPlayer = e.legacy;
+    e.legacy = round1(e.legacy + ch.legacy);
+    e.tierHe = e.tierHe + ' · ' + e.roleHe;
+    e.coachActive = S.mgr.st !== 'done';
+    if (S.mgr.ended) e.coachEndSeason = S.mgr.ended.season;
+  }
+  return G(e);
 }
 
 // ---------------------------------------------------------------- fixtures VMs (pure)
@@ -1191,10 +1230,12 @@ function isBigPure(S, f, own, opp) {
 }
 
 // Upcoming (unplayed) fixtures of the player's current teams this season: [{ f, week, slot, isHome, pri }]
-function upcomingFixtures(S) {
-  const p = S.player;
+// ov (manager mode): { club, stage, nation, called, youth } replaces the player's club / stage / nation / call-ups.
+function upcomingFixtures(S, ov) {
+  const p0 = S.player;
+  const p = ov ? { club: ov.club, stage: ov.stage, nation: ov.nation } : p0;
   const out = [];
-  if (!S.comp || S.retired) return out;
+  if (!S.comp || (S.retired && !ov)) return out;
   const cur = S.week;
   const doneSlot = (w, s) => w < cur || (w === cur && S.inWeek && ((s === 'mw' && S.wstep >= 1) || (s === 'wk' && S.wstep >= 2)));
   const club = p.club;
@@ -1234,7 +1275,7 @@ function upcomingFixtures(S) {
         E.ko.f.forEach((t) => add(t, 'f', EURO_WEEKS.f, c === 'ucl' ? 'wk' : 'mw', 0));
       }
     }
-    if (inYouthSetup(S)) {
+    if (ov ? !!ov.youth : inYouthSetup(S)) {
       const Y = S.comp.yl;
       const sl = leagueRoundSlots(Y.R);
       for (let r = Y.r; r < Y.R; r++) {
@@ -1244,7 +1285,7 @@ function upcomingFixtures(S) {
       }
     }
   }
-  const called = S.nt.called || {};
+  const called = ov ? (ov.called || {}) : (S.nt.called || {});
   const n = p.nation;
   if (called.senior) {
     for (const slot of ['mw', 'wk']) {
@@ -1258,6 +1299,12 @@ function upcomingFixtures(S) {
         if (sl.key.indexOf('md') === 0) { const md = Number(sl.key.slice(2)); for (const f of T.gfx) if (f[0] === md && f[3] === null && (f[1] === n || f[2] === n)) out.push({ f: { comp: T.key, kind: 'national', h: f[1], a: f[2], rk: 'grp' }, week: sl.w, slot: sl.s, isHome: f[1] === n, pri: 4 }); }
         else if (T.ko[sl.key]) for (const t of T.ko[sl.key]) if (t[2] === null && (t[0] === n || t[1] === n)) out.push({ f: { comp: T.key, kind: 'national', h: t[0], a: t[1], rk: sl.key, final: sl.key === 'f' }, week: sl.w, slot: sl.s, isHome: t[0] === n, pri: 4 });
       }
+    }
+    if (ov && ov.nationAll) {
+      // national-team manager: every remaining qualifier / friendly of the season, not only this week's
+      const q = S.nt.q;
+      if (q) q.fx.forEach((f) => { const sl = intlSlotOf(f[0]); if (f[3] === null && (f[1] === n || f[2] === n) && sl.w !== cur && !doneSlot(sl.w, sl.s)) out.push({ f: { comp: 'q_' + q.tour, kind: 'national', h: f[1], a: f[2] }, week: sl.w, slot: sl.s, isHome: f[1] === n, pri: 4 }); });
+      S.nt.fr.forEach((f) => { const sl = intlSlotOf(f[0]); if (f[3] === null && (f[1] === n || f[2] === n) && sl.w !== cur && !doneSlot(sl.w, sl.s)) out.push({ f: { comp: 'fr', kind: 'friendly', h: f[1], a: f[2] }, week: sl.w, slot: sl.s, isHome: f[1] === n, pri: 4 }); });
     }
   } else {
     const lvl = called.u17 ? 'u17' : called.u19 ? 'u19' : called.u21 ? 'u21' : null;
@@ -1292,7 +1339,7 @@ function scheduleList(S) {
 
 export function getSchedule() {
   const S = need();
-  return G({ seasonHe: fmtSeason(S.season), fixtures: scheduleList(S) });
+  return G({ seasonHe: fmtSeason(S.season), fixtures: mgrActive(S) ? mgrScheduleList(S) : scheduleList(S) });
 }
 
 // ---------------------------------------------------------------- hub
@@ -1360,6 +1407,8 @@ function hubVM(S) {
     canReward: !S.retired && p.energy < 100 && S.ev.flags.rw !== aw,
     lastResult: lm ? { textHe: (RESULT_LABELS && RESULT_LABELS[lm.res] || lm.res) + ' ' + lm.score[0] + '-' + lm.score[1] + ' · ' + lm.home.shortHe + ' נגד ' + lm.away.shortHe, rating: lm.rating } : null,
     pending: { match: !!S.live, review: S.pending.review !== null, retire: S.retired !== null },
+    // R2: coaching career after retirement (status stays 'retired'; the UI routes to #/manager while manager.active)
+    manager: S.mgr ? { active: S.mgr.st !== 'done', st: S.mgr.st, openOffers: S.mgr.offers.filter((o) => o.status === 'open').length, route: S.mgr.st !== 'done' ? '#/manager' : '#/retire' } : null,
     announcementsHe: ann,
   };
 }
@@ -1371,7 +1420,7 @@ function leagueStatus(S, lid) { const L = S.comp.lg[lid]; return L.r >= L.R ? '�
 
 export function getCompetitions() {
   const S = need();
-  const p = S.player;
+  const p = focusP(S);
   const mine = [];
   if (p.club) {
     const lid = clubLeague(S, p.club);
@@ -1384,9 +1433,11 @@ export function getCompetitions() {
       if (inIt) mine.push(compRow(S, c, 'europe', E.lp.teams.length > 0, true, E.w ? 'הסתיים' : E.md ? 'מחזור ' + E.md + ' מתוך 8' : 'מוקדמות'));
     }
   }
-  if (S.nt.q) mine.push(compRow(S, 'q_' + S.nt.q.tour, 'national', true, false, S.nt.q.done ? 'הסתיימו' : 'בעיצומן'));
-  if (S.nt.tour) mine.push(compRow(S, S.nt.tour.key, 'national', true, true, S.nt.tour.w ? 'הסתיים' : 'בעיצומו'));
-  if (S.nt.ytour) mine.push(compRow(S, S.nt.ytour.key, 'ynt', true, true, S.nt.ytour.w ? 'הסתיים' : 'בעיצומו'));
+  const mf = mgrFocus(S);
+  const natOn = !mf || !!mf.nation;   // a club / youth manager does not follow the national team
+  if (S.nt.q && natOn) mine.push(compRow(S, 'q_' + S.nt.q.tour, 'national', true, false, S.nt.q.done ? 'הסתיימו' : 'בעיצומן'));
+  if (S.nt.tour && natOn) mine.push(compRow(S, S.nt.tour.key, 'national', true, true, S.nt.tour.w ? 'הסתיים' : 'בעיצומו'));
+  if (S.nt.ytour && !mf) mine.push(compRow(S, S.nt.ytour.key, 'ynt', true, true, S.nt.ytour.w ? 'הסתיים' : 'בעיצומו'));
   const byC = new Map();
   for (const lg of LEAGUES) {
     if (!byC.has(lg.countryId)) byC.set(lg.countryId, []);
@@ -1428,7 +1479,7 @@ function legendOf(groups) {
 export function getTable(compId, opts = {}) { return G(tableVM(compId, opts)); }
 function tableVM(compId, opts = {}) {
   const S = need();
-  const p = S.player;
+  const p = focusP(S);
   if (LEAGUE_BY_ID[compId]) {
     const L = S.comp.lg[compId];
     const f = leagueFormat(compId);
@@ -1499,7 +1550,7 @@ function tieVM(S, legs, variant, mineIds) {
 export function getBracket(compId) { return G(bracketVM(compId)); }
 function bracketVM(compId) {
   const S = need();
-  const p = S.player;
+  const p = focusP(S);
   const mine = [p.club, p.nation].filter(Boolean);
   const Cp = S.comp.cups[compId];
   if (Cp) {
@@ -1601,7 +1652,12 @@ export function getProfile() {
     traitsHe: traits,
   });
 }
-export function getCareer() { const S = need(); return G(careerVM(S, awLabel)); }
+export function getCareer() {
+  const S = need();
+  const cv = careerVM(S, awLabel);
+  cv.coach = S.mgr ? MG.coachRecord(S) : null;   // R2: coaching record (null when there is none)
+  return G(cv);
+}
 
 const LVL_HE = { none: 'טרם זומנת', u17: 'נבחרת עד גיל 17', u19: 'נבחרת עד גיל 19', u21: 'נבחרת עד גיל 21', senior: 'הנבחרת הבוגרת' };
 const LVL_HE_W = { none: 'טרם זומנת', u17: 'נבחרת הנערות עד גיל 17', u19: 'נבחרת הנערות עד גיל 19', u21: 'נבחרת הצעירות עד גיל 21', senior: 'נבחרת הנשים הבוגרת' };
@@ -1649,6 +1705,400 @@ export function getShop() { return G(shopVM(need())); }
 export function buyItem(id) { const S = need(); const r = buy(S, id); if (r.ok) notify(); return G(r); }
 export function sellItem(id) { const S = need(); const r = sell(S, id); if (r.ok) notify(); return G(r); }
 
+// ---------------------------------------------------------------- manager / coach career (R2)
+// After retirement the world keeps running: every manager week simulates the whole calendar (both slots), the managed
+// team's fixtures through the manager model (tactic, reputation, squad mood), then board / fans / mood, offers, season end
+// and the world rollover. The player's own systems (training, events, transfers) are frozen.
+function mgrOf(S) { return S.mgr || null; }
+function mgrActive(S) { const M = S.mgr; return !!(M && M.st === 'active' && M.job); }
+/** Team / stage override used by the schedule, tables and competitions in manager mode. */
+function mgrFocus(S) {
+  if (!mgrActive(S)) return null;
+  const J = S.mgr.job;
+  if (J.kind === 'nation') return { club: null, stage: 'pro', nation: J.team, called: { senior: true }, youth: false, nationAll: true };
+  if (J.role === 'youth') return { club: J.team, stage: 'youth', nation: null, called: {}, youth: !!(S.comp && S.comp.yl && S.comp.yl.clubs.indexOf(J.team) >= 0) };
+  return { club: J.team, stage: 'pro', nation: null, called: {}, youth: false };
+}
+/** Club / nation highlighted as "mine" in tables, brackets and competitions (the managed team in manager mode). */
+function focusP(S) { const f = mgrFocus(S); return f ? { club: f.club, nation: f.nation || S.player.nation } : S.player; }
+function focusClub(S) { const f = mgrFocus(S); return f ? f.club : S.player.club; }
+function focusNation(S) { const f = mgrFocus(S); return f ? (f.nation || null) : S.player.nation; }
+
+// youth coach: the club's U19 league replaces the (retired) player's youth league; a mid-season start catches up the rounds already due
+function mgrYouthLeague(S) {
+  const M = S.mgr;
+  if (!M || !M.job || M.st !== 'active' || M.job.role !== 'youth' || !S.comp) return;
+  const J = M.job;
+  if (S.comp.yl && S.comp.yl.clubs.indexOf(J.team) >= 0) return;
+  const Y = buildYouthLeague(S, J.team, 'u19');
+  if (!Y) return;
+  S.comp.yl = Y;
+  const rng = R();
+  const sl = leagueRoundSlots(Y.R);
+  while (Y.r < Y.R && sl[Y.r] && (sl[Y.r].w < S.week)) {
+    for (const [h, a] of youthRoundFixtures(S, Y.r)) { const [hg, ag] = simScore(rng, Y.str[h] || 45, Y.str[a] || 45, { neutral: false }); tableApply(Y.t, h, a, hg, ag); }
+    Y.r++;
+  }
+}
+
+function mgrSlotRun(S, slot, wk) {
+  const rng = R();
+  const week = S.week;
+  const fixtures = collectFixtures(S, week, slot);
+  const lgRes = {};
+  let ylPlayed = false;
+  for (const fx of fixtures) {
+    const side = MG.mgrSide(S, fx);
+    let hg, ag, extra;
+    if (side) {
+      const sh = sideStrength(S, fx, fx.h), sa = sideStrength(S, fx, fx.a);
+      const rates = MG.mgrRates(S, fx, side, sh, sa);
+      const r = MG.mgrSimFixture(S, rng, fx, side, sh, sa);
+      hg = r[0]; ag = r[1]; extra = r[2];
+      applyResult(S, fx, hg, ag, extra);
+      const own = side === 'h' ? fx.h : fx.a, opp = side === 'h' ? fx.a : fx.h;
+      const fxr = Object.assign({}, fx, { rk: roundHe(fx) || null });
+      const eff = MG.onManagedResult(S, fxr, side, hg, ag, extra, rates, r[3]);
+      const rec = S.mgr.res[S.mgr.res.length - 1];
+      rec.big = (() => { try { return isBigPure(S, fx, own, opp); } catch (e) { return false; } })();
+      wk.mine.push({ rec, eff });
+    } else {
+      [hg, ag, extra] = simFixture(S, rng, fx);
+      applyResult(S, fx, hg, ag, extra);
+    }
+    if (fx.kind === 'league') (lgRes[fx.comp] = lgRes[fx.comp] || []).push([fx.h, fx.a, hg, ag]);
+    if (fx.kind === 'youth') ylPlayed = true;
+  }
+  for (const lid of leagueIds()) if (lgRes[lid]) finishLeagueRound(S, lid, lgRes[lid]);
+  if (ylPlayed && S.comp.yl) S.comp.yl.r++;
+  for (const d of cupsAfterSlot(S)) {
+    S.world.champs[S.season] = S.world.champs[S.season] || {};
+    S.world.champs[S.season][d.cup] = d.winner;
+    if (MG.onFinal(S, d.cup, 'cup', d.winner)) wk.trophies.push('cup');
+  }
+  for (const d of euroAfterSlot(S, week, slot)) {
+    S.world.champs[S.season] = S.world.champs[S.season] || {};
+    S.world.champs[S.season][d.comp] = d.winner;
+    if (MG.onFinal(S, d.comp, d.comp, d.winner)) wk.trophies.push(d.comp);
+  }
+  for (const e of natAfterSlot(S, week, slot)) {
+    if (e.type !== 'tour_done') continue;
+    const T = e.T;
+    if (!T.lvl || T.lvl === 'senior') {
+      const n = S.player.nation;
+      S.nt.hist.push({ season: S.season, key: T.key, nation: n, stage: nationInTour(T, n) ? (T.stage[n] || 'group') : 'dnq', winner: T.w });
+    }
+    const before = S.mgr.trophies.length;
+    MG.onTournamentDone(S, T);
+    if (S.mgr.trophies.length > before) wk.trophies.push(T.kind);
+  }
+}
+
+function mgrWorldSeasonEnd(S) {
+  S.world.champs[S.season] = S.world.champs[S.season] || {};
+  for (const lid of leagueIds()) S.world.champs[S.season][lid] = leagueRanking(S, lid)[0];
+  S.comp.end = { club: null, lg: null, rank: null, loan: false };
+  S.comp.next = computeNextEntrants(S);
+}
+function mgrFinishRollover(S) {
+  S.season++;
+  S.week = 1;
+  S.nt.tour = null; S.nt.ytour = null;
+  S.player.s = emptyStats();
+  S.lastMatch = null;
+  buildSeason(S, false);
+  if (S.mgr) { S.mgr.roll = false; mgrYouthLeague(S); MG.mgrNewSeason(S); }
+}
+function mgrRollover(S) {
+  const rng = R();
+  evolveStars(S, rng);
+  const moved = promoteRelegate(S);
+  const uclLp = S.comp.eu ? S.comp.eu.ucl.lp.teams : [];
+  evolveClubs(S, rng, moved, uclLp);
+  driftNational(S, rng);
+  mgrFinishRollover(S);
+}
+
+function mgrWeek(S) {
+  const M = S.mgr;
+  const rng = R();
+  if (M.roll) mgrFinishRollover(S);
+  const wk = { season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week), mine: [], trophies: [], lines: [], seasonEnded: false, sacked: false, offers: 0, review: null, o0: M.offers.length };
+  const J0 = M.st === 'active' ? M.job : null;
+  const c0 = J0 ? { conf: J0.conf, fans: J0.fans, mood: J0.mood } : null;
+  if (S.week === 45) buildSummerTournament(S);
+  if (J0 && J0.role === 'youth') mgrYouthLeague(S);
+  if (J0 && S.week <= 40 && (!J0.obj || J0.objS !== S.season)) MG.setObjective(S, J0);
+  mgrSlotRun(S, 'mw', wk);
+  mgrSlotRun(S, 'wk', wk);
+  const wl = MG.mgrWeekEnd(S, rng, wk.mine.length > 0);
+  // the coach's lifestyle items keep costing (and investments keep paying) while coaching
+  const up = weeklyUpkeep(S);
+  if (up > 0) S.player.money = Math.max(0, Math.round(S.player.money - up));
+  else if (up < 0) S.player.money = Math.round(S.player.money - up);
+  if (wl.indexOf('sacked') >= 0) wk.sacked = true;
+  if (S.week === 44) {
+    mgrWorldSeasonEnd(S);
+    const se = MG.mgrSeasonEnd(S, rng);
+    wk.seasonEnded = true;
+    if (se.sacked) wk.sacked = true;
+    wk.review = se.row ? Object.assign({}, se.row) : null;
+    wk.renewed = se.renewed; wk.left = se.left;
+  }
+  wk.offers = Math.max(0, S.mgr.offers.filter((o) => o.status === 'open' && o.aw === curAw(S)).length);
+  if (J0 && c0) {
+    const J = J0;
+    wk.delta = { conf: round1(J.conf - c0.conf), fans: round1(J.fans - c0.fans), mood: round1(J.mood - c0.mood) };
+  }
+  if (S.week === 52) mgrRollover(S);
+  else S.week++;
+  MG.freezeTargets(S);
+  return wk;
+}
+
+function weekHasManaged(S) {
+  if (!mgrActive(S)) return false;
+  for (const slot of ['mw', 'wk']) for (const f of collectFixtures(S, S.week, slot)) if (MG.mgrSide(S, f)) return true;
+  return false;
+}
+
+function mgrResultVM(S, rec) {
+  const vm = MG.resultVM(S, rec);
+  const fx = { comp: rec.c, kind: rec.k, h: rec.h, a: rec.a, lvl: rec.lvl };
+  vm.compHe = compHe(S, rec.c);
+  vm.roundHe = rec.rd || '';
+  vm.extraHe = extraHe(null, rec.x);
+  vm.big = !!rec.big;
+  if (rec.k === 'youth') { vm.home = teamVM(rec.h, 'youth'); vm.away = teamVM(rec.a, 'youth'); }
+  else if (teamVariant(fx)) { vm.home = teamVM(rec.h, teamVariant(fx)); vm.away = teamVM(rec.a, teamVariant(fx)); }
+  return vm;
+}
+const DELTA_HE = { conf: 'אמון', fans: 'אוהדים', mood: 'מורל' };
+function mgrSummaryVM(S, wk) {
+  const results = wk.mine.map((m) => {
+    const vm = mgrResultVM(S, m.rec);
+    vm.reel = MG.matchReel(S, m.rec);
+    vm.effectsHe = [];
+    const rc = Math.round(m.eff.conf), rf = Math.round(m.eff.fans);
+    if (rc) vm.effectsHe.push(sgnHe(rc) + (m.rec.k === 'national' || m.rec.k === 'friendly' ? ' אמון ההתאחדות' : ' אמון ההנהלה'));
+    if (rf) vm.effectsHe.push(sgnHe(rf) + ' אוהדים');
+    if (m.eff.derby) vm.effectsHe.push('דרבי!');
+    return vm;
+  });
+  const lines = [];
+  if (wk.sacked) lines.push(gtext('פוטרת מהתפקיד. הדרכים נפרדות.'));
+  if (wk.offers) lines.push(wk.offers === 1 ? 'הגיעה הצעת עבודה חדשה' : 'הגיעו ' + wk.offers + ' הצעות עבודה חדשות');
+  for (const k of wk.trophies) lines.push('🏆 ' + trophyHe(k) + '!');
+  if (wk.renewed) lines.push('החוזה הוארך בשנתיים');
+  if (wk.left) lines.push('החוזה לא חודש');
+  if (wk.delta) for (const k of ['conf', 'fans', 'mood']) if (Math.abs(wk.delta[k]) >= 1) lines.push(DELTA_HE[k] + ' ' + sgnHe(Math.round(wk.delta[k])));
+  const rv = wk.review;
+  return {
+    dateHe: wk.dateHe, season: wk.season, week: wk.week, results, linesHe: lines, seasonEnded: wk.seasonEnded, sacked: wk.sacked, newOffers: wk.offers,
+    review: rv ? { seasonHe: fmtSeason(rv.s), rank: rv.rank, met: rv.met, games: rv.g, w: rv.w, d: rv.d, l: rv.l, gf: rv.gf, ga: rv.ga, trophies: (rv.tr || []).map((k) => trophyHe(k)) } : null,
+    status: S.mgr.st,
+  };
+}
+
+function mgrScheduleList(S) {
+  const ov = mgrFocus(S);
+  if (!ov) return [];
+  const map = new Map();
+  for (const r of S.mgr.res) {
+    const vm = mgrResultVM(S, r);
+    map.set(r.w + '-' + r.s, { vm: { key: vm.key, week: r.w, slot: r.s, dateHe: vm.dateHe, comp: r.c, compHe: vm.compHe, kind: r.k, roundHe: vm.roundHe, home: vm.home, away: vm.away, isHome: vm.isHome, big: !!r.big, selection: 'unknown',
+      result: { score: [r.hg, r.ag], extraHe: vm.extraHe, rating: null, res: r.res } }, w: r.w, s: r.s });
+  }
+  for (const u of upcomingFixtures(S, ov)) {
+    const k = u.week + '-' + u.slot;
+    if (map.has(k)) continue;
+    const vm = fxVM(S, u.f, u.week, u.slot, null, u.isHome);
+    if (u.f.kind === 'youth') { vm.home = teamVM(u.f.h, 'youth'); vm.away = teamVM(u.f.a, 'youth'); }
+    map.set(k, { vm, w: u.week, s: u.slot });
+  }
+  return Array.from(map.values()).sort((a, b) => (a.w - b.w) || ((a.s === 'mw' ? 0 : 1) - (b.s === 'mw' ? 0 : 1))).map((x) => x.vm);
+}
+function mgrTableSnippet(S) {
+  if (!mgrActive(S)) return null;
+  const J = S.mgr.job;
+  let id = null;
+  if (J.kind === 'nation') id = S.nt.q && S.nt.q.grp.indexOf(J.team) >= 0 ? 'q_' + S.nt.q.tour : null;
+  else if (J.role === 'youth') id = S.comp.yl ? S.comp.yl.id : null;
+  else id = clubLeague(S, J.team);
+  if (!id) return null;
+  const t = tableVM(id, {});
+  const rows = [];
+  for (const g of t.groups) for (const r of g.rows) rows.push(r);
+  const i = rows.findIndex((r) => r.mine);
+  const from = Math.max(0, Math.min(rows.length - 5, i - 2));
+  return { id, he: t.he, rows: i >= 0 ? rows.slice(from, from + 5) : rows.slice(0, 5), size: rows.length };
+}
+
+function mgrBusy(S) {
+  const M = mgrOf(S);
+  if (!S.retired || !M) return { ok: false, error: 'no_manager', messageHe: gtext('קריירת האימון מתחילה אחרי הפרישה') };
+  if (M.st === 'offers') return { ok: false, error: 'offers_pending', messageHe: gtext('{{בחר|בחרי}} קודם תפקיד מתוך ההצעות') };
+  if (M.st === 'done') return { ok: false, error: 'done', messageHe: 'קריירת האימון הסתיימה' };
+  return null;
+}
+
+/** Manager mode is on (coaching offers pending, active job or between jobs). */
+export function isManager() { const S = C.S; return !!(S && S.retired && S.mgr && S.mgr.st !== 'done'); }
+/** ManagerVM or null (no coaching career). Pure. */
+export function getManager() {
+  const S = need();
+  if (!S.mgr) return null;
+  const sched = mgrActive(S) ? mgrScheduleList(S) : [];
+  const thisWeek = sched.filter((f) => f.week === S.week && !f.result);
+  const next = thisWeek.length ? thisWeek[0] : (sched.find((f) => f.week > S.week && !f.result) || null);
+  let oppStrength = null;
+  if (next && mgrActive(S)) {
+    const J = S.mgr.job;
+    const opp = next.home.id === J.team ? next.away.id : next.home.id;
+    const fx = { kind: next.kind, comp: next.comp, lvl: null };
+    try { oppStrength = next.kind === 'youth' ? ((S.comp.yl && S.comp.yl.str[opp]) || 45) : sideStrength(S, fx, opp); } catch (e) { oppStrength = null; }
+  }
+  return G(MG.managerVM(S, { thisWeek, next, table: mgrTableSnippet(S), oppStrength }));
+}
+/** Coaching offers a career with this legacy would get (pure preview; used by tests and the retirement screen). */
+export function previewCoachingOffers(legacy) {
+  const S = need();
+  const r = MG.retirementOfferSpecs(S, Number(legacy) || 0);
+  return G({ band: r.band, offers: r.specs.map((o) => ({ team: o.kind === 'nation' ? teamVM(o.team) : teamVM(o.team), kind: o.kind, role: o.role, strength: Math.round(o.kind === 'nation' ? nstr(S, o.team) : cs(S, o.team)), tier: MG.jobTier(S, o), wage: o.wage })) });
+}
+/** Retired v2 careers (or any retired career without a coaching state) get their offers now. */
+export function ensureCoachingOffers() {
+  const S = need();
+  if (!S.retired) return { ok: false, error: 'not_retired' };
+  if (S.mgr) return { ok: true, created: false };
+  // a forced retirement happens inside the week-52 rollover: the world already rolled, only the season switch is pending
+  MG.initRetirementOffers(S, S.week === 52 && !!S.retired && S.retired.week === 52 && S.retired.reason !== 'voluntary');
+  notify();
+  return { ok: true, created: true };
+}
+export function mgrRespondOffer(id, action) {
+  const S = need();
+  const M = mgrOf(S);
+  if (!S.retired || !M) return { ok: false, error: 'no_manager' };
+  const o = M.offers.find((x) => x.id === id);
+  if (!o) throw new Error('unknown_offer');
+  if (o.status !== 'open') return G({ ok: false, error: 'closed', messageHe: 'ההצעה כבר לא בתוקף' });
+  if (action === 'reject') { o.status = 'rejected'; notify(); return G({ ok: true, status: 'rejected' }); }
+  if (action !== 'accept') throw new Error('bad_action');
+  if (M.st === 'done') return G({ ok: false, error: 'done', messageHe: 'קריירת האימון הסתיימה' });
+  if (M.roll) mgrFinishRollover(S);
+  if (M.job) { MG.endJob(S, 'moved'); }
+  const J = MG.startJob(S, o);
+  mgrYouthLeague(S);
+  if (J.role === 'youth' && S.week <= 40) MG.setObjective(S, J);
+  notify();
+  return G({ ok: true, status: 'accepted' });
+}
+/** Turn down every coaching offer at retirement: the career ends as a player only. */
+export function declineCoaching() {
+  const S = need();
+  const M = mgrOf(S);
+  if (!S.retired || !M || M.st !== 'offers') return { ok: false };
+  for (const o of M.offers) if (o.status === 'open') o.status = 'rejected';
+  M.st = 'done';
+  M.ended = { season: S.season, week: S.week, age: ageOf(S), reason: 'declined' };
+  notify();
+  return { ok: true };
+}
+export function mgrSetTactic(id) {
+  const S = need();
+  const M = mgrOf(S);
+  if (!M || MG.TACTIC_IDS.indexOf(id) < 0) return { ok: false };
+  M.tactic = id;
+  notify();
+  return { ok: true };
+}
+/** Play one manager week. Returns { ok, summary } (summary.results[i].reel = the watch-mode reel). */
+export function mgrAdvance(tactic) {
+  const S = need();
+  const e = mgrBusy(S);
+  if (e) return G(e);
+  if (tactic && MG.TACTIC_IDS.indexOf(tactic) >= 0) S.mgr.tactic = tactic;
+  const wk = mgrWeek(S);
+  const summary = mgrSummaryVM(S, wk);
+  notify();
+  return G({ ok: true, summary });
+}
+/** until: 'next_match' (stops before a week with a managed match) | 'season_end' | 'season_start' | 'weeks' */
+export function mgrFastForward(opts = {}) {
+  const S = need();
+  const e = mgrBusy(S);
+  if (e) return G(e);
+  const until = opts.until || 'next_match';
+  const maxW = typeof opts.maxWeeks === 'number' && opts.maxWeeks > 0 ? opts.maxWeeks : 60;
+  const nW = typeof opts.weeks === 'number' ? opts.weeks : 1;
+  const summaries = [];
+  let weeks = 0, stopped = null;
+  const s0 = S.season;
+  for (;;) {
+    if (S.mgr.st === 'done') { stopped = 'done'; break; }
+    if (until === 'next_match' && weeks > 0 && weekHasManaged(S)) { stopped = 'until'; break; }
+    if (until === 'season_start' && S.week === 1 && (S.season > s0 || weeks > 0)) { stopped = 'until'; break; }
+    if (until === 'weeks' && weeks >= nW) { stopped = 'until'; break; }
+    if (weeks >= maxW) { stopped = 'chunk'; break; }
+    const wk = mgrWeek(S);
+    weeks++;
+    const sm = mgrSummaryVM(S, wk);
+    summaries.push(sm);
+    if (wk.sacked) { stopped = 'sacked'; break; }
+    if (wk.seasonEnded && until !== 'season_start') { stopped = 'review'; break; }
+    if (wk.offers > 0) { stopped = 'offer'; break; }
+    if (until === 'next_match' && wk.mine.length > 0) { stopped = 'until'; break; }
+  }
+  notify();
+  return G({ ok: true, weeks, stopped, summaries: summaries.slice(-10) });
+}
+export function mgrRequestBudget() {
+  const S = need();
+  const e = mgrBusy(S);
+  if (e) return G(e);
+  const r = MG.requestBudget(S, R());
+  if (r.ok) notify();
+  return G(r);
+}
+export function mgrSign(targetId) {
+  const S = need();
+  const e = mgrBusy(S);
+  if (e) return G(e);
+  const r = MG.signTarget(S, targetId);
+  if (r.ok) notify();
+  return G(r);
+}
+export function mgrAckReview() {
+  const S = need();
+  const M = mgrOf(S);
+  if (!M || M.rv === null) return { ok: false };
+  M.rv = null;
+  notify();
+  return { ok: true };
+}
+/** Retire from coaching (the Hall of Fame entry then shows player + coach). */
+export function mgrRetire() {
+  const S = need();
+  const M = mgrOf(S);
+  if (!S.retired || !M || M.st === 'done') return { ok: false, error: 'no_manager' };
+  if (M.st === 'offers') return declineCoaching();
+  MG.retireCoach(S, 'voluntary');
+  notify();
+  return { ok: true };
+}
+/** Watch-mode reel of a managed result (key from ManagerVM.recent / schedule). Pure. */
+export function getMatchReel(key) {
+  const S = need();
+  const M = mgrOf(S);
+  if (!M) return null;
+  const r = M.res.find((x) => S.season + '-' + x.w + '-' + x.s + '-' + x.c === key) || M.res.find((x) => S.season + '-' + x.w + '-' + x.s === key);
+  if (!r) return null;
+  const vm = mgrResultVM(S, r);
+  vm.reel = MG.matchReel(S, r);
+  return G(vm);
+}
+
 // ---------------------------------------------------------------- persistence
 export function serialize() {
   const S = need();
@@ -1661,8 +2111,9 @@ export function getSaveMeta() {
   const nat = country(p.nation);
   return G({
     careerId: S.id, name: p.first + ' ' + p.last, nick: p.nick || '', nation: p.nation, flag: nat ? nat.flag : '', pos: p.pos,
-    posHe: posHeOf(p), age: ageOf(S), ovr: ovrOf(p), clubId: p.club || null,
-    clubHe: p.club ? clubName(p.club) : (S.retired ? '{{פרש|פרשה}}' : 'ללא קבוצה'), season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week),
+    posHe: posHeOf(p), age: ageOf(S), ovr: ovrOf(p), clubId: p.club || (mgrActive(S) && S.mgr.job.kind === 'club' ? S.mgr.job.team : null),
+    clubHe: p.club ? clubName(p.club) : mgrActive(S) ? MG.roleHe(S, S.mgr.job) + ' · ' + MG.teamNameHe(S, S.mgr.job.team) : (S.mgr && S.mgr.st === 'unemployed' ? '{{מאמן|מאמנת}} ללא קבוצה' : (S.retired ? '{{פרש|פרשה}}' : 'ללא קבוצה')),
+    manager: S.mgr ? { st: S.mgr.st, active: S.mgr.st !== 'done', team: mgrActive(S) ? S.mgr.job.team : null, kind: mgrActive(S) ? S.mgr.job.kind : null } : null, season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week),
     stage: p.stage, retired: !!S.retired, seasons: S.season - S.startSeason + 1,
     gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
   });
@@ -1676,6 +2127,7 @@ export function loadState(data) {
       if (!('look' in data.player)) data.player.look = null;
       if (typeof data.player.num !== 'number') data.player.num = defaultShirt(data.player.pos);
     }
+    if (!('mgr' in data)) data.mgr = null;
     for (const k of STATE_KEYS) if (!(k in data)) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.player || !data.world || !data.comp) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.ev.carry) data.ev.carry = [];

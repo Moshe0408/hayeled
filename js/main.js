@@ -41,7 +41,7 @@ function saveNow() {
   try {
     const res = save.saveSlot(ctx.activeSlot, game.serialize(), game.getSaveMeta(), { onQuota: (lvl) => game.compactState(lvl) });
     if (res && res.warn === 'blocked_other_tab') showOtherTab();
-    else if (res && res.warn === 'too_new') offerUpdate({ text: 'השמירה נוצרה בגרסה חדשה יותר של המשחק. רענן כדי לעדכן.', persistent: true });
+    else if (res && res.warn === 'too_new') offerUpdate({ text: 'השמירה נוצרה בגרסה חדשה יותר של המשחק. כדאי לרענן כדי לעדכן.', persistent: true });
     return res;
   } catch (e) {
     console.warn('[hayeled] save failed', e);
@@ -85,13 +85,20 @@ function onGameChange() {
 /* Slots                                                               */
 /* ------------------------------------------------------------------ */
 
+/** R2: a retired career that is coaching (or between coaching jobs) lives on #/manager; while the coaching offers
+ *  are still open (st 'offers') the retirement screen shows them. */
+function managerActive(hub) {
+  const m = hub && hub.manager;
+  return !!(m && (m.st === 'active' || m.st === 'unemployed'));
+}
+
 function routeForState() {
   const hub = hubSafe();
   if (!hub) return '#/title';
   switch (hub.status) {
     case 'match': return '#/match';
     case 'review': return '#/season';
-    case 'retired': return '#/retire';
+    case 'retired': return managerActive(hub) ? '#/manager' : '#/retire';
     default: return '#/hub';
   }
 }
@@ -105,8 +112,8 @@ async function openSlot(slot, { quiet = false } = {}) {
   let r;
   try { r = await save.loadSlot(slot); } catch (e) { console.warn(e); r = { ok: false, error: 'corrupt', messageHe: 'לא הצלחנו לקרוא את השמירה.' }; }
   if (!r || !r.ok) {
-    if (r && r.error === 'too_new') offerUpdate({ text: r.messageHe || 'השמירה נוצרה בגרסה חדשה יותר של המשחק. רענן כדי לעדכן.', persistent: true });
-    else if (r && r.error === 'corrupt') toast(r.messageHe || 'השמירה נפגמה. נסה "שחזר שמירה קודמת" או ייבוא גיבוי.');
+    if (r && r.error === 'too_new') offerUpdate({ text: r.messageHe || 'השמירה נוצרה בגרסה חדשה יותר של המשחק. כדאי לרענן כדי לעדכן.', persistent: true });
+    else if (r && r.error === 'corrupt') toast(r.messageHe || 'השמירה נפגמה. אפשר לנסות "שמירה קודמת" או ייבוא גיבוי מההגדרות.');
     else if (!quiet && r && r.messageHe) toast(r.messageHe);
     return r || { ok: false, error: 'empty' };
   }
@@ -146,7 +153,7 @@ async function startNewCareer(opts, slot) {
   const res = call(() => game.newCareer(opts));
   if (!res || !res.ok) {
     try { if (game.hasCareer() && prevSlot) ctx.activeSlot = prevSlot; } catch { /* ignore */ }
-    return res || { ok: false, messageHe: 'לא הצלחנו ליצור את הקריירה. נסה שוב.' };
+    return res || { ok: false, messageHe: 'לא הצלחנו ליצור את הקריירה. אפשר לנסות שוב.' };
   }
   cancelAutosave();
   refreshGender();
@@ -303,7 +310,7 @@ async function applyUpdate() {
 async function checkUpdates() {
   if (!reg) { toast('בדיקת עדכונים לא זמינה בדפדפן הזה'); return; }
   try { await reg.update(); } catch { toast('אין חיבור לרשת כרגע'); return; }
-  if (reg.waiting) { offerUpdate(); toast('יש גרסה חדשה! לחץ "עדכן עכשיו" למעלה'); }
+  if (reg.waiting) { offerUpdate(); toast('יש גרסה חדשה! הכפתור "עדכן עכשיו" למעלה'); }
   else if (reg.installing) toast('מוריד גרסה חדשה...');
   else toast('יש לך את הגרסה האחרונה ✓');
 }
@@ -321,10 +328,10 @@ function applyRemote(cfg) {
     const cmp = svc.remote.compareVersions;
     if (v && cmp) {
       if (cmp(APP_VERSION, v.min || '0.0.0') < 0) {
-        offerUpdate({ text: v.messageHe || 'יש גרסה חדשה. רענן כדי לעדכן', persistent: true });
+        offerUpdate({ text: v.messageHe || 'יש גרסה חדשה. מרעננים כדי לעדכן', persistent: true });
         if (reg) reg.update().catch(() => {});
       } else if (cmp(APP_VERSION, v.latest || '0.0.0') < 0) {
-        offerUpdate({ text: v.messageHe || 'יש גרסה חדשה. רענן כדי לעדכן' });
+        offerUpdate({ text: v.messageHe || 'יש גרסה חדשה. מרעננים כדי לעדכן' });
         if (reg) reg.update().catch(() => {});
       }
     }
@@ -391,7 +398,7 @@ function guard(info) {
   if (!PUBLIC_ROUTES.has(info.path) && !has) return '#/title';
   if (has) {
     const hub = hubSafe();
-    if (hub && hub.status === 'retired' && ['/hub', '/match', '/season', '/offers', '/shop'].includes(info.path)) return '#/retire';
+    if (hub && hub.status === 'retired' && ['/hub', '/match', '/season', '/offers'].includes(info.path)) return managerActive(hub) ? '#/manager' : '#/retire';
   }
   return null;
 }
@@ -400,14 +407,19 @@ function guard(info) {
 /* Boot                                                                */
 /* ------------------------------------------------------------------ */
 
-/** Play the intro unless tests skip it ('hy.intro.skip' = '1'). Never blocks boot for more than 14 s, never throws. */
-function startIntro(gender) {
+/** Play the intro on every app open (R1) unless tests skip it ('hy.intro.skip' = '1').
+ *  Never blocks boot for more than 14 s, never throws. Resolves { played, done }. */
+async function startIntro(gender) {
   let skip = false;
   try { skip = localStorage.getItem('hy.intro.skip') === '1'; } catch { skip = false; }
-  if (skip || typeof playIntro !== 'function') return Promise.resolve();
+  if (skip || typeof playIntro !== 'function') return { played: false, done: false };
   let p;
-  try { p = Promise.resolve(playIntro(gender ? { gender } : {})); } catch (e) { console.warn('[hayeled] intro', e); return Promise.resolve(); }
-  return Promise.race([p.catch((e) => console.warn('[hayeled] intro', e)), new Promise((r) => setTimeout(r, 14000))]);
+  try { p = Promise.resolve(playIntro(gender ? { gender } : {})); } catch (e) { console.warn('[hayeled] intro', e); return { played: false, done: false }; }
+  const r = await Promise.race([p.catch((e) => { console.warn('[hayeled] intro', e); return null; }), new Promise((res) => setTimeout(() => res(null), 14000))]);
+  // a run that failed to render (or timed out) is neither "watched" nor "skipped": not tracked
+  const res = { played: !!r && !r.off && !r.failed, done: !!(r && r.done) };
+  if (res.played) { try { svc.telemetry.track('intro', { done: res.done }); } catch { /* ignore */ } }
+  return res;
 }
 
 async function boot() {
@@ -468,7 +480,11 @@ async function boot() {
 
   // Opening cinematic (contract C8): the first screen is shown when it ends (or is skipped).
   refreshGender();
-  await startIntro(careerGender());
+  const intro = await startIntro(careerGender());
+  // R1: every real app open goes intro -> title screen (gold "המשך קריירה" first). Deep links to the public
+  // screens (settings, Hall of Fame, feedback, install) are kept. With the test flag 'hy.intro.skip' the
+  // v2 resume behaviour stays (straight back to the career), which the e2e persistence scenarios rely on.
+  if (intro.played && !(PUBLIC_ROUTES.has(startInfo.path) && !['/title', '/new'].includes(startInfo.path) && isKnownHash(startHash))) initial = '#/title';
   setGuard(guard);
   onRoute((info) => {
     if (info.path === '/hub') {
@@ -486,6 +502,6 @@ boot().catch((e) => {
   console.warn('[hayeled] boot failed', e);
   try { showErrorScreen(e); } catch {
     const app = document.getElementById('app');
-    if (app) app.textContent = 'המשחק לא נטען. נסה לרענן את הדף.';
+    if (app) app.textContent = 'המשחק לא נטען. כדאי לרענן את הדף.';
   }
 });
