@@ -1,8 +1,9 @@
 // Headless career simulation through the facade only (SPEC §10.1).
-// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--seed 1] [--quick]
+// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--seed 1] [--quick] [--gender m|f|both]   (default both: every career runs as a boy and as a girl)
 import * as game from '../js/engine/game.js';
 import { rngFor, hash32 } from '../js/core/rng.js';
 import { LEAGUES, LEAGUE_BY_ID, CLUB_INDEX, EURO_FILLER_CLUBS } from '../js/data/leagues.js';
+import { WOMEN_ECON } from '../js/engine/state.js';
 
 // ---------------- args
 const argv = process.argv.slice(2);
@@ -12,9 +13,11 @@ const CAREERS = QUICK ? 3 : arg('careers', 12);
 const SEASONS = QUICK ? 6 : arg('seasons', 25);
 const SEED = arg('seed', 1);
 const VERBOSE = argv.includes('--verbose');
+const GARG = (() => { const i = argv.indexOf('--gender'); return i >= 0 && argv[i + 1] ? argv[i + 1] : 'both'; })();
+const GENDERS = GARG === 'm' ? ['m'] : GARG === 'f' ? ['f'] : ['m', 'f'];
 
 const violations = [];
-const checkCounts = { seasonEnd: 0, world: 0, purity: 0, schedule: 0, player: 0 };
+const checkCounts = { seasonEnd: 0, world: 0, purity: 0, schedule: 0, player: 0, walks: 0, matchLogs: 0, women: 0, econ: 0, migrate: 0 };
 const warnings = [];
 function fail(msg, detail) {
   if (violations.length < 200) violations.push(detail !== undefined ? msg + ' :: ' + JSON.stringify(detail).slice(0, 400) : msg);
@@ -22,11 +25,19 @@ function fail(msg, detail) {
 function warn(msg) { warnings.push(msg); }
 
 // ---------------- deep scans
-const PH = /\{[a-z0-9]+\}/;
+const PH = /\{[a-zA-Z0-9_]+\}/;
+const GM = /\{\{|\}\}|undefined|NaN|\[object /;
+let CUR_G = 'm';
+const MEN_ONLY = /לנשים|לנערות|כדור הזהב לנשים|הכישרון הצעיר/;
 function scanVM(v, where, path = '') {
   if (v === null || v === undefined) return;
   if (typeof v === 'number') { if (!Number.isFinite(v)) fail('non-finite number in ' + where + ' at ' + path, v); return; }
-  if (typeof v === 'string') { if (PH.test(v)) fail('unfilled placeholder in ' + where + ' at ' + path, v); return; }
+  if (typeof v === 'string') {
+    if (PH.test(v)) fail('unfilled placeholder in ' + where + ' at ' + path, v);
+    if (GM.test(v)) fail('gender marker leak in ' + where + ' at ' + path, v);
+    if (CUR_G === 'm' && MEN_ONLY.test(v)) fail("women's name in a men's career " + where + ' at ' + path, v);
+    return;
+  }
   if (typeof v === 'function') { fail('function in VM ' + where + ' at ' + path); return; }
   if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) scanVM(v[i], where, path + '[' + i + ']'); return; }
   if (typeof v === 'object') for (const k of Object.keys(v)) scanVM(v[k], where, path + '.' + k);
@@ -208,28 +219,62 @@ function purityCheck(tag) {
   return sig0;
 }
 
+// Walk every view model the facade can return right now (C2 leak scan) + women's names / econ checks (C3).
+const W_EURO = { ucl: 'ליגת האלופות לנשים', uel: 'הליגה האירופית לנשים', uecl: 'הקונפרנס ליג לנשים' };
+function walkAll(tag) {
+  checkCounts.walks++;
+  for (const [name, fn] of GETTERS) chk(name, fn());
+  const comps = chk('getCompetitions', game.getCompetitions());
+  const ids = new Set(comps.mine.map((c) => c.id).concat(comps.europe.map((c) => c.id)));
+  for (const id of ids) { chk('getTable:' + id, game.getTable(id)); chk('getBracket:' + id, game.getBracket(id)); chk('getResults:' + id, game.getResults(id)); }
+  for (const it of game.getInbox()) chk('getThread:' + it.id, game.getThread(it.id));
+  const hub = game.getHub(), meta = game.getSaveMeta(), prof = game.getProfile();
+  if (hub.player.gender !== CUR_G || meta.gender !== CUR_G || prof.gender !== CUR_G) fail(tag + ' gender mismatch in VMs', [CUR_G, hub.player.gender, meta.gender, prof.gender]);
+  if (CUR_G === 'f') {
+    checkCounts.women++;
+    for (const c of comps.europe) if (c.he !== W_EURO[c.id]) fail(tag + " women's euro name", c);
+    for (const g of comps.leagues) for (const it of g.items) {
+      const lg = LEAGUE_BY_ID[it.id];
+      if (lg && it.he !== lg.nameHeW) fail(tag + " women's league name", [it.id, it.he]);
+      if (!lg && it.kind === 'cup') { const l2 = LEAGUES.find((l) => l.cup && l.cup.id === it.id); if (l2 && it.he !== l2.cup.nameHeW) fail(tag + " women's cup name", [it.id, it.he]); }
+    }
+    if (hub.club && hub.club.leagueHe && LEAGUE_BY_ID[game.serialize().world.clubs[hub.club.id].lg] && hub.club.leagueHe !== LEAGUE_BY_ID[game.serialize().world.clubs[hub.club.id].lg].nameHeW) fail(tag + " hub women's league", hub.club.leagueHe);
+    const aw = game.getAwards();
+    for (const a of aw.mine) {
+      if (a.key === 'ballon_dor' && a.he !== 'כדור הזהב לנשים') fail(tag + " women's Ballon d'Or label", a.he);
+      if (a.key === 'golden_boy' && a.he.indexOf('הכישרון הצעיר') < 0) fail(tag + ' women golden boy label', a.he);
+    }
+    const car = game.getCareer();
+    for (const t of car.trophies) if ((t.key === 'ucl' || t.key === 'wc') && t.he.indexOf('לנשים') < 0) fail(tag + " women's trophy label", t);
+    for (const s of game.getSchedule().fixtures) if (s.kind === 'europe' && s.compHe.indexOf('לנשים') < 0) fail(tag + " women's fixture comp", s.compHe);
+  }
+}
+
 // ---------------- policy
 const POS = ['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CAM', 'LW', 'RW', 'ST'];
-function careerOpts(i) {
+function careerOpts(i, gender = 'm') {
   const r = rngFor(SEED, i, 'opts');
-  const co = game.getCreateOptions({ seed: hash32(SEED, i) });
+  const co = game.getCreateOptions({ seed: hash32(SEED, i), gender });
   const fixedNations = ['isr', 'eng', 'bra', 'cro', 'isr', 'esp', 'arg', 'ger'];
   const nation = i < fixedNations.length ? fixedNations[i] : r.pick(co.nations).id;
   const pos = POS[(i * 3 + SEED) % POS.length];
-  const ac = game.getAcademyOptions(nation);
+  const ac = game.getAcademyOptions(nation, { gender });
   let groups = ac.groups;
   if (nation === 'isr' && i % 2 === 0) groups = groups.filter((g) => g.tier === 1);
   const g = r.pick(groups);
   const club = r.pick(g.clubs).id;
-  return { first: 'שחקן' + i, last: 'בדיקה', nick: r.chance(0.5) ? r.pick(co.nicknames) || '' : '', nation, pos, foot: r.chance(0.7) ? 'R' : 'L', club };
+  const look = i % 3 === 0 ? { skin: i % 5, hair: (i * 7) % 6 } : undefined;
+  return { first: (gender === 'f' ? 'שחקנית' : 'שחקן') + i, last: 'בדיקה', nick: r.chance(0.5) ? r.pick(co.nicknames) || '' : '', nation, pos, foot: r.chance(0.7) ? 'R' : 'L', club, gender, look };
 }
 
 function ageNow() { return game.getHub().player.age; }
 
-function runCareer(i, { roundTrip = false, collect = true, checks = true } = {}) {
-  const opts = careerOpts(i);
-  const res = chk('newCareer', game.newCareer({ ...opts, seed: hash32(SEED, i), now: 0 }));
+function runCareer(i, { roundTrip = false, collect = true, checks = true, gender = 'm' } = {}) {
+  CUR_G = gender;
+  const opts = careerOpts(i, gender);
+  const res = chk('newCareer', game.newCareer({ ...opts, seed: hash32(SEED, i, gender === 'f' ? 'f' : ''), now: 0 }));
   if (!res.ok) { fail('newCareer failed', res); return null; }
+  if (checks) checkEcon(i, gender);
   const pol = rngFor(SEED, i, 'policy');
   const signals = [];
   const take = () => { for (const s of game.getAndClearSignals()) signals.push(s); };
@@ -293,8 +338,10 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true } = {})
         }
         if (m.phase !== 'ended') m = game.autoPlayMatch();
       }
+      const preLive = checks ? JSON.parse(JSON.stringify(game.serialize().live)) : null;
       const sum = chk('finishMatch', game.finishMatch());
       take();
+      if (checks) checkMatchLog(sum, preLive, 'c' + i + gender + ' ' + S.season + 'w' + S.week);
       if (!(sum.rating >= 3 && sum.rating <= 10)) fail('rating out of range', sum.rating);
       if (collect) {
         calib.ratings.push(sum.rating);
@@ -345,6 +392,7 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true } = {})
         if (!lr.ok) fail('loadState round trip (rt)', lr);
       }
       if (checks && seasonsDone % 5 === 1) purityCheck('c' + i + ' s' + S.season);
+      if (checks) walkAll('c' + i + gender + ' s' + S.season);
     }
     if (collect && S.week % 1 === 0 && S.comp) {
       for (const lid of Object.keys(S.comp.lg)) {
@@ -372,10 +420,11 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true } = {})
     chk('getRetirement', game.getRetirement());
     retiredAge = S.retired.age;
   }
-  if (checks) checkSpells(S, 'c' + i + ' end');
+  if (checks) { checkSpells(S, 'c' + i + ' end'); walkAll('c' + i + gender + ' end'); }
   // inbox placeholders
-  for (const it of S.inbox) for (const l of it.lines) if (PH.test(l.t)) fail('inbox placeholder', l.t);
-  return { S, signals, elapsed, weeks, matches: matchCount, maxSize, sizes, midTransfer, retiredAge, opts, seasons: S.season - start + (S.retired ? 1 : 0) };
+  for (const it of S.inbox) for (const l of it.lines) { if (PH.test(l.t)) fail('inbox placeholder', l.t); if (GM.test(l.t)) fail('inbox gender marker', l.t); }
+  for (const e of S.hist.timeline) if (GM.test(e.t) || PH.test(e.t)) fail('timeline leak', e.t);
+  return { S, signals, elapsed, weeks, matches: matchCount, maxSize, sizes, midTransfer, retiredAge, opts, gender, seasons: S.season - start + (S.retired ? 1 : 0) };
 }
 
 function summarize(r, i) {
@@ -392,7 +441,7 @@ function summarize(r, i) {
   for (const t of S.hist.awards) awards[t.k] = (awards[t.k] || 0) + 1;
   const bdo = S.hist.bdo.filter((b) => b.rank > 0).map((b) => b.s + ':' + b.rank);
   return {
-    career: i, nation: p.nation, pos: p.pos, pot: p.pot, academy: r.opts.club, clubs, leagues, apps: tot.apps, goals: tot.g, assists: tot.a,
+    career: i, gender: p.gender, nation: p.nation, pos: p.pos, pot: p.pot, academy: r.opts.club, clubs, leagues, apps: tot.apps, goals: tot.g, assists: tot.a,
     trophies, awards, caps: p.caps.senior, intlGoals: p.ig.senior, youthCaps: p.caps.u17 + p.caps.u19 + p.caps.u21, peakOvr: p.peak,
     ballonDor: bdo, retired: S.retired ? S.retired.reason + '@' + S.retired.age : 'active@' + (S.season - p.born), legacy: S.retired ? S.retired.legacy : null,
     seasons: r.seasons, ms: r.elapsed, maxSaveKB: Math.round(r.maxSize / 1024),
@@ -400,12 +449,113 @@ function summarize(r, i) {
   };
 }
 
+// ---------------- C4 match log structure
+const EVS = new Set(['kickoff', 'goal', 'sub', 'card', 'ht', 'ft', 'et', 'pens', 'moment', 'info']);
+function checkMatchLog(sum, live, tag) {
+  checkCounts.matchLogs++;
+  const log = sum.log || [];
+  if (!log.length) { fail(tag + ' empty match log'); return; }
+  if (log[0].ev !== 'kickoff') fail(tag + ' first log entry not kickoff', log[0]);
+  if (log[log.length - 1].ev !== 'ft') fail(tag + ' last log entry not ft', log[log.length - 1].ev);
+  const my = sum.isHome ? sum.score[0] : sum.score[1], th = sum.isHome ? sum.score[1] : sum.score[0];
+  let gOwn = 0, gOpp = 0, gMe = 0, subMate = 0, subOpp = 0, subMe = 0, prevMin = -1;
+  for (const e of log) {
+    if (!EVS.has(e.ev)) fail(tag + ' bad ev', e.ev);
+    if (typeof e.minute !== 'number' || e.minute < prevMin) fail(tag + ' log minutes not ordered', [prevMin, e.minute, e.ev]);
+    prevMin = e.minute;
+    if (!Array.isArray(e.score) || e.score.length !== 2) fail(tag + ' log entry without score', e);
+    if (e.mega && e.who !== 'me') fail(tag + ' mega on a non-me entry', e);
+    if (e.mega && e.ev !== 'goal') fail(tag + ' mega on a non-goal entry', e);
+    if (e.ev === 'goal') {
+      if (['me', 'mate', 'opp'].indexOf(e.who) < 0) fail(tag + ' goal without who', e);
+      if (e.side !== 'own' && e.side !== 'opp') fail(tag + ' goal without side', e);
+      if ((e.who === 'opp') !== (e.side === 'opp')) fail(tag + ' goal who/side mismatch', e);
+      if (!e.scorerHe) fail(tag + ' goal without scorer', e);
+      if (e.who === 'me' && !e.big) fail(tag + ' my goal not big', e);
+      if (e.side === 'own') gOwn++; else gOpp++;
+      if (e.who === 'me') gMe++;
+    }
+    if (e.ev === 'sub') {
+      if (!e.inHe || !e.outHe) { if (!(e.who === 'me' && (e.inHe || e.outHe))) fail(tag + ' sub without names', e); }
+      if (e.who === 'me') subMe++; else if (e.side === 'own') subMate++; else if (e.side === 'opp') subOpp++;
+    }
+  }
+  if (gOwn !== my || gOpp !== th) fail(tag + ' goal entries != final score', [gOwn, gOpp, my, th]);
+  if (gMe !== sum.goals) fail(tag + " 'me' goals != player goals", [gMe, sum.goals]);
+  if (subMate < 2 || subOpp < 2) fail(tag + ' cosmetic subs missing', [subMate, subOpp]);
+  if (live && live.role === 'bench' && subMe < 1) fail(tag + ' bench player without own sub entry');
+  if (live && live.role === 'starter' && live.off < 90 && subMe < 1) fail(tag + ' subbed-off starter without own sub entry');
+  const last = log[log.length - 1].score;
+  if (last[0] !== sum.score[0] || last[1] !== sum.score[1]) fail(tag + ' last log score != final', [last, sum.score]);
+}
+
+// ---------------- C3 economy
+function checkEcon(i, gender) {
+  checkCounts.econ++;
+  const S = game.serialize();
+  const e = gender === 'f' ? WOMEN_ECON : 1;
+  if (S.econ !== e) fail('c' + i + gender + ' econ', S.econ);
+  if (S.player.gender !== gender) fail('c' + i + ' state gender', S.player.gender);
+  if (S.player.money !== Math.round(1500 * e)) fail('c' + i + gender + ' start money not scaled', S.player.money);
+  const s0 = S.world.clubs[S.player.club].s;
+  if (S.player.contract.wage !== Math.round((150 + 5 * s0) * e)) fail('c' + i + gender + ' youth wage not scaled', S.player.contract.wage);
+  const items = game.getShop().cats.flatMap((c) => c.items);
+  const car = items.find((x) => x.id === 'car_old');
+  if (car) { const exp = e === 1 ? 3000 : Number((3000 * e).toPrecision(2)); if (car.price !== exp) fail('c' + i + gender + ' shop price not scaled', [car.price, exp]); }
+  const v = game.getHub().player.value;
+  if (gender === 'f' && v > 2e6) fail('c' + i + ' women value too high', v);
+}
+
+// ---------------- v1 -> v2 migration
+function migrationCheck() {
+  checkCounts.migrate++;
+  CUR_G = 'm';
+  game.newCareer({ ...careerOpts(2, 'm'), seed: hash32(SEED, 'mig'), now: 0 });
+  game.fastForward({ until: 'weeks', weeks: 6 });
+  const v1 = JSON.parse(JSON.stringify(game.serialize()));
+  v1.v = 1; delete v1.econ; delete v1.player.gender; delete v1.player.look; delete v1.player.num;
+  const m = game.migrateState(v1, 1);
+  const lr = game.loadState(m);
+  if (!lr.ok) { fail('migrated v1 state does not load', lr); return; }
+  const S = game.serialize();
+  if (S.v !== game.SCHEMA_VERSION || S.econ !== 1 || S.player.gender !== 'm' || S.player.look !== null || typeof S.player.num !== 'number') fail('migration defaults', [S.v, S.econ, S.player.gender, S.player.look, S.player.num]);
+  walkAll('migrated');
+  // a v1 save taken in the middle of a live match (old LiveMatch shape) must keep playing
+  for (let k = 0; k < 60 && !game.serialize().live; k++) {
+    const r = game.fastForward({ until: 'next_match' });
+    if (r.stopped === 'review') game.ackSeasonReview();
+    for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept) game.respondOffer(o.id, 'accept');
+  }
+  if (game.serialize().live) {
+    let m = game.startMatch();
+    if (m.moment) game.chooseMoment(0);
+    const v1m = JSON.parse(JSON.stringify(game.serialize()));
+    v1m.v = 1; delete v1m.econ; delete v1m.player.gender; delete v1m.player.look; delete v1m.player.num;
+    const L = v1m.live;
+    for (const k of ['ck', 'cc', 'cx', 'ci', 'out', 'mg', 'pn']) delete L[k];
+    for (const k of ['x', 'b', 'ox', 'ob', 'po', 'pi']) delete L.nm[k];
+    L.log = L.log.map((e) => ({ m: e.m, t: e.t, k: e.k }));
+    const lr2 = game.loadState(game.migrateState(v1m, 1));
+    if (!lr2.ok) fail('migrated mid-match v1 state does not load', lr2);
+    else {
+      chk('getMatch(migrated)', game.getMatch());
+      const vm = chk('autoPlayMatch(migrated)', game.autoPlayMatch());
+      for (const e of vm.log) if (!e.ev || !Array.isArray(e.score)) fail('migrated log entry without ev/score', e);
+      chk('finishMatch(migrated)', game.finishMatch());
+      chk('resumeWeek(migrated)', game.resumeWeek());
+    }
+  } else warn('migration check: no live match reached');
+  let threw = false;
+  try { game.migrateState({ v: game.SCHEMA_VERSION + 1 }, game.SCHEMA_VERSION + 1); } catch (e) { threw = true; }
+  if (!threw) fail('migrateState accepts a newer schema');
+}
+
 // ---------------- main
 const T0 = Date.now();
 const results = [];
 let totalSeasons = 0, totalMs = 0;
-for (let i = 0; i < CAREERS; i++) {
-  const r = runCareer(i);
+for (const gender of GENDERS) for (let i = 0; i < CAREERS; i++) {
+  const r = runCareer(i, { gender });
   if (!r) continue;
   results.push(r);
   totalSeasons += r.seasons; totalMs += r.elapsed;
@@ -415,16 +565,24 @@ for (let i = 0; i < CAREERS; i++) {
 
 // determinism
 function plainHash(i, opts) { runCareer(i, opts); return stateHash(); }
-const dOpts = { collect: false, checks: false };
-const hA = plainHash(0, dOpts);
-const hB = plainHash(0, dOpts);
-const hC = plainHash(0, { ...dOpts, roundTrip: true });
-if (hA !== hB) fail('determinism: two plain runs differ', [hA, hB]);
-if (hA !== hC) fail('determinism: save/load round trip differs', [hA, hC]);
+let detOk = true;
+const detHashes = {};
+for (const gender of GENDERS) {
+  const dOpts = { collect: false, checks: false, gender };
+  const hA = plainHash(0, dOpts);
+  const hB = plainHash(0, dOpts);
+  const hC = plainHash(0, { ...dOpts, roundTrip: true });
+  detHashes[gender] = hA;
+  if (hA !== hB) { detOk = false; fail('determinism (' + gender + '): two plain runs differ', [hA, hB]); }
+  if (hA !== hC) { detOk = false; fail('determinism (' + gender + '): save/load round trip differs', [hA, hC]); }
+}
+if (GENDERS.length === 2 && detHashes.m === detHashes.f) fail('boy and girl careers produced the same state');
+migrationCheck();
 
 // chunked vs unchunked fast-forward
-{
-  const opts = careerOpts(1);
+for (const gender of GENDERS) {
+  CUR_G = gender;
+  const opts = careerOpts(1, gender);
   game.newCareer({ ...opts, seed: hash32(SEED, 99), now: 0 });
   game.fastForward({ until: 'weeks', weeks: 3 });
   const snap = JSON.stringify(game.serialize());
@@ -493,7 +651,7 @@ const report = {
   gkCleanSheets: calib.gkMatches ? +(calib.gkCS / calib.gkMatches).toFixed(3) : null,
   maxSaveKB: Math.round(maxSave / 1024), saveKBBySeason: results[0] ? results[0].sizes.map((x) => Math.round(x / 1024)) : [],
   avgSeasonMs: Math.round(avgSeasonMs), totalSec: +((Date.now() - T0) / 1000).toFixed(1), midSeasonTransfer: midTransfer,
-  determinism: hA === hB && hA === hC ? 'ok' : 'FAIL', checksRun: checkCounts,
+  genders: GENDERS, determinism: detOk ? 'ok' : 'FAIL', checksRun: checkCounts,
 };
 console.log('REPORT ' + JSON.stringify(report, null, 1));
 if (warnings.length) { console.log('CALIBRATION WARNINGS:'); for (const w of warnings) console.log('  - ' + w); }

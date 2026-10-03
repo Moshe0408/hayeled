@@ -141,3 +141,14 @@ export const COUNTRIES = [
 
 export const COUNTRY_BY_ID = {};
 for (const c of COUNTRIES) COUNTRY_BY_ID[c.id] = c;
+
+// Women's national team strength (career gender 'f'), same scale as `strength`. Unlisted: max(40, strength - 14).
+export const WOMEN_STRENGTH = {
+  esp: 89, usa: 88, eng: 88, ger: 86, swe: 86, fra: 85, jpn: 83, ned: 83, bra: 82, can: 82, aus: 80, nor: 79, den: 78, prk: 78,
+  ita: 78, chn: 76, col: 75, bel: 75, isl: 74, sui: 74, aut: 74, kor: 74, por: 74, nga: 74, sco: 72, irl: 71, mex: 71, wal: 70,
+  fin: 70, pol: 70, cze: 70, arg: 70, rsa: 70, jam: 70, chi: 70, mar: 68, cmr: 68, zam: 68, crc: 68, ven: 68, ukr: 67, srb: 66,
+  gha: 66, vie: 66, par: 66, hun: 64, rou: 64, pan: 64, tha: 64, svk: 63, svn: 63, civ: 63, cro: 62, hai: 62, phi: 62, uru: 60,
+  ecu: 60, tur: 58, alg: 58, tun: 58, sen: 58, irn: 58, per: 58, gre: 57, bih: 56, mli: 55, egy: 55, jor: 55, isr: 54, bol: 52,
+  uae: 46, ksa: 45, qat: 45,
+};
+for (const c of COUNTRIES) c.strengthW = WOMEN_STRENGTH[c.id] !== undefined ? WOMEN_STRENGTH[c.id] : Math.max(40, c.strength - 14);

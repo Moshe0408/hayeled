@@ -4,25 +4,27 @@ import { COUNTRIES, COUNTRY_BY_ID } from '../data/countries.js';
 import { summerTournaments, CONFED_TOUR, tournamentSlots, intlSlotIndex, intlSlotOf } from './calendar.js';
 import { roundRobin } from './schedule.js';
 import { newTable, tableApply, rankRows } from './world.js';
-import { clamp, round1, sortIds } from './util.js';
+import { clamp, round1, sortIds, isF } from './util.js';
 
 export const YOUTH_OFF = { u17: 22, u19: 16, u21: 10 };
 const WC_QUOTA = { UEFA: 16, CAF: 9, AFC: 8, CONMEBOL: 6, CONCACAF: 6 };
 const KO_KEY = { 32: 'r32', 16: 'r16', 8: 'qf', 4: 'sf', 2: 'f' };
 
 export function countriesOf(confed) { return sortIds(COUNTRIES.filter((c) => c.confed === confed).map((c) => c.id)); }
-export function nstr(S, id) { const v = S.nt.str[id]; return typeof v === 'number' ? v : ((COUNTRY_BY_ID[id] && COUNTRY_BY_ID[id].strength) || 50); }
+// Base national strength: the women's table when the career is women's football (C3).
+export function natBase(S, id) { const c = COUNTRY_BY_ID[id]; if (!c) return 50; return isF(S) && typeof c.strengthW === 'number' ? c.strengthW : c.strength; }
+export function nstr(S, id) { const v = S.nt.str[id]; return typeof v === 'number' ? v : natBase(S, id); }
 export function youthNStr(S, id, lvl) { return nstr(S, id) - (YOUTH_OFF[lvl] || 0); }
 
-export function initNational(S) {
+export function initNational(S, gender) {
   const str = {};
-  for (const c of COUNTRIES) str[c.id] = c.strength;
+  for (const c of COUNTRIES) str[c.id] = gender === 'f' && typeof c.strengthW === 'number' ? c.strengthW : c.strength;
   S.nt = { str, q: null, tour: null, ytour: null, called: {}, hist: [], fr: [] };
 }
 
 export function driftNational(S, rng) {
   for (const id of sortIds(Object.keys(S.nt.str))) {
-    const base = (COUNTRY_BY_ID[id] && COUNTRY_BY_ID[id].strength) || S.nt.str[id];
+    const base = COUNTRY_BY_ID[id] ? natBase(S, id) : S.nt.str[id];
     S.nt.str[id] = round1(clamp(S.nt.str[id] + 0.2 * (base - S.nt.str[id]) + rng.normal(0, 0.8), 30, 95));
   }
 }

@@ -4,6 +4,7 @@ import { esc } from './dom.js';
 import { call, toast, confirmDialog } from './app.js';
 import { card, empty } from './components.js';
 import { money } from './format.js';
+import { gtext } from './gender.js';
 
 const CAT_ICO = { car: '🚗', home: '🏠', family: '👨‍👩‍👦', style: '👔' };
 
@@ -32,7 +33,7 @@ export function render(root) {
       const ok = await confirmDialog({ title: 'לקנות?', text: `${name} ב-${money(price)}`, yes: 'קונים!' });
       if (!ok) return;
       const r = call(() => game.buyItem(id));
-      if (r) toast(r.messageHe || (r.ok ? 'תתחדש!' : 'אין מספיק כסף'));
+      if (r) toast(r.messageHe || (r.ok ? gtext('{{תתחדש|תתחדשי}}!') : 'אין מספיק כסף'));
     } else if (b.dataset.act === 'sell') {
       const ok = await confirmDialog({ title: 'למכור?', text: `${name} ב-${money(Math.round(price * 0.6))}`, yes: 'מוכרים' });
       if (!ok) return;

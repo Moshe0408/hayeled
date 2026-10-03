@@ -1,4 +1,53 @@
 // Small pure helpers shared by the engine.
+import { C } from './state.js';
+
+// ---------- gender (C1/C2) ----------
+/** Gender of the current career ('m' when there is none). */
+export function curGender() { const S = C.S; return S && S.player && S.player.gender === 'f' ? 'f' : 'm'; }
+export function isF(S) { return !!(S && S.player && S.player.gender === 'f'); }
+const GMARK = /\{\{([^{}|]*)\|([^{}]*)\}\}/g;
+/** Resolve gender markers {{male|female}}. gender defaults to the current career's gender. */
+export function gtext(str, gender) {
+  if (typeof str !== 'string' || str.indexOf('{{') < 0) return str;
+  const f = (gender === undefined || gender === null ? curGender() : gender) === 'f';
+  return str.replace(GMARK, (m, a, b) => (f ? b : a));
+}
+/** Pick by gender: g(male, female). */
+export function gpick(male, female, gender) { return ((gender === undefined || gender === null ? curGender() : gender) === 'f') ? female : male; }
+/** Deep-resolve gender markers in a fresh VM (in place). Never call on live state objects other than strings. */
+export function gdeep(v, gender) {
+  if (typeof v === 'string') return v.indexOf('{{') >= 0 ? gtext(v, gender) : v;
+  if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) { const x = v[i]; if (x !== null && typeof x !== 'number' && typeof x !== 'boolean') v[i] = gdeep(x, gender); } return v; }
+  if (v && typeof v === 'object') { for (const k of Object.keys(v)) { const x = v[k]; if (x !== null && typeof x !== 'number' && typeof x !== 'boolean') v[k] = gdeep(x, gender); } return v; }
+  return v;
+}
+// Female forms of shared labels from strings.js, used only when the label carries no {{m|f}} marker.
+const FEM = {
+  'שחקן ליגה': 'שחקנית ליגה', 'שחקן מוערך': 'שחקנית מוערכת', 'כוכב': 'כוכבת',
+  'כוכב הקבוצה': 'כוכבת הקבוצה', 'שחקן מפתח': 'שחקנית מפתח', 'שחקן סגל': 'שחקנית סגל',
+  'מקצוען': 'מקצוענית', 'שחקן חופשי': 'שחקנית חופשית', 'פרש': 'פרשה', 'נוער': 'נערות',
+  'פצוע': 'פצועה', 'מורחק': 'מורחקת', 'קבוצת הנוער': 'קבוצת הנערות',
+  'שוער': 'שוערת', 'בלם': 'בלמית', 'מגן שמאלי': 'מגנה שמאלית', 'מגן ימני': 'מגנה ימנית', 'מגן': 'מגנה', 'קשר אחורי': 'קשרית אחורית',
+  'קשר מרכזי': 'קשרית מרכזית', 'קשר התקפי': 'קשרית התקפית', 'קשר': 'קשרית', 'חלוץ': 'חלוצה',
+  'אתה פצוע': 'את פצועה', 'אתה מורחק למשחק הבא': 'את מורחקת למשחק הבא', 'אתה שחקן חופשי. בדוק הצעות': 'את שחקנית חופשית. בדקי הצעות',
+  'בת הזוג': 'בן הזוג',
+};
+/** Label from strings.js for the current career: markers resolved; female fallback forms when the label has no marker. */
+export function femLabel(s, gender) {
+  if (typeof s !== 'string') return s;
+  if (s.indexOf('{{') >= 0) return gtext(s, gender);
+  const f = (gender === undefined || gender === null ? curGender() : gender) === 'f';
+  return f && Object.prototype.hasOwnProperty.call(FEM, s) ? FEM[s] : s;
+}
+/** Economy scale of a career (C3): 1 for men, ~0.12 for women. */
+export function econOf(S) { return S && typeof S.econ === 'number' && S.econ > 0 ? S.econ : 1; }
+/** Scale a money amount by the career economy and round to 2 significant digits (keeps prices tidy). */
+export function econMoney(S, n) {
+  const e = econOf(S);
+  if (e === 1 || !n) return n || 0;
+  const v = Math.max(1, sigRound(Math.abs(n) * e, 2));
+  return n < 0 ? -v : v;
+}
 
 export function clamp(x, lo, hi) {
   if (!Number.isFinite(x)) x = lo;
@@ -22,8 +71,11 @@ export function hePrefix(prefix, name) {
   const s = String(name || '');
   return prefix + (s.length > 1 && s[0] === 'ה' ? s.slice(1) : s);
 }
-export function fill(template, vars) {
+export function fill(template, vars, gender) {
   if (typeof template !== 'string') return '';
+  return gtext(fillRaw(template, vars), gender);
+}
+function fillRaw(template, vars) {
   // "ב{comp}" -> "בליגה האירופית", not "בהליגה האירופית". Only competition names: club names such as
   // "הפועל באר שבע" keep their ה ("להפועל").
   return template.replace(/(^|[\s"'(״׳-])([בלכ])\{(comp|league|cup|tournament|tour)\}/g, (m, pre, letter, k) => {

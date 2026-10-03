@@ -1,8 +1,8 @@
 // Player model: creation, OVR, potential, development, aging, injuries, value, wages (SPEC §5.11).
 import { rngFor } from '../core/rng.js';
 import { INJURIES } from '../data/strings.js';
-import { clamp, round1, sround1, sigRound, avg } from './util.js';
-import { emptyStats } from './state.js';
+import { clamp, round1, sround1, sigRound, avg, econOf } from './util.js';
+import { emptyStats, defaultShirt } from './state.js';
 
 export const OUT_ATTRS = ['pac', 'sho', 'pas', 'dri', 'def', 'phy'];
 export const GK_ATTRS = ['div', 'han', 'ref', 'gkp', 'kic'];
@@ -54,7 +54,7 @@ export function updatePotSeen(S) {
   p.potSeen = [lo, Math.max(lo, hi)];
 }
 
-export function createPlayer(rng, o, season) {
+export function createPlayer(rng, o, season, econ = 1) {
   const t = rng.int(45, 55);
   const pos = o.pos;
   const w = POS_W[pos];
@@ -82,7 +82,8 @@ export function createPlayer(rng, o, season) {
     first: o.first, last: o.last, nick: o.nick || '', nation: o.nation, pos, foot: o.foot === 'L' ? 'L' : 'R',
     born: season - 15, a, pot, potSeen: [pot - 6, pot + 6], peak: t,
     energy: 90, morale: 60, form: [], injury: null, susp: 0, yc: 0,
-    trust: 50, fans: 30, mates: 55, rep: { l: 5, c: 0, w: 0 }, money: 1500,
+    trust: 50, fans: 30, mates: 55, rep: { l: 5, c: 0, w: 0 }, money: Math.round(1500 * econ),
+    gender: o.gender === 'f' ? 'f' : 'm', look: o.look || null, num: typeof o.num === 'number' ? o.num : defaultShirt(pos),
     stage: 'youth', club: o.club, contract: null, parent: null, next: null, youth: 'u17', owned: [],
     mins: [], bench: 0, freeWeeks: 0, treq: false, agentPush: 0, natLvl: 'none',
     caps: { u17: 0, u19: 0, u21: 0, senior: 0 }, ig: { u17: 0, u19: 0, u21: 0, senior: 0 }, s: emptyStats(),
@@ -175,13 +176,15 @@ export function valueOf(S) {
   const age = ageOf(S);
   const am = age <= 21 ? 1.4 : age <= 25 ? 1.2 : age <= 28 ? 1.0 : age <= 30 ? 0.75 : age <= 32 ? 0.5 : 0.3;
   const yb = age <= 23 ? 1 + Math.max(0, p.pot - ovr) / 40 : 1;
-  const v = 50000 * Math.pow(10, (ovr - 45) / 12) * am * yb * (0.85 + p.rep.c / 300);
-  return Math.max(10000, sigRound(v, 2));
+  const e = econOf(S);
+  const v = 50000 * Math.pow(10, (ovr - 45) / 12) * am * yb * (0.85 + p.rep.c / 300) * e;
+  return Math.max(Math.round(10000 * e), sigRound(v, 2));
 }
-export function fairWage(ovr, prestige) {
-  return Math.round(400 * Math.pow(1.13, ovr - 40) * (0.4 + 0.09 * prestige));
+// econ: career economy scale (C3, 1 for men, ~0.12 for women)
+export function fairWage(ovr, prestige, econ = 1) {
+  return Math.round(400 * Math.pow(1.13, ovr - 40) * (0.4 + 0.09 * prestige) * econ);
 }
-export function wageCap(b) { return Math.round(b * 4000); }
+export function wageCap(b, econ = 1) { return Math.round(b * 4000 * econ); }
 
 export function injuryChanceMatch(S, minutes) {
   const p = S.player;

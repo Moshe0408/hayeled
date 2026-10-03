@@ -9,7 +9,7 @@ import { sortIds } from './util.js';
 const RKEY = { 128: 'r128', 64: 'r64', 32: 'r32', 16: 'r16', 8: 'qf', 4: 'sf', 2: 'f' };
 
 export function cupDefs() {
-  return LEAGUES.filter((l) => l.tier === 1 && l.cup).map((l) => ({ id: l.cup.id, nameHe: l.cup.nameHe, leagueId: l.id, countryId: l.countryId }));
+  return LEAGUES.filter((l) => l.tier === 1 && l.cup).map((l) => ({ id: l.cup.id, nameHe: l.cup.nameHe, nameHeW: l.cup.nameHeW || (l.cup.nameHe + ' לנשים'), leagueId: l.id, countryId: l.countryId }));
 }
 let _cupById = null;
 export function cupDef(id) {

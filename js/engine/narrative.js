@@ -1,12 +1,12 @@
 // Narrative engine: triggers, eligibility, rendering, inbox, effects (SPEC §4.1, §5.16).
 import { EVENTS } from '../data/events.js';
 import { PERSONAS } from '../data/strings.js';
-import { PARTNER_NAMES } from '../data/names.js';
+import { PARTNER_NAMES, PARTNER_NAMES_M } from '../data/names.js';
 import { LEAGUE_BY_ID } from '../data/leagues.js';
 import { rngFor } from '../core/rng.js';
-import { clamp, fill, fmtMoney, fmtSeason, round1 } from './util.js';
+import { clamp, fill, fmtMoney, fmtSeason, round1, gtext, femLabel, econMoney, isF } from './util.js';
 import { nextId, curAw } from './state.js';
-import { clubData, clubLeague, clubCountry, nameFor, country, leagueMembers, cs } from './world.js';
+import { clubData, clubLeague, clubCountry, nameFor, nameForG, country, leagueMembers, cs, lgNameHe, lgYouthHe } from './world.js';
 import { ovrOf, ageOf, formAvg, valueOf, ALL_ATTRS } from './player.js';
 import { weekLabelHe, isWindowOpen } from './calendar.js';
 
@@ -34,7 +34,7 @@ function index() {
 }
 export function eventDef(id) { index(); return _byId[id] || null; }
 
-export function personaHe(id) { const p = PERSONAS && PERSONAS[id]; return p ? p.he : (id || ''); }
+export function personaHe(id) { const p = PERSONAS && PERSONAS[id]; return p ? femLabel(p.he) : (id || ''); }
 export function personaAvatar(id) { const p = PERSONAS && PERSONAS[id]; return p ? p.avatar : '💬'; }
 export function awSeasonWeek(aw) { const s = Math.floor((aw - 1) / 52); return { season: s, week: aw - s * 52 }; }
 export function awLabel(aw) { const x = awSeasonWeek(aw); return weekLabelHe(x.season, x.week); }
@@ -48,7 +48,7 @@ function seasonTotals(p) {
 export function coachName(S, club, store) {
   if (!club) return null;
   if (S.names.coach[club]) return S.names.coach[club];
-  const n = nameFor(club, 'coach');
+  const n = nameForG('m', club, 'coach');   // coaches keep the male persona ('המאמן') in both worlds
   if (store) S.names.coach[club] = n;
   return n;
 }
@@ -60,8 +60,8 @@ export function placeholderVars(S, extra = {}) {
   const cd = club ? clubData(club) : null;
   const lid = club ? clubLeague(S, club) : null;
   const lg = lid ? LEAGUE_BY_ID[lid] : null;
-  let leagueHe = lg ? lg.nameHe : 'הליגה';
-  if (p.stage === 'youth' && S.comp && S.comp.yl && lg) leagueHe = (lg.youthNameHe || 'ליגת הנוער') + (S.comp.yl.lvl === 'u17' ? ' עד גיל 17' : ' עד גיל 19');
+  let leagueHe = lg ? lgNameHe(lid) : 'הליגה';
+  if (p.stage === 'youth' && S.comp && S.comp.yl && lg) leagueHe = lgYouthHe(lid) + (S.comp.yl.lvl === 'u17' ? ' עד גיל 17' : ' עד גיל 19');
   let rival = 'היריבה העירונית';
   if (cd && cd.rival && clubData(cd.rival)) rival = clubData(cd.rival).nameHe;
   else if (lid) {
@@ -75,7 +75,7 @@ export function placeholderVars(S, extra = {}) {
     first: p.first, last: p.last, nick: p.nick || p.first, name: p.first + ' ' + p.last,
     club: cd ? cd.nameHe : 'הקבוצה', clubShort: cd ? (cd.shortHe || cd.nameHe) : 'הקבוצה', city: cd ? (cd.city || 'העיר') : 'העיר',
     league: leagueHe, coach: (club && coachName(S, club, false)) || 'המאמן', agent: S.names.agent || 'הסוכן', journalist: S.names.journalist || 'העיתונאי',
-    partner: S.names.partner || 'בת הזוג', friend1: S.names.friends[0] || 'שמוליק', friend2: S.names.friends[1] || 'מוטי', friend3: S.names.friends[2] || 'דודו',
+    partner: S.names.partner || (isF(S) ? 'בן הזוג' : 'בת הזוג'), friend1: S.names.friends[0] || 'שמוליק', friend2: S.names.friends[1] || 'מוטי', friend3: S.names.friends[2] || 'דודו',
     opp: extra.opp || 'היריבה', rival, nation: nat ? nat.nameHe : 'הנבחרת', age: String(ageOf(S)),
     money: fmtMoney(p.money), wage: p.contract ? fmtMoney(p.contract.wage) + ' לשבוע' : 'אין חוזה', value: fmtMoney(valueOf(S)),
     season: fmtSeason(S.season),
@@ -86,7 +86,10 @@ export function placeholderVars(S, extra = {}) {
   for (const k of Object.keys(v)) if (v[k] === null || v[k] === undefined || v[k] === '') v[k] = '-';
   return v;
 }
-function scrub(t) { return t.replace(/\{[a-z0-9]+\}/gi, ''); }
+function scrub(t) { return gtext(t).replace(/\{[a-z0-9]+\}/gi, ''); }
+// Money effects of events scale with the career economy (C3).
+export function effMoney(S, c) { return c && c.effects && typeof c.effects.money === 'number' ? econMoney(S, c.effects.money) : 0; }
+function cantAfford(S, c) { const m = effMoney(S, c); return m < 0 && S.player.money < -m; }
 function render(t, v) { return scrub(fill(t, v)); }
 
 function condOk(S, rng, c, ctx) {
@@ -94,6 +97,7 @@ function condOk(S, rng, c, ctx) {
   const p = S.player;
   const age = ageOf(S);
   const ovr = ovrOf(p);
+  if (c.gender && c.gender !== (p.gender === 'f' ? 'f' : 'm')) return false;   // C1: gender-gated flavour
   if (c.minAge !== undefined && age < c.minAge) return false;
   if (c.maxAge !== undefined && age > c.maxAge) return false;
   if (c.minOvr !== undefined && ovr < c.minOvr) return false;
@@ -116,7 +120,7 @@ function condOk(S, rng, c, ctx) {
     if (!!c.abroad !== ab) return false;
   }
   if (c.injured !== undefined && !!c.injured !== !!p.injury) return false;
-  if (c.minMoney !== undefined && p.money < c.minMoney) return false;
+  if (c.minMoney !== undefined && p.money < econMoney(S, c.minMoney)) return false;
   if (c.flags && c.flags.some((f) => !S.ev.flags[f])) return false;
   if (c.notFlags && c.notFlags.some((f) => !!S.ev.flags[f])) return false;
   const lm = S.lastMatch;
@@ -171,7 +175,7 @@ export function fireEvent(S, rng, e, ctx) {
   const v = placeholderVars(S, { opp: ctx && ctx.opp, k: rng.int(0, 4) });
   const lines = (e.messages || []).map((m) => (typeof m === 'string' ? { who: e.who, t: render(m, v) } : { who: m.who || e.who, t: render(m.t || '', v) }));
   const ch = e.choices || [];
-  const choices = ch.length ? ch.map((c) => ({ label: render(c.label || '', v), disabled: !!(c.effects && c.effects.money < 0 && S.player.money < -c.effects.money) })) : null;
+  const choices = ch.length ? ch.map((c) => ({ label: render(c.label || '', v), disabled: cantAfford(S, c) })) : null;
   const it = { id: nextId(S, 'inbox'), aw, from: e.who, ev: e.id, lines, choices, ans: null, exp: choices ? aw + 2 : null, imp: !!(e.trigger && ch.length > 0), read: false };
   S.ev.cd[e.id] = aw;
   if (e.once && S.ev.once.indexOf(e.id) < 0) S.ev.once.push(e.id);
@@ -234,8 +238,9 @@ export function applyEffects(S, eff) {
   }
   if (repSum) out.push(repSum > 0 ? 'המוניטין עלה' : 'המוניטין ירד');
   if (typeof eff.money === 'number' && eff.money !== 0) {
-    p.money = Math.max(0, Math.round(p.money + eff.money));
-    out.push((eff.money > 0 ? '+' : '-') + fmtMoney(Math.abs(eff.money)));
+    const m = econMoney(S, eff.money);
+    p.money = Math.max(0, Math.round(p.money + m));
+    out.push((m > 0 ? '+' : '-') + fmtMoney(Math.abs(m)));
   }
   if (typeof eff.form === 'number') {
     p.form.push(round1(clamp(eff.form, 3, 10)));
@@ -258,7 +263,7 @@ export function applyEffects(S, eff) {
   if (eff.clearFlags) for (const f of eff.clearFlags) delete S.ev.flags[f];
   if (S.ev.flags.has_partner && !S.names.partner) {
     const r = rngFor(S.id, 'partner');
-    S.names.partner = r.pick(PARTNER_NAMES || []) || 'נועה';
+    S.names.partner = isF(S) ? (r.pick(PARTNER_NAMES_M || []) || 'איתי') : (r.pick(PARTNER_NAMES || []) || 'נועה');
   }
   if (typeof eff.treq === 'boolean' && p.club && p.stage === 'pro') p.treq = eff.treq;
   if (typeof eff.agentPush === 'number' && eff.agentPush > 0) p.agentPush = Math.max(p.agentPush, Math.round(eff.agentPush));
@@ -271,10 +276,10 @@ export function answerItem(S, rng, item, idx, auto) {
   if (!e || !item.choices || item.ans !== null) return { ok: false, effectsHe: [] };
   const c = e.choices[idx];
   if (!c) return { ok: false, effectsHe: [] };
-  if (c.effects && c.effects.money < 0 && S.player.money < -c.effects.money) {
+  if (cantAfford(S, c)) {
     if (!auto) return { ok: false, effectsHe: [] };
     // auto-answer: pick the first affordable choice instead
-    const alt = e.choices.findIndex((x) => !(x.effects && x.effects.money < 0 && S.player.money < -x.effects.money));
+    const alt = e.choices.findIndex((x) => !cantAfford(S, x));
     if (alt < 0) { item.ans = idx; item.read = true; return { ok: true, effectsHe: [] }; }
     return answerItem(S, rng, item, alt, auto);
   }
@@ -302,6 +307,7 @@ export function autoAnswerExpired(S, rng, force) {
 // ---------- VMs ----------
 function whoHe(S, who) {
   if (who === 'me') return 'אני';
+  if (who === 'partner' && !S.names.partner && isF(S)) return 'בן הזוג';
   if (who === 'friend1' || who === 'friend2' || who === 'friend3') return S.names.friends[Number(who.slice(-1)) - 1] || 'חבר';
   if (who === 'agent' && S.names.agent) return S.names.agent;
   if (who === 'journalist' && S.names.journalist) return S.names.journalist;
@@ -313,7 +319,7 @@ export function inboxRows(S) {
   for (let i = S.inbox.length - 1; i >= 0; i--) {
     const it = S.inbox[i];
     const last = it.lines[it.lines.length - 1];
-    out.push({ id: it.id, from: it.from, fromHe: whoHe(S, it.from), avatar: personaAvatar(it.from), previewHe: last ? last.t : '',
+    out.push({ id: it.id, from: it.from, fromHe: whoHe(S, it.from), avatar: personaAvatar(it.from), previewHe: last ? gtext(last.t) : '',
       dateHe: awLabel(it.aw), unread: !it.read, needsAnswer: !!(it.choices && it.ans === null) });
   }
   return out;
@@ -323,10 +329,10 @@ export function threadVM(S, it) {
   const e = it.ev ? eventDef(it.ev) : null;
   return {
     id: it.id, from: it.from, fromHe: whoHe(S, it.from), avatar: personaAvatar(it.from), isGroup,
-    messages: it.lines.map((l) => ({ who: l.who, whoHe: whoHe(S, l.who), textHe: l.t, mine: l.who === 'me' })),
+    messages: it.lines.map((l) => ({ who: l.who, whoHe: whoHe(S, l.who), textHe: gtext(l.t), mine: l.who === 'me' })),
     choices: it.choices && it.ans === null ? it.choices.map((c, i) => {
       const def = e && e.choices[i];
-      const dis = !!(def && def.effects && def.effects.money < 0 && S.player.money < -def.effects.money);
+      const dis = !!(def && cantAfford(S, def));
       return { index: i, he: c.label, disabled: dis };
     }) : null,
     answered: it.ans, dateHe: awLabel(it.aw),

@@ -1,6 +1,6 @@
 // Lifestyle shop (SPEC §5.15).
 import { SHOP_ITEMS } from '../data/strings.js';
-import { fmtMoney } from './util.js';
+import { fmtMoney, econMoney } from './util.js';
 import { ageOf } from './player.js';
 import { raise } from './narrative.js';
 
@@ -26,9 +26,11 @@ export function shopItems() {
   }
   return out;
 }
-export function itemById(id) { return shopItems().find((x) => x.id === id) || null; }
-export function weeklyUpkeep(S) { let u = 0; for (const id of S.player.owned) { const it = itemById(id); if (it) u += it.upkeep; } return u; }
-export function moraleBonus(S) { let m = 0; for (const id of S.player.owned) { const it = itemById(id); if (it) m += it.morale; } return Math.min(25, m); }
+// Prices and upkeep scale with the career economy (C3); S optional (unscaled without it).
+function scaled(S, it) { if (!S || !it) return it; return Object.assign({}, it, { price: econMoney(S, it.price), upkeep: econMoney(S, it.upkeep) }); }
+export function itemById(id, S) { return scaled(S, shopItems().find((x) => x.id === id) || null); }
+export function weeklyUpkeep(S) { let u = 0; for (const id of S.player.owned) { const it = itemById(id, S); if (it) u += it.upkeep; } return u; }
+export function moraleBonus(S) { let m = 0; for (const id of S.player.owned) { const it = itemById(id, S); if (it) m += it.morale; } return Math.min(25, m); }
 
 function reason(S, it) {
   const p = S.player;
@@ -40,7 +42,7 @@ function reason(S, it) {
 }
 
 export function buy(S, id) {
-  const it = itemById(id);
+  const it = itemById(id, S);
   if (!it) return { ok: false, messageHe: 'פריט לא קיים' };
   const r = reason(S, it);
   if (r) return { ok: false, messageHe: r };
@@ -49,11 +51,11 @@ export function buy(S, id) {
   p.owned.push(it.id);
   p.morale = Math.min(100, p.morale + it.morale);
   if (it.id === 'fam_field') p.fans = Math.min(100, p.fans + 5);
-  if (it.price >= 100000) raise(S, 'big_purchase');
+  if (it.price >= econMoney(S, 100000)) raise(S, 'big_purchase');
   return { ok: true, messageHe: 'קנית: ' + it.he + '!' };
 }
 export function sell(S, id) {
-  const it = itemById(id);
+  const it = itemById(id, S);
   const p = S.player;
   if (!it || p.owned.indexOf(id) < 0) return { ok: false, messageHe: 'הפריט לא שלך' };
   if (it.cat === 'family') return { ok: false, messageHe: 'את זה לא מוכרים' };
@@ -64,7 +66,7 @@ export function sell(S, id) {
 }
 
 export function shopVM(S) {
-  const items = shopItems();
+  const items = shopItems().map((x) => scaled(S, x));
   return {
     money: S.player.money, weeklyUpkeep: weeklyUpkeep(S), moraleBonus: moraleBonus(S),
     cats: CATS.map((c) => ({ id: c, he: CAT_HE[c], items: items.filter((x) => x.cat === c).map((x) => {

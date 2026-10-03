@@ -2,18 +2,39 @@
 // Pure data: no DOM, no randomness. Every key of §4.3 is present; UI_TEXT is an
 // additional, optional export with shared screen copy (settings, save, privacy,
 // feedback, install, ads...). UI may use it or keep its own copy.
+//
+// GENDER (v1.2, contracts C2/C3):
+//  - Labels that the ENGINE turns into view models may carry {{male|female}}
+//    markers (ROLES, STAGES, SELECTION, ALERTS, LEGACY_TIERS, PERSONAS,
+//    TRAINING, SHOP_ITEMS desc). The engine resolves them (femLabel / gtext).
+//  - Tables that other modules read directly stay plain and get a parallel
+//    women's field/table instead: POSITIONS (heF/shortF/descF; the admin reads
+//    POSITIONS.he), AWARDS -> AWARDS_W, TROPHIES -> TROPHIES_W (hof.js reads
+//    them), EURO_COMPS -> EURO_COMPS_W, TOURNAMENTS -> TOURNAMENTS_W,
+//    COMP_NAMES_W (any competition id -> women's name).
+//  - UI_TEXT strings may contain markers: resolve them with js/ui/gender.js gtext().
 
 export const POSITIONS = {
-  GK:  { he: 'שוער', short: 'שוער', group: 'GK', desc: 'השומר האחרון. צלילות, יציאות, ובנייה מהרגליים' },
-  CB:  { he: 'בלם', short: 'בלם', group: 'DEF', desc: 'עמוד השדרה של ההגנה: תיקולים, נגיחות ומיקום' },
-  LB:  { he: 'מגן שמאלי', short: 'מגן', group: 'DEF', desc: 'מגן שעולה להתקפה באגף שמאל וחוזר מהר' },
-  RB:  { he: 'מגן ימני', short: 'מגן', group: 'DEF', desc: 'מגן שעולה להתקפה באגף ימין וחוזר מהר' },
-  CDM: { he: 'קשר אחורי', short: 'קשר', group: 'MID', desc: 'שומר על האיזון, חוטף כדורים ומתחיל את הבנייה' },
-  CM:  { he: 'קשר מרכזי', short: 'קשר', group: 'MID', desc: 'המנוע של הקבוצה: מסירות, ריצות וקצת מכל דבר' },
-  CAM: { he: 'קשר התקפי', short: '10', group: 'MID', desc: 'מספר 10 הקלאסי. רואה מסירות שאף אחד לא רואה' },
-  LW:  { he: 'כנף שמאל', short: 'כנף', group: 'ATT', desc: 'מהיר וחמקמק באגף שמאל, חותך פנימה ומבשל' },
-  RW:  { he: 'כנף ימין', short: 'כנף', group: 'ATT', desc: 'מהיר וחמקמק באגף ימין, מגביה ובועט' },
-  ST:  { he: 'חלוץ', short: 'חלוץ', group: 'ATT', desc: 'מספר 9. התפקיד שלו פשוט: להבקיע' },
+  GK:  { he: 'שוער', short: 'שוער', group: 'GK', desc: 'השומר האחרון. צלילות, יציאות, ובנייה מהרגליים',
+         heF: 'שוערת', shortF: 'שוערת', descF: 'השומרת האחרונה. צלילות, יציאות, ובנייה מהרגליים' },
+  CB:  { he: 'בלם', short: 'בלם', group: 'DEF', desc: 'עמוד השדרה של ההגנה: תיקולים, נגיחות ומיקום',
+         heF: 'בלמית', shortF: 'בלמית', descF: 'עמוד השדרה של ההגנה: תיקולים, נגיחות ומיקום' },
+  LB:  { he: 'מגן שמאלי', short: 'מגן', group: 'DEF', desc: 'מגן שעולה להתקפה באגף שמאל וחוזר מהר',
+         heF: 'מגנה שמאלית', shortF: 'מגנה', descF: 'מגנה שעולה להתקפה באגף שמאל וחוזרת מהר' },
+  RB:  { he: 'מגן ימני', short: 'מגן', group: 'DEF', desc: 'מגן שעולה להתקפה באגף ימין וחוזר מהר',
+         heF: 'מגנה ימנית', shortF: 'מגנה', descF: 'מגנה שעולה להתקפה באגף ימין וחוזרת מהר' },
+  CDM: { he: 'קשר אחורי', short: 'קשר', group: 'MID', desc: 'שומר על האיזון, חוטף כדורים ומתחיל את הבנייה',
+         heF: 'קשרית אחורית', shortF: 'קשרית', descF: 'שומרת על האיזון, חוטפת כדורים ומתחילה את הבנייה' },
+  CM:  { he: 'קשר מרכזי', short: 'קשר', group: 'MID', desc: 'המנוע של הקבוצה: מסירות, ריצות וקצת מכל דבר',
+         heF: 'קשרית מרכזית', shortF: 'קשרית', descF: 'המנוע של הקבוצה: מסירות, ריצות וקצת מכל דבר' },
+  CAM: { he: 'קשר התקפי', short: '10', group: 'MID', desc: 'מספר 10 הקלאסי. רואה מסירות שאף אחד לא רואה',
+         heF: 'קשרית התקפית', shortF: '10', descF: 'מספר 10 הקלאסית. רואה מסירות שאף אחת לא רואה' },
+  LW:  { he: 'כנף שמאל', short: 'כנף', group: 'ATT', desc: 'מהיר וחמקמק באגף שמאל, חותך פנימה ומבשל',
+         heF: 'כנף שמאל', shortF: 'כנף', descF: 'מהירה וחמקמקה באגף שמאל, חותכת פנימה ומבשלת' },
+  RW:  { he: 'כנף ימין', short: 'כנף', group: 'ATT', desc: 'מהיר וחמקמק באגף ימין, מגביה ובועט',
+         heF: 'כנף ימין', shortF: 'כנף', descF: 'מהירה וחמקמקה באגף ימין, מגביהה ובועטת' },
+  ST:  { he: 'חלוץ', short: 'חלוץ', group: 'ATT', desc: 'מספר 9. התפקיד שלו פשוט: להבקיע',
+         heF: 'חלוצה', shortF: 'חלוצה', descF: 'מספר 9. התפקיד שלה פשוט: להבקיע' },
 };
 
 export const ATTRS = {
@@ -36,17 +57,17 @@ export const TRAINING = {
   technique:   { he: 'טכניקה ומסירות', desc: 'מסירות, כדרור ושליטה בכדור' },
   defense:     { he: 'הגנה ותיקולים', desc: 'תיקולים, קריאת משחק ועמדה, עם קצת כוח' },
   physical:    { he: 'כושר ומהירות', desc: 'מהירות, כוח וסיבולת. מאט ירידה בגיל מבוגר' },
-  goalkeeping: { he: 'אימון שוערים', desc: 'צלילות, תפיסה, רפלקסים ומיקום (לשוערים בלבד)' },
+  goalkeeping: { he: '{{אימון שוערים|אימון שוערות}}', desc: 'צלילות, תפיסה, רפלקסים ומיקום ({{לשוערים|לשוערות}} בלבד)' },
   rest:        { he: 'מנוחה והתאוששות', desc: 'בלי התקדמות השבוע, אבל +15 אנרגיה ובלי סיכון לפציעה באימון' },
 };
 
-export const ROLES = { star: 'כוכב הקבוצה', key: 'שחקן מפתח', rotation: 'רוטציה', squad: 'שחקן סגל', prospect: 'כישרון צעיר' };
+export const ROLES = { star: '{{כוכב הקבוצה|כוכבת הקבוצה}}', key: '{{שחקן מפתח|שחקנית מפתח}}', rotation: 'רוטציה', squad: '{{שחקן סגל|שחקנית סגל}}', prospect: 'כישרון צעיר' };
 
 export const ODDS = { low: 'נמוך', mid: 'בינוני', high: 'גבוה' };
 
-export const STAGES = { youth: 'נוער', pro: 'מקצוען', free: 'שחקן חופשי', retired: 'פרש' };
+export const STAGES = { youth: '{{נוער|נערות}}', pro: '{{מקצוען|מקצוענית}}', free: '{{שחקן חופשי|שחקנית חופשית}}', retired: '{{פרש|פרשה}}' };
 
-export const SELECTION = { starter: 'בהרכב', bench: 'על הספסל', out: 'מחוץ לסגל', injured: 'פצוע', suspended: 'מורחק', youth: 'קבוצת הנוער', national: 'בנבחרת' };
+export const SELECTION = { starter: 'בהרכב', bench: 'על הספסל', out: 'מחוץ לסגל', injured: '{{פצוע|פצועה}}', suspended: '{{מורחק|מורחקת}}', youth: '{{קבוצת הנוער|קבוצת הנערות}}', national: 'בנבחרת' };
 
 export const COMP_TYPES = { league: 'ליגה', cup: 'גביע', europe: 'אירופה', national: 'נבחרת', youth: 'נוער', ynt: 'נבחרת נוער', friendly: 'ידידות' };
 
@@ -78,6 +99,103 @@ export const TROPHIES = {
   u17: 'אליפות עד 17', u19: 'אליפות עד 19', u21: 'אליפות עד 21', youth_league: 'אליפות נוער',
 };
 
+// ---------------------------------------------------------------------------
+// Women's football names (contract C3). Same keys as the men's tables. The
+// values match the engine's internal tables (js/engine/history.js, match.js).
+// ---------------------------------------------------------------------------
+export const AWARDS_W = {
+  top_scorer: 'מלכת השערים', pots: 'שחקנית העונה', tots: 'נבחרת העונה', young_pots: 'השחקנית הצעירה של העונה',
+  ucl_top_scorer: 'מלכת שערי ליגת האלופות לנשים', golden_boy: 'פרס הכישרון הצעיר', ballon_dor: 'כדור הזהב לנשים', bdo_top3: 'פודיום כדור הזהב לנשים',
+  bdo_top10: 'טופ 10 בכדור הזהב לנשים', golden_boot_tour: 'מלכת שערי הטורניר', motm_final: 'שחקנית הגמר',
+};
+
+export const TROPHIES_W = {
+  league: 'אליפות', league2: 'עלייה ליגה', cup: 'גביע', ucl: 'ליגת האלופות לנשים', uel: 'הליגה האירופית לנשים', uecl: 'הקונפרנס ליג לנשים',
+  wc: 'גביע העולם לנשים', euro: 'אליפות אירופה לנשים', copa: 'קופה אמריקה לנשים', afcon: 'אליפות אפריקה לנשים', asian: 'גביע אסיה לנשים', gold: 'גביע הזהב לנשים',
+  u17: 'אליפות עד 17 לנערות', u19: 'אליפות עד 19 לנערות', u21: 'אליפות עד 21', youth_league: 'אליפות נערות',
+};
+
+export const EURO_COMPS_W = {
+  ucl:  { he: 'ליגת האלופות לנשים', short: 'האלופות' },
+  uel:  { he: 'הליגה האירופית לנשים', short: 'האירופית' },
+  uecl: { he: 'הקונפרנס ליג לנשים', short: 'הקונפרנס' },
+};
+
+export const TOURNAMENTS_W = {
+  wc: 'גביע העולם לנשים', euro: 'יורו הנשים', copa: 'קופה אמריקה לנשים', afcon: 'אליפות אפריקה לנשים', asian: 'גביע אסיה לנשים', gold: 'גביע הזהב לנשים',
+  u17: 'אליפות עד גיל 17 לנערות', u19: 'אליפות עד גיל 19 לנערות', u21: 'אליפות עד גיל 21 לנשים', qual: 'מוקדמות', friendly: 'משחק ידידות',
+};
+
+// Any competition id -> women's display name (he) and short form. Covers the
+// leagues of js/data/leagues.js, their cups and youth leagues, the European
+// cups and the national tournaments. Lookup order for a helper:
+// COMP_NAMES_W[id] -> leagues.js nameHeW -> men's name + ' לנשים'.
+export const COMP_NAMES_W = {
+  // leagues
+  isr1: { he: 'ליגת העל לנשים', short: 'ליגת העל' },
+  isr2: { he: 'הליגה הלאומית לנשים', short: 'הלאומית' },
+  eng1: { he: 'הסופר ליג לנשים', short: 'סופר ליג' },
+  eng2: { he: 'הצ׳מפיונשיפ לנשים', short: 'צ׳מפיונשיפ' },
+  esp1: { he: 'ליגה F', short: 'ליגה F' },
+  ita1: { he: 'הסרייה A לנשים', short: 'סרייה A' },
+  ger1: { he: 'הבונדסליגה לנשים', short: 'בונדסליגה' },
+  fra1: { he: 'הפרמייר ליג הצרפתית לנשים', short: 'ליגה צרפתית' },
+  por1: { he: 'הליגה הפורטוגלית לנשים', short: 'ליגה פורטוגל' },
+  ned1: { he: 'הארדיביזי לנשים', short: 'ארדיביזי' },
+  bel1: { he: 'הסופר ליג הבלגית לנשים', short: 'ליגה בלגית' },
+  tur1: { he: 'הסופר ליג הטורקית לנשים', short: 'סופר ליג' },
+  sco1: { he: 'הפרמייר ליג הסקוטית לנשים', short: 'ליגה סקוטית' },
+  gre1: { he: 'הליגה היוונית לנשים', short: 'ליגה יוונית' },
+  ksa1: { he: 'הליגה הסעודית לנשים', short: 'ליגה סעודית' },
+  usa1: { he: 'NWSL', short: 'NWSL' },
+  bra1: { he: 'הברזיליירו לנשים', short: 'ברזיליירו' },
+  arg1: { he: 'הליגה הארגנטינאית לנשים', short: 'ליגה ארגנטינה' },
+  // cups
+  isr_cup: { he: 'גביע המדינה לנשים', short: 'הגביע' },
+  eng_cup: { he: 'הגביע האנגלי לנשים', short: 'הגביע' },
+  esp_cup: { he: 'גביע המלכה', short: 'הגביע' },
+  ita_cup: { he: 'גביע איטליה לנשים', short: 'הגביע' },
+  ger_cup: { he: 'גביע גרמניה לנשים', short: 'הגביע' },
+  fra_cup: { he: 'גביע צרפת לנשים', short: 'הגביע' },
+  por_cup: { he: 'גביע פורטוגל לנשים', short: 'הגביע' },
+  ned_cup: { he: 'גביע הולנד לנשים', short: 'הגביע' },
+  bel_cup: { he: 'גביע בלגיה לנשים', short: 'הגביע' },
+  tur_cup: { he: 'גביע טורקיה לנשים', short: 'הגביע' },
+  sco_cup: { he: 'הגביע הסקוטי לנשים', short: 'הגביע' },
+  gre_cup: { he: 'גביע יוון לנשים', short: 'הגביע' },
+  ksa_cup: { he: 'הגביע הסעודי לנשים', short: 'הגביע' },
+  usa_cup: { he: 'גביע האתגר של NWSL', short: 'הגביע' },
+  bra_cup: { he: 'גביע ברזיל לנשים', short: 'הגביע' },
+  arg_cup: { he: 'גביע ארגנטינה לנשים', short: 'הגביע' },
+  // European cups
+  ucl: { he: 'ליגת האלופות לנשים', short: 'האלופות' },
+  uel: { he: 'הליגה האירופית לנשים', short: 'האירופית' },
+  uecl: { he: 'הקונפרנס ליג לנשים', short: 'הקונפרנס' },
+  // national tournaments
+  wc: { he: 'גביע העולם לנשים', short: 'המונדיאל' },
+  euro: { he: 'יורו הנשים', short: 'היורו' },
+  copa: { he: 'קופה אמריקה לנשים', short: 'הקופה' },
+  afcon: { he: 'אליפות אפריקה לנשים', short: 'אליפות אפריקה' },
+  asian: { he: 'גביע אסיה לנשים', short: 'גביע אסיה' },
+  gold: { he: 'גביע הזהב לנשים', short: 'גביע הזהב' },
+  u17: { he: 'אליפות עד גיל 17 לנערות', short: 'עד 17' },
+  u19: { he: 'אליפות עד גיל 19 לנערות', short: 'עד 19' },
+  u21: { he: 'אליפות עד גיל 21 לנשים', short: 'עד 21' },
+};
+
+// National team naming. {nation} = country nameHe.
+export const NATIONAL_TEAM_NAME = {
+  m: 'נבחרת {nation}', f: 'נבחרת {nation} לנשים',
+  youthM: 'נבחרת הנוער של {nation}', youthF: 'נבחרת הנערות של {nation}',
+  u21M: 'נבחרת הצעירה של {nation}', u21F: 'נבחרת הצעירות של {nation}',
+};
+
+// Gender choice and words used by the wizard / UI (contract C1).
+export const GENDER_LABELS = {
+  m: { id: 'm', he: 'בן', role: 'שחקן', kid: 'ילד', hero: 'הילד מהשכונה', pronoun: 'הוא', you: 'אתה', world: 'כדורגל גברים', emoji: '👦' },
+  f: { id: 'f', he: 'בת', role: 'שחקנית', kid: 'ילדה', hero: 'הילדה מהשכונה', pronoun: 'היא', you: 'את', world: 'כדורגל נשים', emoji: '👧' },
+};
+
 export const INJURIES = {
   minor: [
     { id: 'knock', he: 'מכה' },
@@ -102,18 +220,19 @@ export const INJURIES = {
   ],
 };
 
+// partner is written as the opposite gender of the player.
 export const PERSONAS = {
   mom:            { he: 'אמא', avatar: '👩‍🍳' },
   dad:            { he: 'אבא', avatar: '👨' },
-  friends:        { he: 'החבר׳ה מהשכונה', avatar: '⚽', group: true },
+  friends:        { he: '{{החבר׳ה מהשכונה|החברות מהשכונה}}', avatar: '⚽', group: true },
   agent:          { he: 'הסוכן', avatar: '🕴️' },
   coach:          { he: 'המאמן', avatar: '📋' },
   journalist:     { he: 'עיתונאי', avatar: '🎙️' },
   sponsor:        { he: 'ספונסר', avatar: '💼' },
-  partner:        { he: 'בת הזוג', avatar: '❤️' },
+  partner:        { he: '{{בת הזוג|בן הזוג}}', avatar: '❤️' },
   social:         { he: 'רשתות חברתיות', avatar: '📱' },
-  captain:        { he: 'הקפטן', avatar: '©️' },
-  fan:            { he: 'אוהד', avatar: '📣' },
+  captain:        { he: '{{הקפטן|הקפטנית}}', avatar: '©️' },
+  fan:            { he: '{{אוהד|אוהדת}}', avatar: '📣' },
   brother:        { he: 'אח קטן', avatar: '🧒' },
   grandma:        { he: 'סבתא', avatar: '👵' },
   national_coach: { he: 'מאמן הנבחרת', avatar: '🏳️' },
@@ -126,28 +245,29 @@ export const PERSONAS = {
 export const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
 export const LEGACY_TIERS = [
-  { min: 0, he: 'שחקן ליגה' },
-  { min: 60, he: 'שחקן מוערך' },
-  { min: 160, he: 'כוכב' },
+  { min: 0, he: '{{שחקן ליגה|שחקנית ליגה}}' },
+  { min: 60, he: '{{שחקן מוערך|שחקנית מוערכת}}' },
+  { min: 160, he: '{{כוכב|כוכבת}}' },
   { min: 320, he: 'אגדה' },
   { min: 550, he: 'אגדה של כל הזמנים' },
 ];
 
 // Numbers are binding (SPEC §5.15). minAge omitted = no limit. fam_* items cannot be sold.
+// Prices are the men's scale; the engine applies S.econ (C3) for women's careers.
 export const SHOP_ITEMS = [
   { id: 'car_old',        cat: 'car',    he: 'הסובארו הישנה של הדוד', price: 3000,    upkeep: 20,   morale: 1,  minAge: 18, desc: 'נוסעת. בדרך כלל.' },
   { id: 'car_city',       cat: 'car',    he: 'קיה פיקנטו חדשה',        price: 15000,   upkeep: 60,   morale: 2,  minAge: 18, desc: 'קטנה, חסכונית, נכנסת לכל חניה' },
-  { id: 'car_family',     cat: 'car',    he: 'מאזדה 3',                price: 35000,   upkeep: 120,  morale: 3,  minAge: 18, desc: 'רכב של שחקן רציני' },
-  { id: 'car_lux',        cat: 'car',    he: 'אאודי RS',               price: 120000,  upkeep: 450,  morale: 5,  minAge: 18, desc: 'כל השכונה תשמע אותך מגיע' },
+  { id: 'car_family',     cat: 'car',    he: 'מאזדה 3',                price: 35000,   upkeep: 120,  morale: 3,  minAge: 18, desc: 'רכב של {{שחקן רציני|שחקנית רצינית}}' },
+  { id: 'car_lux',        cat: 'car',    he: 'אאודי RS',               price: 120000,  upkeep: 450,  morale: 5,  minAge: 18, desc: 'כל השכונה תשמע אותך {{מגיע|מגיעה}}' },
   { id: 'car_super',      cat: 'car',    he: 'למבורגיני',              price: 450000,  upkeep: 1800, morale: 8,  minAge: 18, desc: 'אבא כבר מבקש לנהוג רק סיבוב אחד' },
   { id: 'home_room',      cat: 'home',   he: 'שיפוץ החדר אצל ההורים',  price: 8000,    upkeep: 0,    morale: 2,                desc: 'בלי הפוסטרים מכיתה ח׳. טוב, רק חלק' },
   { id: 'home_apt',       cat: 'home',   he: 'דירת 3 חדרים בעיר',      price: 250000,  upkeep: 400,  morale: 4,  minAge: 18, desc: 'סוף סוף לבד. אמא עדיין מביאה אוכל' },
   { id: 'home_pent',      cat: 'home',   he: 'פנטהאוז מול הים',        price: 1800000, upkeep: 2500, morale: 7,  minAge: 18, desc: 'נוף לים ומרפסת למנגלים' },
-  { id: 'home_villa',     cat: 'home',   he: 'וילה עם בריכה',          price: 6000000, upkeep: 6000, morale: 10, minAge: 18, desc: 'החבר׳ה כבר עברו לגור אצלך. בערך' },
+  { id: 'home_villa',     cat: 'home',   he: 'וילה עם בריכה',          price: 6000000, upkeep: 6000, morale: 10, minAge: 18, desc: '{{החבר׳ה כבר עברו|החברות כבר עברו}} לגור אצלך. בערך' },
   { id: 'fam_trip',       cat: 'family', he: 'טיסה משפחתית לחו״ל',     price: 12000,   upkeep: 0,    morale: 2,                desc: 'אבא כבר מכין רשימת ציוד' },
   { id: 'fam_parents',    cat: 'family', he: 'שיפוץ הבית של ההורים',   price: 90000,   upkeep: 0,    morale: 5,                desc: 'מטבח חדש לאמא, ספה חדשה לאבא' },
   { id: 'fam_field',      cat: 'family', he: 'מגרש חדש בשכונה',        price: 400000,  upkeep: 0,    morale: 6,  fans: 5,      desc: 'דשא סינתטי, תאורה, ושלט עם השם שלך' },
-  { id: 'style_wardrobe', cat: 'style',  he: 'ארון בגדים של מעצבים',   price: 20000,   upkeep: 0,    morale: 1,                desc: 'החבר׳ה יצחקו. ואז יבקשו לשאול חולצה' },
+  { id: 'style_wardrobe', cat: 'style',  he: 'ארון בגדים של מעצבים',   price: 20000,   upkeep: 0,    morale: 1,                desc: '{{החבר׳ה יצחקו. ואז יבקשו לשאול חולצה|החברות יצחקו. ואז יבקשו לשאול שמלה}}' },
   { id: 'style_watch',    cat: 'style',  he: 'שעון יוקרה',             price: 40000,   upkeep: 0,    morale: 2,                desc: 'מראה את השעה. ואת המשכורת' },
 ];
 
@@ -155,13 +275,13 @@ export const RESULT_LABELS = { W: 'ניצחון', D: 'תיקו', L: 'הפסד' }
 
 export const ALERTS = {
   contract_expiring: 'החוזה שלך מסתיים בסוף העונה',
-  injured: 'אתה פצוע',
+  injured: '{{אתה פצוע|את פצועה}}',
   callup: 'זומנת לנבחרת!',
   window_open: 'חלון ההעברות פתוח',
   offer: 'יש לך הצעה חדשה',
   energy_low: 'האנרגיה נמוכה. כדאי לנוח',
-  suspended: 'אתה מורחק למשחק הבא',
-  free_agent: 'אתה שחקן חופשי. בדוק הצעות',
+  suspended: '{{אתה מורחק|את מורחקת}} למשחק הבא',
+  free_agent: '{{אתה שחקן חופשי. בדוק|את שחקנית חופשית. בדקי}} הצעות',
   season_review: 'סיכום העונה מחכה לך',
   info: '',
 };
@@ -170,22 +290,26 @@ export const FORMAT_LABELS = { double_rr: 'ליגה כפולה', double_rr_split
 
 // ---------------------------------------------------------------------------
 // Extra (optional) shared screen copy. Placeholders in braces ({n}, {v}, {slot},
-// {minute}...) are filled by the UI with simple replace.
+// {minute}...) are filled by the UI with simple replace. Strings may contain
+// {{male|female}} markers: resolve with js/ui/gender.js gtext() first.
 // ---------------------------------------------------------------------------
 export const UI_TEXT = {
   app: {
     name: 'הילד מהשכונה',
     tagline: 'מהשכונה ועד הבאלון ד׳אור',
+    taglineG: '{{מהשכונה ועד הבאלון ד׳אור|מהשכונה ועד כדור הזהב}}',
+    hero: '{{הילד מהשכונה|הילדה מהשכונה}}',
     loading: 'טוען...',
     noscript: 'כדי לשחק ב"הילד מהשכונה" צריך להפעיל JavaScript בדפדפן.',
   },
   common: {
     ok: 'אישור', cancel: 'ביטול', back: 'חזרה', close: 'סגור', continue: 'המשך', yes: 'כן', no: 'לא',
     save: 'שמור', copy: 'העתק', copied: 'הועתק ✓', share: 'שתף', send: 'שלח', delete: 'מחק', retry: 'נסה שוב',
-    later: 'לא עכשיו', confirm: 'בטוח?', areYouSure: 'אתה בטוח?', error: 'משהו השתבש. נסה שוב',
+    later: 'לא עכשיו', confirm: 'בטוח?', areYouSure: '{{אתה בטוח|את בטוחה}}?', error: 'משהו השתבש. נסה שוב',
     offline: 'אין חיבור לאינטרנט. המשחק ממשיך לעבוד כרגיל', week: 'שבוע', season: 'עונה', age: 'גיל',
     ovr: 'יכולת', potential: 'פוטנציאל', money: 'כסף', energy: 'אנרגיה', morale: 'מורל', form: 'כושר',
     trust: 'אמון המאמן', fans: 'אהבת הקהל', mates: 'יחסים בקבוצה', value: 'שווי שוק', wage: 'משכורת', perWeek: 'לשבוע',
+    player: '{{שחקן|שחקנית}}',
   },
   nav: {
     hub: 'בית', schedule: 'לוח', tables: 'טבלאות', career: 'קריירה', inbox: 'הודעות',
@@ -197,14 +321,29 @@ export const UI_TEXT = {
     restoreDeleted: 'שחזר קריירה שנמחקה', restorePrev: 'שחזר שמירה קודמת', importBackup: 'ייבוא גיבוי',
     deleteConfirm: 'למחוק את הקריירה מהמשבצת? אפשר יהיה לשחזר אותה מתפריט המשבצת',
     deleteConfirm2: 'בטוח? זו הקריירה של {name}',
+    replayIntro: 'צפה שוב בפתיחה',
+    boy: 'בן', girl: 'בת',
+  },
+  // C1: gender choice. Shown BEFORE a gender exists, so these are neutral.
+  gender: {
+    step: 'בן או בת?',
+    title: 'מי יוצא לדרך מהשכונה?',
+    hint: 'הבחירה קובעת את כל העולם של הקריירה: כדורגל גברים או כדורגל נשים, השמות, הפרסים והתחרויות.',
+    boy: 'בן', girl: 'בת',
+    boyRole: 'שחקן', girlRole: 'שחקנית',
+    boyWorld: 'כדורגל גברים', girlWorld: 'כדורגל נשים',
+    boyHero: 'הילד מהשכונה', girlHero: 'הילדה מהשכונה',
+    look: 'מראה', skin: 'גוון עור', hair: 'שיער', kit: 'צבעי החולצה', number: 'מספר על הגב',
+    random: 'הגרלה',
+    changeLater: 'אי אפשר לשנות אחרי שהקריירה מתחילה',
   },
   create: {
     stepName: 'איך קוראים לך?', first: 'שם פרטי', last: 'שם משפחה', nick: 'כינוי (לא חובה)', nickHint: 'ככה יקראו לך בשכונה',
-    stepNation: 'מאיזו מדינה אתה?', searchNation: 'חפש מדינה...',
-    stepPosition: 'באיזו עמדה אתה משחק?', foot: 'רגל חזקה', footR: 'ימין', footL: 'שמאל',
-    stepClub: 'באיזו מחלקת נוער אתה מתחיל?', noLeagueNote: 'למדינה שלך אין ליגה במשחק. בחר אקדמיה בכל ליגה שתרצה',
-    stepSummary: 'מוכן לצאת לדרך?', chooseSlot: 'באיזו משבצת לשמור?', slotTaken: 'המשבצת תפוסה. הקריירה הקיימת תעבור לשחזור',
-    next: 'הבא', start: 'צא לדרך!', scoutTitle: 'דו״ח סקאוט', scoutOk: 'יאללה, מתחילים',
+    stepNation: 'מאיזו מדינה {{אתה|את}}?', searchNation: '{{חפש|חפשי}} מדינה...',
+    stepPosition: 'באיזו עמדה {{אתה משחק|את משחקת}}?', foot: 'רגל חזקה', footR: 'ימין', footL: 'שמאל',
+    stepClub: 'באיזו מחלקת {{נוער אתה מתחיל|נערות את מתחילה}}?', noLeagueNote: 'למדינה שלך אין ליגה במשחק. {{בחר|בחרי}} אקדמיה בכל ליגה {{שתרצה|שתרצי}}',
+    stepSummary: '{{מוכן|מוכנה}} לצאת לדרך?', chooseSlot: 'באיזו משבצת לשמור?', slotTaken: 'המשבצת תפוסה. הקריירה הקיימת תעבור לשחזור',
+    next: 'הבא', start: '{{צא|צאי}} לדרך!', scoutTitle: 'דו״ח סקאוט', scoutOk: 'יאללה, מתחילים',
     errName: 'צריך שם פרטי ושם משפחה',
   },
   hub: {
@@ -214,12 +353,46 @@ export const UI_TEXT = {
     ffProgress: 'שבוע {n}...', ffStop: 'עצור',
     alerts: 'התראות', quickLinks: 'קיצורים',
     weekSummary: 'סיכום השבוע', weekOk: 'המשך', newMessages: '{n} הודעות חדשות', newOffers: '{n} הצעות חדשות',
+    newMessage: 'הודעה חדשה', newOffer: 'הצעה חדשה',
     ovrChange: 'שינוי ביכולת',
   },
   match: {
     start: 'יאללה!', autoplay: 'שחק אוטומטית', finish: 'סיכום', continue: 'המשך',
-    goalFlash: 'גוללל!', starter: 'בהרכב', benchOn: 'נכנס מהספסל בדקה {minute}', minute: 'דקה',
-    rating: 'ציון', motm: 'שחקן המשחק', goals: 'שערים', assists: 'בישולים', odds: 'סיכוי', fullTime: 'סיום',
+    goalFlash: 'גוללל!', starter: 'בהרכב', benchOn: '{{נכנס|נכנסת}} מהספסל בדקה {minute}', minute: 'דקה',
+    rating: 'ציון', motm: '{{שחקן המשחק|שחקנית המשחק}}', goals: 'שערים', assists: 'בישולים', odds: 'סיכוי', fullTime: 'סיום',
+  },
+  // C5: watch mode (default) and the replay controls.
+  watch: {
+    title: 'צפייה במשחק', live: 'שידור חי', kickoff: 'שריקת פתיחה', watch: 'צפה במשחק',
+    play: 'המשך', pause: 'השהה', speed: 'מהירות', speed1: 'x1', speed2: 'x2', speed4: 'x4',
+    skip: 'דלג לסיום', skipConfirm: 'לדלג לסיום המשחק?', toSummary: 'לסיכום המשחק',
+    minute: 'דקה {minute}', ht: 'מחצית', ft: 'סיום', et: 'הארכה', pens: 'פנדלים', addedTime: '+{n}',
+    events: 'אירועי המשחק', lineups: 'הרכבים', subs: 'חילופים', bench: 'ספסל', stats: 'סטטיסטיקה',
+    possession: 'החזקת כדור', shots: 'בעיטות', onTarget: 'למסגרת', corners: 'קרנות', cards: 'כרטיסים', fouls: 'עבירות',
+    goal: 'גול', sub: 'חילוף', yellow: 'צהוב', red: 'אדום', own: 'שלנו', opp: 'יריבה',
+    subIn: 'נכנס', subOut: 'יצא', subInF: 'נכנסה', subOutF: 'יצאה',
+    youOn: '{{אתה נכנס|את נכנסת}} למגרש!', youOff: 'הוחלפת. משחק טוב', youBench: '{{אתה|את}} על הספסל',
+    youStart: '{{אתה|את}} בהרכב!', youNotSquad: '{{אתה|את}} מחוץ לסגל הפעם',
+    myRating: 'הציון שלך', myGoals: 'השערים שלך', motm: '{{שחקן המשחק|שחקנית המשחק}}',
+    tapToSkip: 'הקש כדי לדלג', soundOn: 'קול הקהל: פועל', soundOff: 'קול הקהל: כבוי',
+    bigGoal: 'גוללללל!', megaGoal: 'גוללללללל!!!', hatTrick: 'שלושער!!!', lateWinner: 'ברגע האחרון!!!', equaliser: 'שוויון!',
+    finalScore: 'תוצאת סיום', result: { W: 'ניצחון!', D: 'תיקו', L: 'הפסד' },
+  },
+  // C8: opening cinematic.
+  intro: {
+    skip: 'דלג', tapToSkip: 'הקש כדי לדלג',
+    line1: 'שכונה אחת. כדור אחד.',
+    line2: 'חלום אחד.',
+    line3: 'מהמגרש מתחת לבניין...',
+    line4: '...ועד האצטדיונים הגדולים בעולם',
+    title: 'הילד מהשכונה',
+    titleG: '{{הילד מהשכונה|הילדה מהשכונה}}',
+    cta: 'יאללה, מתחילים',
+  },
+  // C9: celebration overlay (see also commentary.js CELEBRATION_TEXT).
+  celebrate: {
+    goal: 'גוללללל!', mega: 'גוללללללל!!!', save: 'איזו הצלה!', win: 'ניצחון!', trophy: '{{אלופים|אלופות}}!!!',
+    tap: 'הקש להמשך',
   },
   save: {
     saved: 'נשמר ✓',
@@ -279,11 +452,20 @@ export const UI_TEXT = {
     displayTitle: 'תצוגה',
     reduceMotion: 'הפחתת אנימציות',
     haptics: 'רטט במשחקים',
+    // C5 setting: ctx.settings.decisions (default false = watch mode)
+    matchTitle: 'משחקים',
+    decisions: 'החלטות במשחק',
+    decisionsNote: 'כבוי (מומלץ): צופים במשחק המלא בזמן אמת, עם חילופים, שערים וחגיגות. דלוק: המשחק עוצר ברגעי מפתח {{ואתה בוחר|ואת בוחרת}} מה לעשות.',
+    decisionsOn: 'אני רוצה להחליט ברגעים הגדולים',
+    watchSpeed: 'מהירות צפייה ברירת מחדל',
+    crowdSound: 'קולות קהל ותופים',
+    introReplay: 'הצג שוב את סרטון הפתיחה',
+    introAuto: 'סרטון פתיחה בכל כניסה',
     aboutTitle: 'אודות',
     version: 'גרסה {v}',
     checkUpdate: 'בדוק עדכונים',
     upToDate: 'יש לך את הגרסה האחרונה ✓',
-    credits: 'משחק קריירה בעברית. כל השמות של השחקנים בדיוניים.',
+    credits: 'משחק קריירה בעברית. כל השמות של השחקנים והשחקניות בדיוניים, וכל הסמלים עיצוב מקורי.',
     dangerTitle: 'אזור מסוכן',
     deleteSlot: 'מחק משבצת {n}',
     deleteSlotConfirm: 'למחוק את הקריירה במשבצת {n}?',

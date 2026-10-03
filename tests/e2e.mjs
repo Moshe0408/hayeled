@@ -1,11 +1,13 @@
 // tests/e2e.mjs: end-to-end browser test (SPEC §10.2). Integrate agent.
-// Usage: node tests/e2e.mjs [--only a|b] [--headful]
+// Usage: node tests/e2e.mjs [--only a|b|c] [--headful]
 // Env:   PUPPETEER_CORE_PATH  absolute path of a puppeteer-core package dir (default: tests/node_modules/puppeteer-core)
 //        CHROME_PATH          browser executable (default: installed Chrome, then Edge)
 //        SHOTS_DIR            screenshot directory (default: tests/out)
 // Spawns tests/serve.mjs 8123 --base /hayeled/ and tests/mock-supabase.mjs 54329, kills them at the end.
 // Scenario group A runs with the shipped (empty) backend config; group B injects the mock backend through the
 // SPEC §1.2 dev override (localStorage 'hy.dev.backend', set with evaluateOnNewDocument in that context only).
+// Group C covers v2: the opening cinematic, a girl career (feminine Hebrew, women's football) and goal celebrations.
+// Every page skips the 8 s intro ('hy.intro.skip'='1') except scenario C1.
 
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -123,6 +125,8 @@ const isAd = (u) => /^https:\/\/example\.com/.test(u) || /googlesyndication|doub
 
 function watch(page, label) {
   page.on('console', (m) => {
+    // render errors of the v2 canvas scenes are logged as warnings and swallowed by the app: surface them here
+    if (m.type() === 'warn' && /\[intro\]|\[celebrate\]|celebrate|match replay|render error/i.test(m.text())) { problems.push(`[${label}] console.warn: ${m.text()}`); return; }
     if (m.type() !== 'error') return;
     const text = m.text();
     const loc = (m.location() && m.location().url) || '';
@@ -155,14 +159,18 @@ function watch(page, label) {
   });
 }
 
-async function newPage(ctx, label) {
+async function newPage(ctx, label, { intro = false, reduced = false } = {}) {
   const page = await ctx.newPage();
+  // pin the motion preference: the host OS setting must not decide between the full and the quiet intro / celebrations
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }]);
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await page.setUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36');
   await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9' });
   page.setDefaultTimeout(15000);
   // no backend unless a scenario points the override at the mock (registered later, so it wins)
   await page.evaluateOnNewDocument(() => { try { if (!localStorage.getItem('hy.dev.backend')) localStorage.setItem('hy.dev.backend', JSON.stringify({ off: true })); } catch { /* opaque origin */ } });
+  // the 8 s opening cinematic (C8) is skipped everywhere except the intro scenario
+  await page.evaluateOnNewDocument((skip) => { try { if (skip) localStorage.setItem('hy.intro.skip', '1'); else localStorage.removeItem('hy.intro.skip'); } catch { /* opaque origin */ } }, !intro);
   watch(page, label);
   return page;
 }
@@ -180,6 +188,8 @@ async function click(page, sel, timeout = 10000) {
   // be replaced between "found" and "clicked". Re-query and retry instead of failing the scenario.
   for (let attempt = 0; ; attempt++) {
     const el = await page.waitForSelector(sel, { visible: true, timeout });
+    // a full-screen celebration (C9) swallows the first tap like on a phone: tap it away first
+    await page.evaluate(() => { for (const c of document.querySelectorAll('[data-testid="celebration"]')) c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
     try { await el.click(); return; } catch (e) {
       if (attempt >= 3 || !/detached|not clickable|Node is either not visible/i.test(String(e && e.message))) throw e;
       await sleep(150);
@@ -253,19 +263,45 @@ async function uiState(page, timeout = 20000) {
   }
 }
 
-/** Play the live match on #/match. mode: 'manual' (tap moment options) | 'auto'. Returns matches finished. */
+/** Records every celebration overlay (C9) that is mounted on the page: window.__hyCelebs = [{ kind, text }]. */
+async function recordCelebrations(page) {
+  await page.evaluateOnNewDocument(() => {
+    window.__hyCelebs = [];
+    const start = () => {
+      new MutationObserver((ms) => {
+        for (const m of ms) for (const n of m.addedNodes) {
+          if (n.nodeType === 1 && n.dataset && n.dataset.testid === 'celebration') window.__hyCelebs.push({ kind: n.dataset.kind, text: n.textContent || '' });
+        }
+      }).observe(document.body, { childList: true });
+    };
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  });
+}
+
+/**
+ * Play the match on #/match. Returns matches finished.
+ * mode: 'watch'  (default v2 flow: kick-off -> replay at x4 -> full time -> summary; skips to the end after `watchMs`)
+ *       'auto'   (straight to the result with btn-autoplay)
+ *       'manual' (decisions mode: tap the key-moment options; needs settings.decisions on)
+ */
 let shotMatch = 0;
-async function playMatch(page, mode, tag = '') {
+let momentsClicked = 0;
+async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
   let finished = 0;
   let k = 0;
-  for (let guard = 0; guard < 600; guard++) {
+  let replayT0 = 0;
+  let replayShot = false;
+  for (let guard = 0; guard < 1200; guard++) {
     const st = await page.evaluate(() => {
       const q = (id) => document.querySelector(`[data-testid="${id}"]`);
       const ab = q('btn-autoplay');
+      const sp4 = q('speed-4');
       return {
         h: location.hash, pre: !!q('btn-start-match'), outcome: !!q('moment-outcome'),
         opts: document.querySelectorAll('[data-testid^="moment-opt-"]').length,
         finish: !!q('btn-finish-match'), cont: !!q('btn-match-continue'), auto: !!ab && !ab.disabled,
+        replay: !!q('btn-skip-end'), x4: !!sp4 && sp4.getAttribute('aria-pressed') === 'true',
+        celeb: !!document.querySelector('[data-testid="celebration"]'),
       };
     });
     if (!st.h.startsWith('#/match')) return finished;
@@ -273,6 +309,7 @@ async function playMatch(page, mode, tag = '') {
       if (shotMatch < 2) { await shot(page, `match-summary${tag}`); }
       await click(page, T('btn-match-continue'));
       finished++;
+      replayT0 = 0;
       await sleep(400);
       continue;
     }
@@ -283,9 +320,23 @@ async function playMatch(page, mode, tag = '') {
       continue;
     }
     if (st.pre) {
-      if (shotMatch === 0) { await shot(page, 'match-pre'); }
-      if (mode === 'manual') await click(page, T('btn-start-match'));
-      else await click(page, T('btn-autoplay'));
+      if (shotMatch === 0) { await shot(page, 'match-pre' + tag); }
+      if (mode === 'auto') await click(page, T('btn-autoplay'));
+      else await click(page, T('btn-start-match'));
+      await sleep(250);
+      continue;
+    }
+    if (st.replay) {
+      // watch mode replay: x4, then let it run (celebrations included) or skip to full time after watchMs
+      if (!replayT0) replayT0 = Date.now();
+      if (st.celeb) { await sleep(150); continue; }
+      if (!replayShot && shotMatch === 0 && Date.now() - replayT0 > 1500) { replayShot = true; await shot(page, 'match-live' + tag, { full: false }); }
+      if (mode !== 'watch' || Date.now() - replayT0 > watchMs) {
+        await page.evaluate(() => { const b = document.querySelector('[data-testid="btn-skip-end"]'); if (b) b.click(); });
+        await sleep(250);
+        continue;
+      }
+      if (!st.x4) { await page.evaluate(() => { const b = document.querySelector('[data-testid="speed-4"]'); if (b) b.click(); }); }
       await sleep(250);
       continue;
     }
@@ -297,9 +348,10 @@ async function playMatch(page, mode, tag = '') {
     }
     if (st.opts) {
       if (mode === 'manual') {
-        if (shotMatch === 0 && k === 0) { await shot(page, 'match-live'); await setWidth(page, 360); await shot(page, 'match-live-360'); await noOverflow(page, 'match 360'); await setWidth(page, 390); }
+        if (k === 0 && momentsClicked === 0) { await shot(page, 'match-decision', { full: false }); await setWidth(page, 360); await shot(page, 'match-live-360'); await noOverflow(page, 'match 360'); await setWidth(page, 390); }
         await click(page, T('moment-opt-' + (k % st.opts)));
         k++;
+        momentsClicked++;
         await sleep(200);
       } else await click(page, T('btn-autoplay'));
       continue;
@@ -358,31 +410,41 @@ async function ffToSeasonReview(page) {
   throw new Error('season review not reached');
 }
 
-async function createCareerUI(page, { first = 'יוסי', last = 'אזולאי', shotsOn = true } = {}) {
+async function createCareerUI(page, { first = 'יוסי', last = 'אזולאי', shotsOn = true, gender = 'm', tag = '' } = {}) {
   await goto(page, '#/title');
   await click(page, T('btn-new-career'));
+  // step 1: boy / girl (C1)
+  await click(page, T('gender-' + gender));
+  if (shotsOn) await shot(page, 'new-0-gender' + tag);
+  await click(page, T('btn-next'));
+  // step 2: name
   await page.waitForSelector(T('inp-first'), { visible: true });
   await page.type(T('inp-first'), first);
   await page.type(T('inp-last'), last);
-  if (shotsOn) await shot(page, 'new-1-name');
+  if (shotsOn) await shot(page, 'new-1-name' + tag);
+  await click(page, T('btn-next'));
+  // step 3: look (skin / hair colour / hairstyle)
+  await click(page, T('skin-3'));
+  await click(page, T('hair-2'));
+  if (shotsOn) { await shot(page, 'new-1b-look' + tag); await noOverflow(page, 'wizard look'); }
   await click(page, T('btn-next'));
   await click(page, T('nation-isr'));
-  if (shotsOn) { await shot(page, 'new-2-nation'); await noOverflow(page, 'wizard nation'); }
+  if (shotsOn) { await shot(page, 'new-2-nation' + tag); await noOverflow(page, 'wizard nation'); }
   await click(page, T('btn-next'));
   await click(page, T('pos-ST'));
   await click(page, T('foot-R'));
-  if (shotsOn) await shot(page, 'new-3-position');
+  if (shotsOn) await shot(page, 'new-3-position' + tag);
   await click(page, T('btn-next'));
   await page.waitForSelector('[data-testid^="club-isr"]', { visible: true });
   const clubId = await page.$eval('[data-testid^="club-isr"]', (e) => e.dataset.testid);
   await click(page, T(clubId));
-  if (shotsOn) await shot(page, 'new-4-academy');
+  if (shotsOn) await shot(page, 'new-4-academy' + tag);
   await click(page, T('btn-next'));
   await page.waitForSelector(T('btn-start') + ':not([disabled])', { visible: true });
-  if (shotsOn) await shot(page, 'new-5-summary');
+  if (shotsOn) await shot(page, 'new-5-summary' + tag);
   await click(page, T('btn-start'));
   await page.waitForSelector(T('scout-report'), { visible: true });
-  if (shotsOn) await shot(page, 'scout-report', { full: false });
+  if (shotsOn) await shot(page, 'scout-report' + tag, { full: false });
   await click(page, T('btn-scout-ok'));
   await page.waitForSelector(T('hub-ovr'), { visible: true });
   await sleep(300);
@@ -450,34 +512,75 @@ async function groupA(browser) {
     await createCareerUI(page);
     const h = await hubVM(page);
     assert(h && h.player.ovr > 0 && h.club, 'hub without player/club');
+    // C7 avatar on the hub player card, C6 crests on the hub
+    const art = await page.evaluate(() => ({ av: [...document.querySelectorAll('#view svg.avatar')].filter((e) => e.getBoundingClientRect().width > 20).length, cr: document.querySelectorAll('#view svg.crest').length }));
+    assert(art.av >= 1, 'no avatar SVG on the hub');
+    assert(art.cr >= 1, 'no crest SVG on the hub');
     await shot(page, 'hub');
     await setWidth(page, 360); await noOverflow(page, 'hub 360'); await shot(page, 'hub-360'); await setWidth(page, 390);
     await setWidth(page, 320); await noOverflow(page, 'hub 320'); await setWidth(page, 390);
   });
 
-  await scenario('A3 play weeks: 2 manual matches + 1 auto-play match, week summary', async () => {
+  await scenario('A3 play weeks (watch mode): 2 watched matches at x4 + 1 straight-to-result, week summary', async () => {
     let manual = 0, auto = 0, weeks = 0, weekShot = false;
     for (let i = 0; i < 40 && (manual < 2 || auto < 1); i++) {
-      const mode = manual < 2 ? 'manual' : 'auto';
+      const mode = manual < 2 ? 'watch' : 'auto';
       if (!weekShot) {
         // first week: capture the summary modal before closing it
         await closeTopModals(page);
         await click(page, T('btn-advance'));
         await sleep(300);
         let s = await uiState(page);
-        if (s === 'match') { const n = await playMatch(page, mode); if (mode === 'manual') manual += n; else auto += n; shotMatch++; s = await uiState(page); }
+        if (s === 'match') { const n = await playMatch(page, mode); if (mode === 'watch') manual += n; else auto += n; shotMatch++; s = await uiState(page); }
         if (s === 'week') { await shot(page, 'week-summary', { full: false }); weekShot = true; await click(page, T('btn-week-ok')); await sleep(300); }
         weeks++;
         continue;
       }
       const r = await advanceUI(page, mode);
       weeks++;
-      if (mode === 'manual') manual += r.matches; else auto += r.matches;
+      if (mode === 'watch') manual += r.matches; else auto += r.matches;
       if (r.state === 'season') break;
     }
-    assert(manual >= 2 && auto >= 1, `matches manual=${manual} auto=${auto} after ${weeks} weeks`);
+    assert(manual >= 2 && auto >= 1, `matches watched=${manual} auto=${auto} after ${weeks} weeks`);
     const h = await hubVM(page);
     assert(h.player.form.length >= 1, 'no form after matches');
+  });
+
+  await scenario('A3b decisions setting on: key moments are asked, then back to watch mode', async () => {
+    await goto(page, '#/settings');
+    await page.waitForSelector(T('toggle-decisions'), { visible: true });
+    const was = await page.$eval(T('toggle-decisions'), (e) => e.checked);
+    assert(was === false, 'decisions must be off by default');
+    await click(page, T('toggle-decisions'));
+    await sleep(300);
+    assert(await page.evaluate(() => window.__hy.ctx.settings.decisions === true), 'decisions setting not saved');
+    await goto(page, '#/hub');
+    let moments = 0;
+    for (let i = 0; i < 12 && !moments; i++) {
+      await closeTopModals(page);
+      if (!(await present(page, T('btn-advance')))) await goto(page, '#/hub');
+      await click(page, T('btn-advance'));
+      await sleep(300);
+      for (let j = 0; j < 10; j++) {
+        const s = await uiState(page);
+        if (s === 'match') {
+          // decisions mode: the key moments are asked again (the player may be an unused sub, so try a few)
+          const m0 = momentsClicked;
+          await playMatch(page, 'manual');
+          moments += momentsClicked - m0;
+          continue;
+        }
+        if (s === 'week') { await click(page, T('btn-week-ok')); await sleep(300); break; }
+        if (s === 'interstitial') { await click(page, T('btn-ad-close')); continue; }
+        break;
+      }
+    }
+    assert(moments >= 1, 'no key moment offered with decisions on');
+    await goto(page, '#/settings');
+    await click(page, T('toggle-decisions'));
+    await sleep(300);
+    assert(await page.evaluate(() => window.__hy.ctx.settings.decisions === false), 'decisions not switched off');
+    await goto(page, '#/hub');
   });
 
   await scenario('A4 answer an inbox event', async () => {
@@ -510,6 +613,8 @@ async function groupA(browser) {
     await comp.click();
     await sleep(400);
     await noOverflow(page, 'table');
+    const crests = await page.evaluate(() => document.querySelectorAll('#view svg.crest').length);
+    assert(crests >= 8, 'league table without crest SVGs: ' + crests);
     await shot(page, 'table-league');
     await setWidth(page, 360); await noOverflow(page, 'table 360'); await shot(page, 'table-league-360'); await setWidth(page, 390);
     await goto(page, '#/settings'); await setWidth(page, 360); await noOverflow(page, 'settings 360'); await shot(page, 'settings-360'); await setWidth(page, 390);
@@ -775,6 +880,159 @@ async function groupA(browser) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Group C: v2 - opening cinematic, girl career, goal celebrations     */
+/* ------------------------------------------------------------------ */
+
+/** Text of the whole document (view, modals, header, overlays) for marker / wording checks. */
+const docText = (page) => page.evaluate(() => document.body.innerText || '');
+async function noMarkers(page, where) {
+  const bad = await page.evaluate(() => {
+    const t = document.body.innerText || '';
+    const m = t.match(/\{\{|\}\}|NaN|undefined|\[object Object\]|\{[a-z0-9_]+\}/);
+    return m ? m[0] + ' in: ' + t.slice(Math.max(0, m.index - 50), m.index + 50).replace(/\s+/g, ' ') : null;
+  });
+  assert(!bad, `${where}: ${bad}`);
+}
+
+async function groupC(browser) {
+  const ctx = await browser.createBrowserContext();
+
+  await scenario('C1 opening cinematic: plays on first launch, skip button works, title after, not again this session', async () => {
+    const page = await newPage(ctx, 'C-intro', { intro: true });
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForSelector(T('intro'), { visible: true, timeout: 10000 });
+    await sleep(1600);
+    await shot(page, 'intro-1.6s', { full: false });
+    const canvasOk = await page.evaluate(() => { const c = document.querySelector('[data-testid="intro"] canvas'); return !!c && c.width > 0 && c.height > 0; });
+    assert(canvasOk, 'intro canvas missing');
+    await page.waitForSelector(T('btn-intro-skip'), { visible: true });
+    await click(page, T('btn-intro-skip'));
+    await page.waitForFunction(() => !document.querySelector('[data-testid="intro"]'), { timeout: 3000 });
+    await waitBoot(page);
+    await page.waitForSelector(T('btn-new-career'), { visible: true });
+    const flags = await page.evaluate(() => ({ seen: localStorage.getItem('hy.intro.seen'), sess: sessionStorage.getItem('hy.intro.session') }));
+    assert(flags.seen && flags.sess, 'intro flags not stored ' + JSON.stringify(flags));
+    // same session: no intro on reload
+    await page.reload({ waitUntil: 'load' });
+    await waitBoot(page);
+    await page.waitForSelector(T('btn-new-career'), { visible: true });
+    assert(!(await page.$(T('intro'))), 'intro played twice in one session');
+    // replay from settings, closed with Esc
+    await goto(page, '#/settings');
+    await click(page, T('btn-replay-intro'));
+    await page.waitForSelector(T('intro'), { visible: true, timeout: 5000 });
+    await sleep(700);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('[data-testid="intro"]'), { timeout: 3000 });
+    await page.close();
+  });
+
+  await scenario('C1b reduced motion: intro is a short logo reveal (no canvas) and the title follows', async () => {
+    const rctx = await browser.createBrowserContext();
+    const page = await newPage(rctx, 'C-intro-rm', { intro: true, reduced: true });
+    const t0 = Date.now();
+    await page.goto(BASE, { waitUntil: 'load' });
+    await page.waitForSelector(T('intro'), { visible: true, timeout: 10000 });
+    const hasCanvas = await page.evaluate(() => !!document.querySelector('[data-testid="intro"] canvas'));
+    assert(!hasCanvas, 'reduced-motion intro must not run the canvas cinematic');
+    await shot(page, 'intro-reduced-motion', { full: false });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="intro"]'), { timeout: 5000 });
+    await page.waitForSelector(T('btn-new-career'), { visible: true });
+    const ms = Date.now() - t0;
+    assert(ms < 6000, 'reduced-motion intro took ' + ms + ' ms');
+    await rctx.close();
+  });
+
+  const page = await newPage(ctx, 'C');
+  await recordCelebrations(page);
+
+  await scenario('C2 girl career: gender-f wizard -> hub in feminine Hebrew, avatar + crests, no {{ markers', async () => {
+    await page.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(page);
+    await createCareerUI(page, { first: 'נועה', last: 'כהן', gender: 'f', tag: '-f' });
+    const h = await hubVM(page);
+    assert(h.player.gender === 'f', 'engine gender ' + h.player.gender);
+    const meta2 = await page.evaluate(() => window.__hy.game.getSaveMeta());
+    assert(meta2.look && meta2.look.skin === 3, 'look not stored: ' + JSON.stringify(meta2.look));
+    await closeTopModals(page);
+    await noMarkers(page, 'hub (f)');
+    const t = await docText(page);
+    assert(/הילדה מהשכונה|ברוכה|שחקנית|לנשים/.test(t), 'no feminine wording on the hub');
+    const art = await page.evaluate(() => ({ av: document.querySelectorAll('#view svg.avatar').length, cr: document.querySelectorAll('#view svg.crest').length }));
+    assert(art.av >= 1 && art.cr >= 1, 'hub art ' + JSON.stringify(art));
+    await shot(page, 'hub-f');
+  });
+
+  await scenario('C3 girl career: watch matches until she scores -> "גוללללל!" celebration overlay', async () => {
+    let meGoal = false;
+    for (let i = 0; i < 40 && !meGoal; i++) {
+      await closeTopModals(page);
+      if (!(await present(page, T('btn-advance')))) await goto(page, '#/hub');
+      const h = await hubVM(page);
+      if (h.status === 'review') break;
+      await click(page, T('btn-advance'));
+      await sleep(300);
+      for (let j = 0; j < 10; j++) {
+        const s = await uiState(page);
+        if (s === 'week') { await click(page, T('btn-week-ok')); await sleep(300); break; }
+        if (s === 'interstitial') { await click(page, T('btn-ad-close')); continue; }
+        if (s !== 'match') break;
+        // kick off, read the resolved log; watch at x4 only when she scores, else skip to full time
+        await click(page, T('btn-start-match'));
+        await page.waitForSelector(T('btn-skip-end'), { visible: true });
+        const evs = await page.evaluate(() => window.__hyMatchDebug.events());
+        const mine = evs.filter((e) => e.ev === 'goal' && e.who === 'me');
+        if (mine.length) {
+          meGoal = true;
+          await page.evaluate(() => window.__hyMatchDebug.speed(4));
+          await page.waitForSelector(T('celebration'), { timeout: 60000 });
+          await sleep(500);
+          await shot(page, 'celebration-me-goal', { full: false });
+        }
+        await playMatch(page, 'auto', '-f');
+      }
+    }
+    assert(meGoal, 'she did not score in 40 weeks');
+    const celebs = await page.evaluate(() => window.__hyCelebs);
+    assert(celebs.some((c) => /גול/.test(c.text)), 'no goal celebration recorded ' + JSON.stringify(celebs));
+    // the C9 overlay is removed afterwards
+    await page.waitForFunction(() => !document.querySelector('[data-testid="celebration"]'), { timeout: 8000 });
+  });
+
+  await scenario('C4 girl career: full season -> review, every screen feminine and marker-free, crests in tables', async () => {
+    await goto(page, '#/hub');
+    await ffToSeasonReview(page);
+    await noMarkers(page, 'season review (f)');
+    await shot(page, 'season-review-f');
+    await click(page, T('btn-season-ok'));
+    await sleep(600);
+    await closeTopModals(page);
+    const screens = ['#/hub', '#/schedule', '#/tables', '#/career', '#/inbox', '#/profile', '#/national', '#/offers', '#/awards', '#/shop', '#/settings'];
+    let all = '';
+    for (const hsh of screens) {
+      await goto(page, hsh);
+      await sleep(250);
+      await closeTopModals(page);
+      await noOverflow(page, hsh + ' (f)');
+      await noMarkers(page, hsh + ' (f)');
+      all += await docText(page);
+    }
+    assert(/לנשים/.test(all), 'no women\'s competition names (…לנשים) on any screen');
+    assert(/ברוכה|הילדה מהשכונה|שחקנית|מבקיעה|את /.test(all), 'no feminine forms found');
+    await goto(page, '#/tables');
+    const comp = await page.$('[data-testid^="comp-"]');
+    assert(comp, 'no competition link');
+    await comp.click();
+    await sleep(400);
+    const crests = await page.evaluate(() => document.querySelectorAll('#view svg.crest').length);
+    assert(crests >= 8, 'table without crests: ' + crests);
+    await shot(page, 'table-league-f');
+  });
+
+  await ctx.close();
+}
+
+/* ------------------------------------------------------------------ */
 /* Group B: mock backend                                               */
 /* ------------------------------------------------------------------ */
 
@@ -969,6 +1227,7 @@ async function main() {
   const t0 = Date.now();
   try {
     if (!ONLY || ONLY === 'a') await groupA(browser);
+    if (!ONLY || ONLY === 'c') await groupC(browser);
     if (!ONLY || ONLY === 'b') await groupB(browser);
   } finally {
     await browser.close().catch(() => {});

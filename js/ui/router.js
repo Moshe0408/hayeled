@@ -1,6 +1,7 @@
 // router.js: hash router with lazy screen modules.
 // Dynamic import specifiers below resolve relative to this file (js/ui/).
 import { resetHeader, setTabs, setBannersVisible, showErrorScreen, closeAllModals } from './app.js';
+import { refreshGender, careerGender } from './gender.js';
 
 const routes = [];
 let rootEl = null;
@@ -106,6 +107,8 @@ async function renderCurrent() {
   if (my !== token) return;
   runCleanup();
   closeAllModalsSafe(info);
+  refreshGender();
+  try { document.documentElement.dataset.g = careerGender() || ''; } catch { /* ignore */ }
   const meta = info.route.meta || {};
   currentMeta = meta;
   resetHeader(meta);
@@ -144,7 +147,7 @@ function closeAllModalsSafe(info) {
 
 route('/title', () => import('./title.js'), { tabs: false, header: false });
 route('/new', () => import('./create.js'), { tabs: false, title: 'קריירה חדשה', back: '#/title' });
-route('/hub', () => import('./hub.js'), { tab: 'hub', title: 'הילד מהשכונה', gear: true });
+route('/hub', () => import('./hub.js'), { tab: 'hub', title: '{{הילד|הילדה}} מהשכונה', gear: true });
 route('/match', () => import('./match.js'), { tabs: false, header: false, banners: false });
 route('/season', () => import('./week.js'), { tab: 'hub', title: 'סיכום העונה' });
 route('/inbox', () => import('./inbox.js'), { tab: 'inbox', title: 'הודעות', back: '#/hub' });

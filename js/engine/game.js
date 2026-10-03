@@ -2,16 +2,16 @@
 import { createRng, rngFor, randomSeed, hash32 } from '../core/rng.js';
 import { COUNTRIES, COUNTRY_BY_ID } from '../data/countries.js';
 import { LEAGUES, LEAGUE_BY_ID, CLUB_INDEX } from '../data/leagues.js';
-import { NICKNAMES, FRIEND_NAMES, AGENT_NAMES, JOURNALIST_NAMES } from '../data/names.js';
+import { NICKNAMES, FRIEND_NAMES, AGENT_NAMES, JOURNALIST_NAMES, NICKNAMES_F, FRIEND_NAMES_F } from '../data/names.js';
 import { POSITIONS, ATTRS, TRAINING, ROLES, STAGES, SELECTION, EURO_COMPS, ROUND_NAMES, TOURNAMENTS, ALERTS, FORMAT_LABELS, RESULT_LABELS } from '../data/strings.js';
-import { clamp, round1, avg, fmtMoney as _fmtMoney, fmtSeason as _fmtSeason, sortIds, deepClone, hePrefix } from './util.js';
-import { C, SCHEMA_VERSION as SV, emit, curAw, createEmptyState, migrateState as _migrate, emptyStats, STATE_KEYS } from './state.js';
+import { clamp, round1, avg, fmtMoney as _fmtMoney, fmtSeason as _fmtSeason, sortIds, deepClone, hePrefix, gtext, gdeep, femLabel, econOf, curGender, isF } from './util.js';
+import { C, SCHEMA_VERSION as SV, emit, curAw, createEmptyState, migrateState as _migrate, emptyStats, STATE_KEYS, WOMEN_ECON, defaultShirt } from './state.js';
 import { weekLabelHe, isWindowOpen, isIntlWeek, intlSlotIndex, leagueRoundSlots, cupRoundSlots, tournamentSlots, EURO_WEEKS, summerTournaments, INTL_WEEKS } from './calendar.js';
 import { simScore, simKnockout, koWinner } from './sim.js';
 import {
   initWorld, teamVM, cs, clubData, clubLeague, clubCountry, clubName, country, league, leagueIds, leagueFormat, leagueRanking, leagueRankOf,
   buildLeagues, leagueRoundFixtures, leagueFixturesInSlot, finishLeagueRound, tableApply, rankRows, buildYouthLeague, youthFixturesInSlot,
-  youthRoundFixtures, promoteRelegate, evolveClubs, genName, poolOfCountry, nameFor, clubPrestige, leagueMembers, isFiller,
+  youthRoundFixtures, promoteRelegate, evolveClubs, genName, poolOfCountry, nameFor, clubPrestige, leagueMembers, isFiller, lgNameHe,
 } from './world.js';
 import { buildCups, cupFixturesInSlot, cupApply, cupsAfterSlot, cupIds, cupDef, roundKey as cupRoundKey, cupTieWinner } from './cups.js';
 import { EC, buildEurope, firstSeasonEntrants, computeNextEntrants, euroFixturesInSlot, euroApply, euroAfterSlot, lpRanking, twoLegWinner } from './europe.js';
@@ -21,7 +21,7 @@ import {
 } from './national.js';
 import { createPlayer, ovrOf, ageOf, formAvg, formAvgOr, potStars, updatePotSeen, developWeek, potentialDrift, valueOf, fairWage, injuryChanceMatch, rollInjury, injuryHe, clampStatus, POS_W, OUT_ATTRS, GK_ATTRS, posGroup } from './player.js';
 import { clubSelection, youthSelection, nationalSelection, seniorScore, youthThreshold } from './selection.js';
-import { createLive, startLive, chooseLive, autoPlayLive, endLive, matchVM, computeRating, momentStats, resOf, compHe, roundHe, fxKey, teamVariant, lineOf, extraHe, sideStrength, cleanSheetEligible, tourHe } from './match.js';
+import { createLive, startLive, chooseLive, autoPlayLive, endLive, matchVM, computeRating, momentStats, resOf, compHe, roundHe, fxKey, teamVariant, lineOf, extraHe, sideStrength, cleanSheetEligible, tourHe, tourKindHe, euroHe, logVM, compNameHe as _compNameHe } from './match.js';
 import { generateOffers, renewalCheck, makeProOffer, proEligible, respond, expireOffers, requestTransfer as reqT, cancelTransferRequest as cancelT, offerVM, contractVM, endLoan, contractExpiry, releaseYouth, applyPrecontract, effSeason, teamStrOf, setAbroadFlag } from './transfers.js';
 import { createStars, evolveStars, buildBenchmarks, seasonEndAwards, ballonDor, giveTrophy, giveAward, awardsVM, awardHe, trophyHe } from './awards.js';
 import { raise, sysMsg, runWeekEvents, autoAnswerExpired, answerItem, inboxRows, threadVM, awLabel, coachName } from './narrative.js';
@@ -31,6 +31,13 @@ import { buy, sell, shopVM, moraleBonus, weeklyUpkeep } from './shop.js';
 export const SCHEMA_VERSION = SV;
 export function fmtMoney(n) { return _fmtMoney(n); }
 export function fmtSeason(s) { return _fmtSeason(s); }
+// Every Hebrew string the facade returns has its {{male|female}} markers resolved (C2).
+function G(v, g) { return gdeep(v, g); }
+/** Gender of the loaded career ('m' if none). */
+export function getGender() { return curGender(); }
+/** C3: display name of a competition id for the loaded career (women's names when gender 'f'). */
+export function compNameHe(id) { return C.S ? _compNameHe(id, C.S) : _compNameHe(id, null); }
+export function gtextHe(str) { return gtext(str); }
 
 const subs = [];
 function need() { if (!C.S) throw new Error('no_career'); return C.S; }
@@ -47,17 +54,20 @@ export function migrateState(data, fromVersion) { return _migrate(data, fromVers
 const POS_ORDER = ['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CAM', 'LW', 'RW', 'ST'];
 export function getCreateOptions(opts = {}) {
   const seed = (opts && typeof opts.seed === 'number') ? (opts.seed >>> 0) : 0;
+  const gnd = opts && opts.gender === 'f' ? 'f' : 'm';
   const pick = COUNTRIES.filter((c) => c.pickable);
   const isr = pick.filter((c) => c.id === 'isr');
   const rest = pick.filter((c) => c.id !== 'isr').sort((a, b) => String(a.nameHe).localeCompare(String(b.nameHe), 'he'));
   const nations = isr.concat(rest).map((c) => ({ id: c.id, nameHe: c.nameHe, flag: c.flag, confed: c.confed, hasLeague: !!(c.leagues && c.leagues.length) }));
-  const positions = POS_ORDER.map((id) => { const p = (POSITIONS && POSITIONS[id]) || {}; return { id, he: p.he || id, short: p.short || id, group: p.group || posGroup(id), desc: p.desc || '' }; });
-  const nk = rngFor(seed, 'nicks').shuffle((NICKNAMES || []).slice()).slice(0, 6);
-  return { nations, positions, feet: [{ id: 'R', he: 'ימין' }, { id: 'L', he: 'שמאל' }], nicknames: nk };
+  const positions = POS_ORDER.map((id) => { const p = (POSITIONS && POSITIONS[id]) || {}; return { id, he: femLabel(p.he || id, gnd), short: femLabel(p.short || id, gnd), group: p.group || posGroup(id), desc: gtext(p.desc || '', gnd) }; });
+  const nk = rngFor(seed, 'nicks').shuffle(((gnd === 'f' ? NICKNAMES_F : NICKNAMES) || []).slice()).slice(0, 6);
+  return G({ nations, positions, feet: [{ id: 'R', he: 'ימין' }, { id: 'L', he: 'שמאל' }], nicknames: nk,
+    genders: [{ id: 'm', he: 'בן', heLong: 'שחקן' }, { id: 'f', he: 'בת', heLong: 'שחקנית' }], gender: gnd }, gnd);
 }
 
 function academyStars(s) { return clamp(Math.round((s - 40) / 11), 1, 5); }
-export function getAcademyOptions(nationId) {
+export function getAcademyOptions(nationId, opts = {}) {
+  const gnd = opts && (opts.gender === 'f' || opts.gender === 'm') ? opts.gender : curGender();
   const own = LEAGUES.filter((l) => l.countryId === nationId);
   const hasLeague = own.length > 0;
   const lgs = hasLeague ? own : LEAGUES;
@@ -66,7 +76,7 @@ export function getAcademyOptions(nationId) {
     groups: lgs.map((l) => {
       const cc = COUNTRY_BY_ID[l.countryId];
       return {
-        leagueId: l.id, leagueHe: l.nameHe, countryHe: cc ? cc.nameHe : '', flag: cc ? cc.flag : '', tier: l.tier,
+        leagueId: l.id, leagueHe: gnd === 'f' ? (l.nameHeW || l.nameHe + ' לנשים') : l.nameHe, countryHe: cc ? cc.nameHe : '', flag: cc ? cc.flag : '', tier: l.tier,
         clubs: l.clubs.map((cl) => ({ id: cl.id, nameHe: cl.nameHe, shortHe: cl.shortHe, city: cl.city, colors: cl.colors.slice(0, 2), strength: cl.strength, academyStars: academyStars(cl.strength) })),
       };
     }),
@@ -81,26 +91,30 @@ export function newCareer(opts = {}) {
   if (nick.length > 16) return { ok: false, error: 'invalid_nick', messageHe: 'הכינוי ארוך מדי (עד 16 תווים)' };
   if (!COUNTRY_BY_ID[opts.nation]) return { ok: false, error: 'invalid_nation', messageHe: 'בחר מדינה' };
   if (POS_ORDER.indexOf(opts.pos) < 0) return { ok: false, error: 'invalid_pos', messageHe: 'בחר עמדה' };
-  const ac = getAcademyOptions(opts.nation);
+  const ac = getAcademyOptions(opts.nation, { gender: opts.gender === 'f' ? 'f' : 'm' });
   const okClub = ac.groups.some((g) => g.clubs.some((c) => c.id === opts.club));
   if (!okClub) return { ok: false, error: 'invalid_club', messageHe: 'בחר אקדמיה' };
   const seed = typeof opts.seed === 'number' ? (opts.seed >>> 0) : randomSeed();
   const now = typeof opts.now === 'number' ? opts.now : Date.now();
   const startSeason = typeof opts.startSeason === 'number' ? opts.startSeason : 2026;
+  const gender = opts.gender === 'f' ? 'f' : 'm';
+  const look = sanitizeLook(opts.look);
+  const num = Number.isInteger(opts.num) && opts.num >= 1 && opts.num <= 99 ? opts.num : defaultShirt(opts.pos);
   const S = createEmptyState();
+  S.econ = gender === 'f' ? WOMEN_ECON : 1;
   S.id = 'c_' + b36(now) + '_' + b36(seed);
   S.createdAt = now; S.seed = seed; S.startSeason = startSeason; S.season = startSeason; S.week = 1;
   C.S = S; C.rng = createRng(seed); C.sig = [];
   const rng = C.rng;
   initWorld(S);
-  initNational(S);
-  S.player = createPlayer(rng, { first, last, nick, nation: opts.nation, pos: opts.pos, foot: opts.foot, club: opts.club }, startSeason);
+  initNational(S, gender);
+  S.player = createPlayer(rng, { first, last, nick, nation: opts.nation, pos: opts.pos, foot: opts.foot, club: opts.club, gender, look, num }, startSeason, S.econ);
   const p = S.player;
-  p.contract = { club: opts.club, wage: Math.round(150 + 5 * cs(S, opts.club)), until: p.born + 18, role: 'prospect', rc: 0, since: startSeason, loan: false };
+  p.contract = { club: opts.club, wage: Math.round((150 + 5 * cs(S, opts.club)) * S.econ), until: p.born + 18, role: 'prospect', rc: 0, since: startSeason, loan: false };
   const nr = rngFor(seed, 'names');
   S.names.agent = nr.pick(AGENT_NAMES || []) || 'שוקי לוי';
   S.names.journalist = nr.pick(JOURNALIST_NAMES || []) || 'רפי';
-  const fr = nr.shuffle((FRIEND_NAMES || ['שמוליק', 'מוטי', 'דודו']).slice());
+  const fr = nr.shuffle(((gender === 'f' ? FRIEND_NAMES_F : FRIEND_NAMES) || ['שמוליק', 'מוטי', 'דודו']).slice());
   S.names.friends = [fr[0] || 'שמוליק', fr[1] || 'מוטי', fr[2] || 'דודו'];
   createStars(S, rng);
   buildSeason(S, true);
@@ -108,12 +122,22 @@ export function newCareer(opts = {}) {
   updatePotSeen(S);
   setAbroadFlag(S);
   addTimeline(S, 'start', 'הצטרפת לאקדמיה של ' + clubName(opts.club) + '. הכול מתחיל כאן.');
-  sysMsg(S, 'system', 'ברוך הבא ל"הילד מהשכונה"! ' + first + ', הקריירה שלך מתחילה באקדמיה של ' + clubName(opts.club) + '.');
-  sysMsg(S, 'mom', 'אמא כאן. הכנתי לך שניצלים לאימון הראשון. אל תשכח לשתות מים! ❤️');
-  emit('career_started', { nation: p.nation, position: p.pos, club: opts.club, league: clubLeague(S, opts.club) });
+  sysMsg(S, 'system', '{{ברוך הבא|ברוכה הבאה}} ל"הילד מהשכונה"! ' + first + ', הקריירה שלך מתחילה באקדמיה של ' + clubName(opts.club) + '.');
+  sysMsg(S, 'mom', 'אמא כאן. הכנתי לך שניצלים לאימון הראשון. אל {{תשכח|תשכחי}} לשתות מים! ❤️');
+  emit('career_started', { nation: p.nation, position: p.pos, club: opts.club, league: clubLeague(S, opts.club), gender });
   notify();
-  return { ok: true, report: scoutReport(S) };
+  return G({ ok: true, report: scoutReport(S) });
 }
+
+// C7: optional look chosen in the wizard ({ skin, hair }: small integers or short id strings)
+function sanitizeLook(l) {
+  if (!l || typeof l !== 'object') return null;
+  const ok = (v) => (Number.isInteger(v) && v >= 0 && v <= 99) || (typeof v === 'string' && /^[a-zA-Z0-9_#-]{1,16}$/.test(v));
+  const out = {};
+  for (const k of ['skin', 'hair', 'hairColor', 'style']) if (ok(l[k])) out[k] = l[k];
+  return Object.keys(out).length ? out : null;
+}
+function posHeOf(p) { return femLabel((POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos); }
 
 function scoutReport(S) {
   const p = S.player;
@@ -122,14 +146,14 @@ function scoutReport(S) {
   const st = potStars(p.potSeen);
   const best = attrsVM(S).slice(0, 2).map((a) => a.he).join(' ו');
   const txt = [
-    'גיל ' + ageOf(S) + ', ' + ((POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos) + ' עם רגל ' + (p.foot === 'L' ? 'שמאל' : 'ימין') + ' טובה.',
+    'גיל ' + ageOf(S) + ', ' + posHeOf(p) + ' עם רגל ' + (p.foot === 'L' ? 'שמאל' : 'ימין') + ' טובה.',
     'הנקודות החזקות: ' + best + '.',
-    st >= 4 ? 'הסקאוטים מדברים על כישרון נדיר. אם יעבוד קשה, השמיים הם הגבול.' : st >= 3 ? 'יש פה פוטנציאל אמיתי לשחקן מקצוען טוב.' : 'צריך לעבוד קשה, אבל הלב במקום. אף אחד לא נולד כוכב.',
+    st >= 4 ? 'הסקאוטים מדברים על כישרון נדיר. אם {{יעבוד|תעבוד}} קשה, השמיים הם הגבול.' : st >= 3 ? 'יש פה פוטנציאל אמיתי {{לשחקן מקצוען טוב|לשחקנית מקצוענית טובה}}.' : 'צריך לעבוד קשה, אבל הלב במקום. {{אף אחד לא נולד כוכב|אף אחת לא נולדה כוכבת}}.',
   ].join(' ');
   return {
     name: p.first + ' ' + p.last, nick: p.nick, age: ageOf(S), nationHe: nat ? nat.nameHe : '', flag: nat ? nat.flag : '',
-    posHe: (POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos, footHe: p.foot === 'L' ? 'שמאל' : 'ימין', clubHe: p.club ? clubName(p.club) : '',
-    ovr, potStars: st, potRange: p.potSeen.slice(), attrs: attrsVM(S), textHe: txt,
+    posHe: posHeOf(p), footHe: p.foot === 'L' ? 'שמאל' : 'ימין', clubHe: p.club ? clubName(p.club) : '',
+    ovr, potStars: st, potRange: p.potSeen.slice(), attrs: attrsVM(S), textHe: txt, gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
   };
 }
 
@@ -212,7 +236,7 @@ function isPlayerTeamFx(S, fx, key) {
   return isPlayerNatFx(S, fx);
 }
 
-const NOTE = { bench: 'ישבת על הספסל', out: 'לא נכללת בסגל', injured: 'פצוע', suspended: 'מורחק', unknown: '' };
+const NOTE = { bench: 'ישבת על הספסל', out: 'לא נכללת בסגל', injured: '{{פצוע|פצועה}}', suspended: '{{מורחק|מורחקת}}', unknown: '' };
 
 function resultRow(S, fx, hg, ag, extra, mine, rating, note) {
   const v = teamVariant(fx);
@@ -443,13 +467,13 @@ function callups(S) {
   S.ev.flags['_call_' + lvl] = true;
   if (p.natLvl !== 'senior') p.natLvl = lvl;
   const nat = country(p.nation);
-  const lvlHe = lvl === 'senior' ? 'הנבחרת הבוגרת' : lvl === 'u17' ? 'נבחרת עד גיל 17' : lvl === 'u19' ? 'נבחרת עד גיל 19' : 'נבחרת עד גיל 21';
-  W.callupHe = hePrefix('זומנת ל', lvlHe) + ' של ' + (nat ? nat.nameHe : '');
+  const lvlHe = natLevelHe(lvl);
+  W.callupHe = lvl === 'senior' && isF(S) ? 'זומנת ל' + natTeamHe(S) : hePrefix('זומנת ל', lvlHe) + ' של ' + (nat ? nat.nameHe : '');
   if (firstAtLevel) {
     W.firstCall = true;
     raise(S, lvl === 'senior' ? 'national_callup' : 'youth_callup');
     emit('national_callup', { level: lvl });
-    sysMsg(S, 'national_coach', 'שלום ' + p.first + ', אני שמח לבשר לך ש' + hePrefix('זומנת ל', lvlHe) + '. כל המדינה מאחוריך!');
+    sysMsg(S, 'national_coach', 'שלום ' + p.first + ', אני שמח לבשר לך ש' + (lvl === 'senior' && isF(S) ? 'זומנת ל' + natTeamHe(S) : hePrefix('זומנת ל', lvlHe)) + '. כל המדינה מאחוריך!');
     addTimeline(S, 'callup', hePrefix('זימון ראשון ל', lvlHe));
   }
   if (week === 45 && (lvl === 'senior' ? S.nt.tour : S.nt.ytour)) raise(S, 'tournament_start');
@@ -590,7 +614,7 @@ function weekEnd(S, ff) {
   if (p.club && S.week <= 44 && S.comp.res.some((r) => r.w === S.week && r.k === 'league')) {
     const lid = clubLeague(S, p.club);
     const rk = lid ? leagueRankOf(S, lid, p.club) : null;
-    if (rk) W.lines.push(clubName(p.club) + ' במקום ' + rk + ' ' + hePrefix('ב', LEAGUE_BY_ID[lid].nameHe));
+    if (rk) W.lines.push(clubName(p.club) + ' במקום ' + rk + ' ' + hePrefix('ב', lgNameHe(lid)));
   }
   if (S.week === 44) seasonEnd(S);
   if (!S.retired) runWeekEvents(S, rng, { opp: opponentHint(S), derby: W.derby });
@@ -616,7 +640,7 @@ function onInjury(S) {
   if (p.injury.weeks >= 6) raise(S, 'long_injury');
   const he = injuryHe(p.injury);
   if (W) { W.injuryHe = he + ' · ' + p.injury.weeks + ' שבועות'; W.newInj = Math.max(W.newInj, p.injury.weeks); }
-  sysMsg(S, 'doctor', 'אבחון: ' + he + '. צפי חזרה: ' + p.injury.weeks + ' שבועות. תנוח ותקשיב לפיזיותרפיסט.');
+  sysMsg(S, 'doctor', 'אבחון: ' + he + '. צפי חזרה: ' + p.injury.weeks + ' שבועות. {{תנוח ותקשיב|תנוחי ותקשיבי}} לפיזיותרפיסט.');
   addTimeline(S, 'injury', 'פציעה: ' + he + ' (' + p.injury.weeks + ' שבועות)');
 }
 
@@ -660,7 +684,7 @@ function seasonEnd(S) {
   emit('season_completed', { season: S.season, n: S.season - S.startSeason + 1, league: S.comp.end.lg, rank: S.comp.end.rank, apps: tot.apps, goals: tot.g, ovr: ovrOf(p) });
   if (W) {
     W.seasonEnded = true;
-    if (S.comp.end.rank) W.lines.push('סיום העונה: מקום ' + S.comp.end.rank + ' ' + hePrefix('ב', LEAGUE_BY_ID[lid] ? LEAGUE_BY_ID[lid].nameHe : 'ליגה'));
+    if (S.comp.end.rank) W.lines.push('סיום העונה: מקום ' + S.comp.end.rank + ' ' + hePrefix('ב', LEAGUE_BY_ID[lid] ? lgNameHe(lid) : 'ליגה'));
   }
 }
 
@@ -753,27 +777,27 @@ export function advanceWeek(training) {
   const r = advanceInternal(S, training);
   delete r.ff;
   if (r.ok) notify();
-  return r;
+  return G(r);
 }
 export function resumeWeek() {
   const S = need();
   const r = resumeInternal(S);
   delete r.ff;
   if (r.ok) notify();
-  return r;
+  return G(r);
 }
 
 // ---------------------------------------------------------------- match facade
 export function getMatch() {
   const S = need();
-  return S.live ? matchVM(S, S.live) : null;
+  return S.live ? G(matchVM(S, S.live)) : null;
 }
 export function startMatch() {
   const S = need();
   if (!S.live) throw new Error('no_match');
   if (S.live.phase === 'pre') startLive(S, R(), S.live);
   notify();
-  return matchVM(S, S.live);
+  return G(matchVM(S, S.live));
 }
 export function chooseMoment(optionIndex) {
   const S = need();
@@ -783,7 +807,7 @@ export function chooseMoment(optionIndex) {
   if (L.phase !== 'live') throw new Error('match_not_live');
   const outcome = chooseLive(S, R(), L, optionIndex);
   notify();
-  return { outcome, match: matchVM(S, L) };
+  return G({ outcome, match: matchVM(S, L) });
 }
 export function autoPlayMatch() {
   const S = need();
@@ -791,7 +815,7 @@ export function autoPlayMatch() {
   if (!L) throw new Error('no_match');
   autoPlayLive(S, R(), L);
   notify();
-  return matchVM(S, L);
+  return G(matchVM(S, L));
 }
 
 function natLevelOfFx(fx) {
@@ -838,8 +862,8 @@ function finishInternal(S) {
     if (fx.kind === 'europe' && F.euDebut === null) { F.euDebut = aw; addTimeline(S, 'europe', 'הופעת בכורה באירופה: ' + compHe(S, fx.comp)); }
   }
   if (nl === 'senior') {
-    if (F.ntDebut === null) { F.ntDebut = aw; raise(S, 'national_debut'); emit('debut', { kind: 'national' }); addTimeline(S, 'national', 'הופעת בכורה בנבחרת ' + (country(p.nation) ? country(p.nation).nameHe : '') + '!'); }
-    if (ms.g > 0 && F.ntGoal === null) { F.ntGoal = aw; addTimeline(S, 'goal', 'שער ראשון בנבחרת הבוגרת!'); }
+    if (F.ntDebut === null) { F.ntDebut = aw; raise(S, 'national_debut'); emit('debut', { kind: 'national' }); addTimeline(S, 'national', 'הופעת בכורה ב' + natTeamHe(S) + '!'); }
+    if (ms.g > 0 && F.ntGoal === null) { F.ntGoal = aw; addTimeline(S, 'goal', 'שער ראשון ב' + natTeamHe(S) + '!'); }
   }
   p.form.push(rating); while (p.form.length > 5) p.form.shift();
   let dm = res === 'W' ? 3 : res === 'L' ? -3 : 0;
@@ -908,7 +932,9 @@ function finishInternal(S) {
     home: teamVM(fx.h, v), away: teamVM(fx.a, v), isHome: L.side === 'h', score: L.sc.slice(), extraHe: extraHe(L.et), res,
     rating, goals: ms.g, assists: ms.a, motm, minutes, cleanSheet: csOk,
     momentsHe: L.mo.filter((m) => m.res).map((m) => ({ minute: m.m, textHe: m.res.t, ok: m.res.ok })),
-    log: L.log.map((e) => ({ minute: e.m, textHe: e.t.replace(/\{score\}/g, L.sc[0] + '-' + L.sc[1]), kind: e.k })),
+    log: logVM(L),
+    myShortHe: (L.side === 'h' ? teamVM(fx.h, v) : teamVM(fx.a, v)).shortHe, oppShortHe: (L.side === 'h' ? teamVM(fx.a, v) : teamVM(fx.h, v)).shortHe,
+    playerHe: L.pn || p.nick || p.last, num: p.num, gender: p.gender === 'f' ? 'f' : 'm', final: !!fx.final, big: !!fx.big,
     effectsHe: eff, tieHe, injuryHe: injuryHeTxt,
   };
   if (W) {
@@ -933,11 +959,11 @@ export function finishMatch() {
   const S = need();
   const r = finishInternal(S);
   notify();
-  return r;
+  return G(r);
 }
 export function getLastMatch() {
   const S = need();
-  return S.lastMatch ? deepClone(S.lastMatch) : null;
+  return S.lastMatch ? G(deepClone(S.lastMatch)) : null;
 }
 
 // ---------------------------------------------------------------- fast forward
@@ -950,7 +976,7 @@ export function fastForward(opts = {}) {
   let weeks = 0;
   let stopped = null;
   const startSeason = S.season;
-  const done = (st) => { notify(); return { ok: true, weeks, summaries: summaries.slice(-10), stopped: st, hub: hubVM(S) }; };
+  const done = (st) => { notify(); return G({ ok: true, weeks, summaries: summaries.slice(-10), stopped: st, hub: hubVM(S) }); };
   if (S.retired) return done('retired');
   const evalStop = (sum, m0, ff) => {
     if (S.retired) return 'retired';
@@ -1009,7 +1035,7 @@ function seasonStatsFrom(st) {
   const t = sumLines(st, ALL_LINES);
   return { apps: t.apps, goals: t.g, assists: t.a, avgRating: t.apps ? round1(t.rs / t.apps) : 0, motm: t.motm, cleanSheets: t.cs };
 }
-const LINE_HE = { lg: 'ליגה', cup: 'גביע', eu: 'אירופה', nt: 'נבחרת', yth: 'נוער', ynt: 'נבחרת נוער' };
+const LINE_HE = { lg: 'ליגה', cup: 'גביע', eu: 'אירופה', nt: 'נבחרת', yth: '{{נוער|נערות}}', ynt: '{{נבחרת נוער|נבחרת נערות}}' };
 
 export function getSeasonReview(season) {
   const S = need();
@@ -1028,7 +1054,7 @@ export function getSeasonReview(season) {
   const byComp = [];
   for (const k of ALL_LINES) {
     const l = st[k];
-    if (l.apps > 0) byComp.push({ compHe: k === 'lg' && lg ? lg.nameHe : LINE_HE[k], apps: l.apps, goals: l.g, assists: l.a, avgRating: lineAvg(l) });
+    if (l.apps > 0) byComp.push({ compHe: k === 'lg' && lg ? lgNameHe(lg.id) : femLabel(LINE_HE[k]), apps: l.apps, goals: l.g, assists: l.a, avgRating: lineAvg(l) });
   }
   const trophies = S.hist.trophies.filter((t) => t.s === s).map((t) => ({ key: t.k, he: trophyHe(t.k) }));
   const awards = S.hist.awards.filter((t) => t.s === s).map((t) => ({ key: t.k, he: awardHe(t.k) }));
@@ -1037,7 +1063,7 @@ export function getSeasonReview(season) {
   const ovrEnd = live ? ovrOf(p) : arch.ovr;
   const stats = seasonStatsFrom(st);
   const hl = [];
-  if (end.rank) hl.push('סיימתם במקום ' + end.rank + (lg ? ' ' + hePrefix('ב', lg.nameHe) : ''));
+  if (end.rank) hl.push('סיימתם במקום ' + end.rank + (lg ? ' ' + hePrefix('ב', lgNameHe(lg.id)) : ''));
   if (stats.goals > 0) hl.push(stats.goals + ' שערים ו-' + stats.assists + ' בישולים');
   if (ovrEnd > ovrStart) hl.push('היכולת עלתה מ-' + ovrStart + ' ל-' + ovrEnd);
   for (const t of trophies) hl.push('🏆 ' + t.he);
@@ -1045,19 +1071,19 @@ export function getSeasonReview(season) {
   if (stats.apps === 0) hl.push('עונה בלי הופעות. העונה הבאה תהיה שלך.');
   const nextHe = [];
   if (live) {
-    if (p.stage === 'free') nextHe.push('אתה שחקן חופשי. בדוק הצעות בחלון ההעברות.');
-    if (p.next) nextHe.push('בקיץ אתה עובר ל' + clubName(p.next.club));
+    if (p.stage === 'free') nextHe.push('{{אתה שחקן חופשי. בדוק|את שחקנית חופשית. בדקי}} הצעות בחלון ההעברות.');
+    if (p.next) nextHe.push('בקיץ {{אתה עובר|את עוברת}} ל' + clubName(p.next.club));
     if (p.stage === 'youth' && S.offers.some((o) => o.status === 'open' && o.type === 'pro')) nextHe.push('מחכה לך הצעה לחוזה מקצועני!');
     const ts = summerTournaments(S.season + 1);
-    if (ts.length) nextHe.push('בקיץ: ' + ts.map((k) => (TOURNAMENTS && TOURNAMENTS[k]) || k).join(', '));
+    if (ts.length) nextHe.push('בקיץ: ' + ts.map((k) => tourKindHe(k)).join(', '));
     if (p.contract && p.contract.until === S.season + 1 && !p.contract.loan) nextHe.push('נכנס לשנה האחרונה בחוזה');
   }
   const club = end.club || null;
-  return {
-    season: s, seasonHe: fmtSeason(s), clubHe: club ? clubName(club) : 'ללא קבוצה', leagueHe: lg ? lg.nameHe : '', rank: end.rank || null,
+  return G({
+    season: s, seasonHe: fmtSeason(s), clubHe: club ? clubName(club) : 'ללא קבוצה', leagueHe: lg ? lgNameHe(lg.id) : '', rank: end.rank || null,
     rankHe: end.rank ? 'מקום ' + end.rank : '-', stats, byComp, trophies, awards, ovrStart, ovrEnd, valueEnd: valueOf(S), highlightsHe: hl, nextHe,
     canRetire: !S.retired && ageOf(S) >= 32 && !S.live && !S.inWeek, isFirstSeason: s === S.startSeason,
-  };
+  });
 }
 export function ackSeasonReview() {
   const S = need();
@@ -1084,7 +1110,7 @@ export function retire() {
   const S = need();
   if (S.retired) return getRetirement();
   if (ageOf(S) < 32) return { ok: false, error: 'too_young', messageHe: 'אפשר לפרוש רק מגיל 32' };
-  if (S.live || S.inWeek) return { ok: false, error: 'in_match', messageHe: 'סיים קודם את השבוע' };
+  if (S.live || S.inWeek) return { ok: false, error: 'in_match', messageHe: gtext('{{סיים|סיימי}} קודם את השבוע') };
   retireNow(S, 'voluntary', false);
   notify();
   return getRetirement();
@@ -1099,21 +1125,21 @@ export function getRetirement() {
   const t = cv.totals;
   const f = S.names.friends;
   const farewell = [
-    'אמא: "אני כל כך גאה בך. מהמגרש בשכונה ועד לכאן. בוא הביתה, הכנתי שניצלים."',
-    f[0] + ' מהחבר׳ה: "' + t.goals + ' שערים, אחי. אנחנו עדיין זוכרים את הבעיטה ההיא במגרש של בית הספר."',
+    'אמא: "אני כל כך גאה בך. מהמגרש בשכונה ועד לכאן. {{בוא|בואי}} הביתה, הכנתי שניצלים."',
+    f[0] + ' מהחבר׳ה: "' + t.goals + ' שערים, {{אחי|אחותי}}. אנחנו עדיין זוכרים את הבעיטה ההיא במגרש של בית הספר."',
     'אבא: "ישבתי ביציע בכל משחק שיכולתי. לא הייתי מוותר על אף דקה."',
   ];
   if (S.hist.trophies.length) farewell.push('האוהדים: "תודה על ' + S.hist.trophies.length + ' תארים. השם שלך יישאר על הקיר."');
   else farewell.push('האוהדים: "נתת את הלב על הדשא. זה מה שזוכרים."');
-  return {
-    ok: true, name: p.first + ' ' + p.last, age: S.retired.age, seasons: S.retired.season - S.startSeason + 1, reason: S.retired.reason,
+  return G({
+    ok: true, name: p.first + ' ' + p.last, gender: p.gender === 'f' ? 'f' : 'm', age: S.retired.age, seasons: S.retired.season - S.startSeason + 1, reason: S.retired.reason,
     reasonHe: REASON_HE[S.retired.reason] || '', legacy: S.retired.legacy, tierHe: legacyTierHe(S.retired.legacy),
     totals: cv.totals, trophies: cv.trophies, awards: cv.awards, peakOvr: p.peak, clubsHe, farewellHe: farewell,
-  };
+  });
 }
 export function buildHallOfFameEntry() {
   const S = need();
-  return hofEntry(S, Date.now());
+  return G(hofEntry(S, Date.now()));
 }
 
 // ---------------------------------------------------------------- fixtures VMs (pure)
@@ -1266,7 +1292,7 @@ function scheduleList(S) {
 
 export function getSchedule() {
   const S = need();
-  return { seasonHe: fmtSeason(S.season), fixtures: scheduleList(S) };
+  return G({ seasonHe: fmtSeason(S.season), fixtures: scheduleList(S) });
 }
 
 // ---------------------------------------------------------------- hub
@@ -1274,7 +1300,7 @@ function alertsVM(S) {
   const p = S.player;
   const A = ALERTS || {};
   const out = [];
-  const add = (type, route) => out.push({ type, textHe: A[type] || '', route });
+  const add = (type, route) => out.push({ type, textHe: femLabel(A[type] || ''), route });
   if (S.pending.review !== null) add('season_review', '#/season');
   if (p.injury) add('injured', '#/profile');
   if (p.susp > 0) add('suspended', null);
@@ -1296,8 +1322,8 @@ function hubVM(S) {
     const lid = clubLeague(S, p.club);
     const lg = LEAGUE_BY_ID[lid];
     club = Object.assign(teamVM(p.club), {
-      leagueHe: lg ? lg.nameHe : '', rank: lid ? leagueRankOf(S, lid, p.club) : null,
-      roleHe: p.contract ? ((ROLES && ROLES[p.contract.role]) || p.contract.role) : '', wage: p.contract ? p.contract.wage : 0,
+      leagueHe: lg ? lgNameHe(lid) : '', rank: lid ? leagueRankOf(S, lid, p.club) : null,
+      roleHe: p.contract ? femLabel((ROLES && ROLES[p.contract.role]) || p.contract.role) : '', wage: p.contract ? p.contract.wage : 0,
       untilHe: p.contract ? 'עד סוף ' + fmtSeason(p.contract.until) : '', loan: !!(p.contract && p.contract.loan),
     });
   }
@@ -1312,16 +1338,16 @@ function hubVM(S) {
   if (ts.length && !S.retired) {
     const T = S.nt.tour;
     if (T) ann.push(tourHe(T.key) + (nationInTour(T, p.nation) ? ' - הנבחרת שלך משתתפת!' : ''));
-    else ann.push('בקיץ ' + (S.season + 1) + ': ' + ts.map((k) => (TOURNAMENTS && TOURNAMENTS[k]) || k).join(', '));
+    else ann.push('בקיץ ' + (S.season + 1) + ': ' + ts.map((k) => tourKindHe(k)).join(', '));
   }
   const aw = curAw(S);
   return {
     status, dateHe: weekLabelHe(S.season, S.week), season: S.season, week: S.week, phase: S.week >= 45 ? 'summer' : 'season',
     player: {
-      name: p.first + ' ' + p.last, nick: p.nick, age: ageOf(S), pos: p.pos, posHe: (POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos,
+      name: p.first + ' ' + p.last, nick: p.nick, age: ageOf(S), pos: p.pos, posHe: posHeOf(p), gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
       ovr, potStars: potStars(p.potSeen), potRange: p.potSeen.slice(), energy: p.energy, morale: p.morale, formAvg: fa === null ? null : round1(fa), form: p.form.slice(),
       injury: p.injury ? { weeks: p.injury.weeks, he: injuryHe(p.injury) } : null, susp: p.susp, trust: p.trust, fans: p.fans, mates: p.mates,
-      rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w }, money: p.money, value: valueOf(S), stage: p.stage, stageHe: (STAGES && STAGES[p.stage]) || p.stage, natLvl: p.natLvl,
+      rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w }, money: p.money, value: valueOf(S), stage: p.stage, stageHe: femLabel((STAGES && STAGES[p.stage]) || p.stage), natLvl: p.natLvl,
     },
     club, thisWeek, next,
     training: { current: S.training, options: trOpts },
@@ -1337,7 +1363,7 @@ function hubVM(S) {
     announcementsHe: ann,
   };
 }
-export function getHub() { return hubVM(need()); }
+export function getHub() { return G(hubVM(need())); }
 
 // ---------------------------------------------------------------- competitions, tables, brackets
 function compRow(S, id, kind, hasTable, hasBracket, statusHe) { return { id, he: compHe(S, id), kind, hasTable, hasBracket, statusHe }; }
@@ -1369,10 +1395,11 @@ export function getCompetitions() {
   }
   const leagues = Array.from(byC.keys()).map((cid) => ({ countryHe: country(cid) ? country(cid).nameHe : cid, flag: country(cid) ? country(cid).flag : '', items: byC.get(cid) }));
   const europe = EC.map((c) => { const E = S.comp.eu[c]; return compRow(S, c, 'europe', E.lp.teams.length > 0, true, E.w ? 'הסתיים' : E.md ? 'מחזור ' + E.md + ' מתוך 8' : 'מוקדמות'); });
-  return { mine, leagues, europe };
+  return G({ mine, leagues, europe });
 }
 
-const ZONE_HE = { champ: 'אלוף', ucl: 'ליגת האלופות', uel: 'הליגה האירופית', uecl: 'הקונפרנס ליג', promo: 'עלייה', releg: 'ירידה', ko: 'עלייה ישירה לשמינית', kpo: 'פלייאוף', out: 'הדחה', q: 'העפלה' };
+const ZONE_HE = { champ: '{{אלוף|אלופה}}', ucl: 'ליגת האלופות', uel: 'הליגה האירופית', uecl: 'הקונפרנס ליג', promo: 'עלייה', releg: 'ירידה', ko: 'עלייה ישירה לשמינית', kpo: 'פלייאוף', out: 'הדחה', q: 'העפלה' };
+function zoneHe(z) { return (z === 'ucl' || z === 'uel' || z === 'uecl') ? euroHe(z) : gtext(ZONE_HE[z] || z); }
 
 function leagueZones(S, lid) {
   const lg = LEAGUE_BY_ID[lid];
@@ -1395,10 +1422,11 @@ function rowsVM(S, rows, zones, mineId, variant, startRank) {
 function legendOf(groups) {
   const zs = new Set();
   for (const g of groups) for (const r of g.rows) if (r.zone) zs.add(r.zone);
-  return Array.from(zs).map((z) => ({ zone: z, he: ZONE_HE[z] || z }));
+  return Array.from(zs).map((z) => ({ zone: z, he: zoneHe(z) }));
 }
 
-export function getTable(compId, opts = {}) {
+export function getTable(compId, opts = {}) { return G(tableVM(compId, opts)); }
+function tableVM(compId, opts = {}) {
   const S = need();
   const p = S.player;
   if (LEAGUE_BY_ID[compId]) {
@@ -1416,7 +1444,7 @@ export function getTable(compId, opts = {}) {
       });
     } else groups = [{ he: 'טבלה', rows: rowsVM(S, rankRows(L.t), zones, p.club, null, 0) }];
     const lg = LEAGUE_BY_ID[compId];
-    return { id: compId, he: lg.nameHe, groups, legend: legendOf(groups), noteHe: L.sp ? 'הליגה התפצלה לפלייאוף' : (f.groups ? 'אחרי ' + f.Rb + ' מחזורים הליגה מתפצלת' : null),
+    return { id: compId, he: lgNameHe(compId), groups, legend: legendOf(groups), noteHe: L.sp ? 'הליגה התפצלה לפלייאוף' : (f.groups ? 'אחרי ' + f.Rb + ' מחזורים הליגה מתפצלת' : null),
       formatHe: (FORMAT_LABELS && FORMAT_LABELS[(lg.format && lg.format.type) || 'double_rr']) || '' };
   }
   if (S.comp.yl && compId === S.comp.yl.id) {
@@ -1468,7 +1496,8 @@ function tieVM(S, legs, variant, mineIds) {
   return { home: teamVM(h, variant), away: teamVM(a, variant), legs: L, aggHe, winner, mine: mineIds.indexOf(h) >= 0 || mineIds.indexOf(a) >= 0 };
 }
 
-export function getBracket(compId) {
+export function getBracket(compId) { return G(bracketVM(compId)); }
+function bracketVM(compId) {
   const S = need();
   const p = S.player;
   const mine = [p.club, p.nation].filter(Boolean);
@@ -1506,20 +1535,20 @@ export function getResults(compId) {
   const S = need();
   const L = S.comp.lg[compId];
   if (!L || !L.last || L.last.length === 0) return null;
-  return { roundHe: 'מחזור ' + L.r, results: L.last.map((x) => ({ home: teamVM(x[0]), away: teamVM(x[1]), score: [x[2], x[3]] })) };
+  return G({ roundHe: 'מחזור ' + L.r, results: L.last.map((x) => ({ home: teamVM(x[0]), away: teamVM(x[1]), score: [x[2], x[3]] })) });
 }
 
 // ---------------------------------------------------------------- inbox
-export function getInbox() { return inboxRows(need()); }
+export function getInbox() { return G(inboxRows(need())); }
 function findItem(S, id) { const it = S.inbox.find((x) => x.id === id); if (!it) throw new Error('unknown_inbox_id'); return it; }
-export function getThread(id) { const S = need(); return threadVM(S, findItem(S, id)); }
+export function getThread(id) { const S = need(); return G(threadVM(S, findItem(S, id))); }
 export function answerEvent(id, choiceIndex) {
   const S = need();
   const it = findItem(S, id);
   const r = answerItem(S, R(), it, choiceIndex, false);
   clampStatus(S.player);
   if (r.ok) notify();
-  return { ok: r.ok, thread: threadVM(S, it), effectsHe: r.effectsHe };
+  return G({ ok: r.ok, thread: threadVM(S, it), effectsHe: r.effectsHe });
 }
 export function markRead(id) { const S = need(); const it = findItem(S, id); if (!it.read) { it.read = true; notify(); } }
 export function markAllRead() { const S = need(); let ch = false; for (const it of S.inbox) if (!it.read) { it.read = true; ch = true; } if (ch) notify(); }
@@ -1529,7 +1558,7 @@ export function getOffers() {
   const S = need();
   const open = S.offers.filter((o) => o.status === 'open').slice().reverse();
   const closed = S.offers.filter((o) => o.status !== 'open').slice().reverse();
-  return open.concat(closed).map((o) => offerVM(S, o, awLabel));
+  return G(open.concat(closed).map((o) => offerVM(S, o, awLabel)));
 }
 export function respondOffer(id, action, counter) {
   const S = need();
@@ -1541,14 +1570,14 @@ export function respondOffer(id, action, counter) {
   if (action === 'reject' && o.type === 'pro' && p.stage === 'youth' && S.ev.flags._relpend) { delete S.ev.flags._relpend; releaseYouth(S); }
   clampStatus(p);
   if (r.ok) notify();
-  return { ok: r.ok, error: r.error, status: r.status, offer: offerVM(S, o, awLabel), messageHe: r.messageHe };
+  return G({ ok: r.ok, error: r.error, status: r.status, offer: offerVM(S, o, awLabel), messageHe: r.messageHe });
 }
-export function requestTransfer() { const S = need(); const r = reqT(S); if (r.ok) notify(); return r; }
-export function cancelTransferRequest() { const S = need(); const r = cancelT(S); if (r.ok) notify(); return r; }
-export function getContract() { const S = need(); return contractVM(S, S.player.contract); }
+export function requestTransfer() { const S = need(); const r = reqT(S); if (r.ok) notify(); return G(r); }
+export function cancelTransferRequest() { const S = need(); const r = cancelT(S); if (r.ok) notify(); return G(r); }
+export function getContract() { const S = need(); return G(contractVM(S, S.player.contract)); }
 
 // ---------------------------------------------------------------- profile / career / national / awards / shop
-const TRAIT_FLAGS = { captain: 'קפטן', fan_favourite: 'אהוב הקהל', bad_boy: 'ילד רע', charity: 'פעיל חברתי', married: 'נשוי', kids: 'אבא', has_partner: 'בזוגיות', abroad: 'משחק בחו״ל' };
+const TRAIT_FLAGS = { captain: '{{קפטן|קפטנית}}', fan_favourite: '{{אהוב הקהל|אהובת הקהל}}', bad_boy: '{{ילד רע|ילדה רעה}}', charity: '{{פעיל חברתי|פעילה חברתית}}', married: '{{נשוי|נשואה}}', kids: '{{אבא|אמא}}', has_partner: 'בזוגיות', abroad: '{{משחק|משחקת}} בחו״ל' };
 export function getProfile() {
   const S = need();
   const p = S.player;
@@ -1557,23 +1586,28 @@ export function getProfile() {
   const st = sumLines(p.s, ALL_LINES);
   const traits = [];
   for (const k of Object.keys(TRAIT_FLAGS)) if (S.ev.flags[k]) traits.push(TRAIT_FLAGS[k]);
-  if (p.treq) traits.push('ביקש העברה');
-  return {
+  if (p.treq) traits.push('{{ביקש|ביקשה}} העברה');
+  return G({
     name: p.first + ' ' + p.last, nick: p.nick, age: ageOf(S), nationHe: nat ? nat.nameHe : '', flag: nat ? nat.flag : '',
-    posHe: (POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos, footHe: p.foot === 'L' ? 'שמאל' : 'ימין', ovr: ovrOf(p),
+    gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num, pos: p.pos,
+    posHe: posHeOf(p), footHe: p.foot === 'L' ? 'שמאל' : 'ימין', ovr: ovrOf(p),
     potStars: potStars(p.potSeen), potRange: p.potSeen.slice(), attrs: attrsVM(S), gk: p.pos === 'GK', value: valueOf(S), money: p.money,
-    wage: p.contract ? p.contract.wage : 0, stageHe: (STAGES && STAGES[p.stage]) || p.stage, clubHe: p.club ? clubName(p.club) : 'ללא קבוצה',
+    wage: p.contract ? p.contract.wage : 0, stageHe: femLabel((STAGES && STAGES[p.stage]) || p.stage), clubHe: p.club ? clubName(p.club) : 'ללא קבוצה',
     contract: contractVM(S, p.contract),
     status: { energy: p.energy, morale: p.morale, trust: p.trust, fans: p.fans, mates: p.mates, rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w } },
     season: { apps: st.apps, goals: st.g, assists: st.a, avgRating: st.apps ? round1(st.rs / st.apps) : 0, motm: st.motm },
     career: { apps: t.apps, goals: t.goals, assists: t.assists, caps: t.caps, intlGoals: t.intlGoals, trophies: S.hist.trophies.length },
     owned: p.owned.map((id) => { const it = shopVM(S).cats.flatMap((c) => c.items).find((x) => x.id === id); return { id, he: it ? it.he : id }; }),
     traitsHe: traits,
-  };
+  });
 }
-export function getCareer() { const S = need(); return careerVM(S, awLabel); }
+export function getCareer() { const S = need(); return G(careerVM(S, awLabel)); }
 
 const LVL_HE = { none: 'טרם זומנת', u17: 'נבחרת עד גיל 17', u19: 'נבחרת עד גיל 19', u21: 'נבחרת עד גיל 21', senior: 'הנבחרת הבוגרת' };
+const LVL_HE_W = { none: 'טרם זומנת', u17: 'נבחרת הנערות עד גיל 17', u19: 'נבחרת הנערות עד גיל 19', u21: 'נבחרת הצעירות עד גיל 21', senior: 'נבחרת הנשים הבוגרת' };
+function natLevelHe(lvl) { return (curGender() === 'f' ? LVL_HE_W : LVL_HE)[lvl] || ''; }
+/** 'נבחרת ישראל' / 'נבחרת ישראל לנשים' */
+function natTeamHe(S) { const n = country(S.player.nation); const nm = n ? n.nameHe : ''; return 'נבחרת ' + nm + (isF(S) ? ' לנשים' : ''); }
 const STAGE_HE = { group: 'שלב הבתים', r32: 'סיבוב 32', r16: 'שמינית הגמר', qf: 'רבע הגמר', sf: 'חצי הגמר', f: 'הגמר', w: 'זכייה!', dnq: 'לא העפילה' };
 export function getNational() {
   const S = need();
@@ -1589,17 +1623,17 @@ export function getNational() {
     tournament = { key: T.key, he: tourHe(T.key), table: getTable(T.key), bracket: Object.keys(T.ko).length ? getBracket(T.key) : null,
       stageHe: !nationInTour(T, p.nation) ? STAGE_HE.dnq : st ? (st === 'w' ? STAGE_HE.w : hePrefix('הודחה ב', STAGE_HE[st] || st)) : 'בטורניר' };
   }
-  const statusHe = S.retired ? 'פרשת' : isCalled ? 'זומנת לנבחרת!' : p.natLvl === 'none' ? 'עוד לא זומנת. תמשיך להתקדם.' : 'לא זומנת לפגרה הנוכחית';
-  return {
-    nation: nat, level: p.natLvl, levelHe: LVL_HE[p.natLvl] || '', statusHe, caps: p.caps.senior, goals: p.ig.senior,
+  const statusHe = S.retired ? 'פרשת' : isCalled ? 'זומנת לנבחרת!' : p.natLvl === 'none' ? 'עוד לא זומנת. {{תמשיך|תמשיכי}} להתקדם.' : 'לא זומנת לפגרה הנוכחית';
+  return G({
+    nation: nat, teamHe: natTeamHe(S), level: p.natLvl, levelHe: natLevelHe(p.natLvl), statusHe, caps: p.caps.senior, goals: p.ig.senior,
     youth: { u17: [p.caps.u17, p.ig.u17], u19: [p.caps.u19, p.ig.u19], u21: [p.caps.u21, p.ig.u21] },
     upcoming, qualifier: S.nt.q ? getTable('q_' + S.nt.q.tour) : null, tournament,
     history: S.nt.hist.slice().reverse().map((h) => ({ seasonHe: fmtSeason(h.season), he: tourHe(h.key), stageHe: STAGE_HE[h.stage] || h.stage, winnerHe: country(h.winner) ? country(h.winner).nameHe : '' })),
-  };
+  });
 }
 export function getAwards() {
   const S = need();
-  return awardsVM(S, () => {
+  return G(awardsVM(S, () => {
     const out = [];
     const p = S.player;
     const lid = p.club ? clubLeague(S, p.club) : null;
@@ -1609,11 +1643,11 @@ export function getAwards() {
       if (b) out.push({ compHe: id === 'ucl' ? compHe(S, 'ucl') : compHe(S, id), scorerHe: b.n + ' (' + (b.club ? clubName(b.club) : '') + ') ' + b.g });
     }
     return out;
-  });
+  }));
 }
-export function getShop() { return shopVM(need()); }
-export function buyItem(id) { const S = need(); const r = buy(S, id); if (r.ok) notify(); return r; }
-export function sellItem(id) { const S = need(); const r = sell(S, id); if (r.ok) notify(); return r; }
+export function getShop() { return G(shopVM(need())); }
+export function buyItem(id) { const S = need(); const r = buy(S, id); if (r.ok) notify(); return G(r); }
+export function sellItem(id) { const S = need(); const r = sell(S, id); if (r.ok) notify(); return G(r); }
 
 // ---------------------------------------------------------------- persistence
 export function serialize() {
@@ -1625,16 +1659,23 @@ export function getSaveMeta() {
   const S = need();
   const p = S.player;
   const nat = country(p.nation);
-  return {
+  return G({
     careerId: S.id, name: p.first + ' ' + p.last, nick: p.nick || '', nation: p.nation, flag: nat ? nat.flag : '', pos: p.pos,
-    posHe: (POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos, age: ageOf(S), ovr: ovrOf(p), clubId: p.club || null,
-    clubHe: p.club ? clubName(p.club) : (S.retired ? 'פרש' : 'ללא קבוצה'), season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week),
+    posHe: posHeOf(p), age: ageOf(S), ovr: ovrOf(p), clubId: p.club || null,
+    clubHe: p.club ? clubName(p.club) : (S.retired ? '{{פרש|פרשה}}' : 'ללא קבוצה'), season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week),
     stage: p.stage, retired: !!S.retired, seasons: S.season - S.startSeason + 1,
-  };
+    gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
+  });
 }
 export function loadState(data) {
   try {
     if (!data || typeof data !== 'object' || data.v !== SCHEMA_VERSION) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
+    if (typeof data.econ !== 'number' || !(data.econ > 0)) data.econ = 1;
+    if (data.player && typeof data.player === 'object') {
+      if (data.player.gender !== 'f') data.player.gender = 'm';
+      if (!('look' in data.player)) data.player.look = null;
+      if (typeof data.player.num !== 'number') data.player.num = defaultShirt(data.player.pos);
+    }
     for (const k of STATE_KEYS) if (!(k in data)) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.player || !data.world || !data.comp) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.ev.carry) data.ev.carry = [];

@@ -8,6 +8,8 @@ import {
 } from './ui/app.js';
 import { startRouter, setGuard, onRoute, isKnownHash, currentRoute } from './ui/router.js';
 import { initInstall } from './ui/install.js';
+import { refreshGender, careerGender } from './ui/gender.js';
+import { playIntro } from './ui/scene/intro.js';
 
 const PUBLIC_ROUTES = new Set(['/title', '/new', '/hof', '/settings', '/feedback', '/install']);
 const AUTOSAVE_MS = 400;
@@ -115,6 +117,7 @@ async function openSlot(slot, { quiet = false } = {}) {
   }
   ctx.activeSlot = slot;
   ctx.blocked = false;
+  refreshGender();
   saveSettings({ lastSlot: slot });
   // only a real rescue deserves a message: the main copy (localStorage) was missing or stale and IndexedDB saved the day.
   // A lagging IndexedDB mirror is healed silently.
@@ -146,6 +149,7 @@ async function startNewCareer(opts, slot) {
     return res || { ok: false, messageHe: 'לא הצלחנו ליצור את הקריירה. נסה שוב.' };
   }
   cancelAutosave();
+  refreshGender();
   if (occupied) {
     try { await save.deleteSlot(slot); } catch (e) { console.warn('[hayeled] deleteSlot', e); }
   }
@@ -181,6 +185,7 @@ async function slotOp(slot, fn, kind = 'restore') {
       if (!lr || !lr.ok) toast((lr && lr.messageHe) || 'לא הצלחנו לטעון את השמירה ששוחזרה');
     }
   }
+  refreshGender();
   return res;
 }
 
@@ -192,6 +197,7 @@ async function reloadActive() {
   const r = await save.loadSlot(slot);
   if (r && r.ok) call(() => game.loadState(r.state), { quiet: true });
   cancelAutosave();
+  refreshGender();
 }
 
 async function exportActive() {
@@ -394,6 +400,16 @@ function guard(info) {
 /* Boot                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Play the intro unless tests skip it ('hy.intro.skip' = '1'). Never blocks boot for more than 14 s, never throws. */
+function startIntro(gender) {
+  let skip = false;
+  try { skip = localStorage.getItem('hy.intro.skip') === '1'; } catch { skip = false; }
+  if (skip || typeof playIntro !== 'function') return Promise.resolve();
+  let p;
+  try { p = Promise.resolve(playIntro(gender ? { gender } : {})); } catch (e) { console.warn('[hayeled] intro', e); return Promise.resolve(); }
+  return Promise.race([p.catch((e) => console.warn('[hayeled] intro', e)), new Promise((r) => setTimeout(r, 14000))]);
+}
+
 async function boot() {
   const appEl = document.getElementById('app');
   initShell(appEl);
@@ -450,6 +466,9 @@ async function boot() {
     initial = startHash;
   }
 
+  // Opening cinematic (contract C8): the first screen is shown when it ends (or is skipped).
+  refreshGender();
+  await startIntro(careerGender());
   setGuard(guard);
   onRoute((info) => {
     if (info.path === '/hub') {

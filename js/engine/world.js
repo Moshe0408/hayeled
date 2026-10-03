@@ -1,9 +1,9 @@
 // World: data lookups, club runtime values, league tables, round play, promotion/relegation, club evolution.
 import { COUNTRIES, COUNTRY_BY_ID } from '../data/countries.js';
 import { LEAGUES, LEAGUE_BY_ID, CLUB_INDEX, EURO_FILLER_CLUBS } from '../data/leagues.js';
-import { NAME_POOLS } from '../data/names.js';
+import { NAME_POOLS, NAME_POOLS_F } from '../data/names.js';
 import { rngFor } from '../core/rng.js';
-import { clamp, round1, sortIds } from './util.js';
+import { clamp, round1, sortIds, curGender } from './util.js';
 import { roundRobin, splitGroups } from './schedule.js';
 import { leagueRoundSlots } from './calendar.js';
 import { simScore } from './sim.js';
@@ -26,16 +26,25 @@ export function poolOfCountry(cid) {
   const p = c && c.namePool;
   return (p && NAME_POOLS[p]) ? p : (NAME_POOLS.generic ? 'generic' : Object.keys(NAME_POOLS)[0]);
 }
-export function genName(rng, poolId) {
+// gender: 'm' | 'f' (default: the current career's gender). Women draw female first names; surnames are shared.
+export function genName(rng, poolId, gender) {
   const pool = NAME_POOLS[poolId] || NAME_POOLS.generic || NAME_POOLS[Object.keys(NAME_POOLS)[0]];
-  const first = rng.pick(pool.first) || 'יוסי';
+  const g = gender === 'm' || gender === 'f' ? gender : curGender();
+  const fp = g === 'f' ? ((NAME_POOLS_F && (NAME_POOLS_F[poolId] || NAME_POOLS_F.generic)) || null) : null;
+  const first = rng.pick(fp ? fp.first : pool.first) || (g === 'f' ? 'נועה' : 'יוסי');
   const last = rng.pick(pool.last) || 'כהן';
   return { first, last, full: first + ' ' + last };
 }
-export function nameFor(clubOrNation, ...key) {
+// Players' names around the player (teammates, keepers, rivals) follow the career gender.
+export function nameFor(clubOrNation, ...key) { return nameForG(curGender(), clubOrNation, ...key); }
+export function nameForG(gender, clubOrNation, ...key) {
   const cid = isClub(clubOrNation) ? clubCountry(clubOrNation) : clubOrNation;
-  return genName(rngFor(clubOrNation, ...key), poolOfCountry(cid)).full;
+  return genName(rngFor(clubOrNation, ...key), poolOfCountry(cid), gender).full;
 }
+
+// ---------- women's football display names (C3) ----------
+export function lgNameHe(lid) { const l = LEAGUE_BY_ID[lid]; if (!l) return ''; return curGender() === 'f' ? (l.nameHeW || l.nameHe + ' לנשים') : l.nameHe; }
+export function lgYouthHe(lid) { const l = LEAGUE_BY_ID[lid]; if (!l) return curGender() === 'f' ? 'ליגת הנערות' : 'ליגת הנוער'; return curGender() === 'f' ? (l.youthNameHeW || 'ליגת הנערות') : (l.youthNameHe || 'ליגת הנוער'); }
 
 let _leagueOrder = null;
 export function leagueIds() {
@@ -67,7 +76,7 @@ export function teamVM(id, variant) {
   const c = clubData(id);
   if (c) {
     const vm = { id, nameHe: c.nameHe, shortHe: c.shortHe || c.nameHe, colors: (c.colors || ['#1fbf5a', '#ffffff']).slice(0, 2) };
-    if (variant === 'youth') vm.nameHe += ' (נוער)';
+    if (variant === 'youth') vm.nameHe += curGender() === 'f' ? ' (נערות)' : ' (נוער)';
     return vm;
   }
   const n = COUNTRY_BY_ID[id];

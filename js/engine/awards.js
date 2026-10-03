@@ -4,9 +4,9 @@ import { LEAGUES, LEAGUE_BY_ID } from '../data/leagues.js';
 import { AWARDS, TROPHIES } from '../data/strings.js';
 import { clamp, round1, sortIds, fmtSeason } from './util.js';
 import { nextId, emit } from './state.js';
-import { cs, clubLeague, clubCountry, genName, poolOfCountry, leagueRanking, leagueIds, leagueMembers, clubName, country, leagueFormat } from './world.js';
+import { cs, clubLeague, clubCountry, genName, poolOfCountry, leagueRanking, leagueIds, leagueMembers, clubName, country, leagueFormat, lgNameHe } from './world.js';
 import { ovrOf, ageOf, G, posGroup } from './player.js';
-import { addAward, addTrophy, addTimeline, sumLines, ALL_LINES } from './history.js';
+import { addAward, addTrophy, addTimeline, sumLines, ALL_LINES, awardLabel, trophyLabel } from './history.js';
 import { raise, sysMsg } from './narrative.js';
 
 const STAR_POS = ['ST', 'ST', 'ST', 'LW', 'RW', 'CAM', 'CAM', 'CM', 'CM', 'CDM', 'CB', 'CB', 'LB', 'RB', 'GK'];
@@ -19,7 +19,7 @@ function eliteClubs(S) {
 }
 
 function newStar(S, rng, age, ovrLo, ovrHi, potLo, potHi) {
-  const nat = rng.weighted(COUNTRIES, (c) => Math.max(0, c.strength - 55) ** 2);
+  const nat = rng.weighted(COUNTRIES, (c) => Math.max(0, ((S.player && S.player.gender === 'f' && typeof c.strengthW === 'number') ? c.strengthW : c.strength) - 55) ** 2);
   const pos = rng.pick(STAR_POS);
   const ovr = round1(rng.float(ovrLo, ovrHi));
   const pot = Math.max(Math.ceil(ovr), rng.int(potLo, potHi));
@@ -71,8 +71,8 @@ export function buildBenchmarks(S, rng) {
   return sc;
 }
 
-export function awardHe(k) { return (AWARDS && AWARDS[k]) || k; }
-export function trophyHe(k) { return (TROPHIES && TROPHIES[k]) || k; }
+export function awardHe(k) { return awardLabel(k); }
+export function trophyHe(k) { return trophyLabel(k); }
 
 export function giveTrophy(S, k, c, club) {
   if (!addTrophy(S, k, c, club)) return false;
@@ -229,7 +229,7 @@ export function ballonDor(S, rng) {
   if (rank === 1) { giveAward(S, 'ballon_dor', null, null); p.rep.w = Math.min(100, p.rep.w + 8); }
   else if (rank >= 1 && rank <= 3) { giveAward(S, 'bdo_top3', null, rank); p.rep.w = Math.min(100, p.rep.w + 8); }
   else if (rank >= 1 && rank <= 10) giveAward(S, 'bdo_top10', null, rank);
-  if (rank > 0) sysMsg(S, 'system', 'טקס כדור הזהב: סיימת במקום ' + rank + '!');
+  if (rank > 0) sysMsg(S, 'system', 'טקס ' + awardHe('ballon_dor') + ': סיימת במקום ' + rank + '!');
   if (gb === 1) giveAward(S, 'golden_boy', null, null);
   return { rank, gb };
 }
@@ -237,11 +237,11 @@ export function ballonDor(S, rng) {
 export function awardsVM(S, benchmarksFn) {
   const mine = S.hist.awards.slice().reverse().map((a) => ({
     seasonHe: fmtSeason(a.s), key: a.k, he: awardHe(a.k),
-    detailHe: a.k === 'top_scorer' || a.k === 'ucl_top_scorer' || a.k === 'golden_boot_tour' ? (a.v + ' שערים') : (a.k.indexOf('bdo') === 0 && a.v ? 'מקום ' + a.v : (a.c && LEAGUE_BY_ID[a.c] ? LEAGUE_BY_ID[a.c].nameHe : '')),
+    detailHe: a.k === 'top_scorer' || a.k === 'ucl_top_scorer' || a.k === 'golden_boot_tour' ? (a.v + ' שערים') : (a.k.indexOf('bdo') === 0 && a.v ? 'מקום ' + a.v : (a.c && LEAGUE_BY_ID[a.c] ? lgNameHe(a.c) : '')),
   }));
   const ballonDor = S.hist.bdo.slice().reverse().map((b) => ({
-    seasonHe: fmtSeason(b.s), rank: b.rank, rankHe: b.rank ? 'מקום ' + b.rank : 'לא היית מועמד',
-    top3: b.top.map((t) => ({ name: t.n, clubHe: t.club ? clubName(t.club) : '', flag: (country(t.nation) && country(t.nation).flag) || '' })),
+    seasonHe: fmtSeason(b.s), rank: b.rank, rankHe: b.rank ? 'מקום ' + b.rank : 'לא {{היית מועמד|היית מועמדת}}',
+    top3: b.top.map((t) => ({ name: t.n, nation: t.nation || null, clubHe: t.club ? clubName(t.club) : '', flag: (country(t.nation) && country(t.nation).flag) || '' })),
   }));
   return { mine, ballonDor, seasonBenchmarks: benchmarksFn() };
 }

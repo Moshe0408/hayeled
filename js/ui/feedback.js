@@ -3,6 +3,7 @@ import * as game from '../engine/game.js';
 import { APP_VERSION } from '../config.js';
 import { esc } from './dom.js';
 import { svc, toast, openModal } from './app.js';
+import { gtext } from './gender.js';
 import { navigate } from './router.js';
 import { isStandalone, isIOS } from './install.js';
 
@@ -40,7 +41,7 @@ export function render(root, params = {}) {
 
   function starsHtml() {
     return `<div class="fb-stars" role="radiogroup" aria-label="דירוג">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="fb-star${n <= st.rating ? ' on' : ''}" data-act="star" data-n="${n}" data-testid="fb-star-${n}" role="radio" aria-checked="${n === st.rating}" aria-label="${n} כוכבים">★</button>`).join('')}</div>
-      <div class="fb-label">${esc(LABELS[st.rating] || 'גע בכוכב כדי לדרג')}</div>`;
+      <div class="fb-label">${esc(LABELS[st.rating] || gtext('{{גע|געי}} בכוכב כדי לדרג'))}</div>`;
   }
 
   function draw() {
@@ -51,7 +52,7 @@ export function render(root, params = {}) {
         <div class="fb-stars-wrap">${starsHtml()}</div>
         <label class="field"><span>מה דעתך? (לא חובה)</span><textarea id="fb-text" data-testid="fb-text" maxlength="2000" rows="5" placeholder="למשל: הייתי רוצה עוד ליגות...">${esc(st.text)}</textarea></label>
         <label class="field"><span>מייל (לא חובה)</span><input id="fb-email" data-testid="fb-email" type="email" inputmode="email" maxlength="200" autocomplete="email" value="${esc(st.email)}" placeholder="name@example.com">
-          <small class="muted">אם תרצה שנחזור אליך</small></label>
+          <small class="muted">${esc(gtext('אם {{תרצה|תרצי}} שנחזור אליך'))}</small></label>
         ${can ? '' : '<p class="note">שליחת משוב תהיה זמינה בקרוב</p>'}
         <button type="button" class="btn btn-primary btn-lg" data-act="send" data-testid="btn-fb-send" ${can && st.rating && !st.sending ? '' : 'disabled'}>${st.sending ? 'שולח...' : 'שלח משוב'}</button>
       </section>
@@ -67,7 +68,7 @@ export function render(root, params = {}) {
   function done(queued) {
     root.innerHTML = `<div class="feedback"><section class="card center" data-testid="fb-done">
       <div class="big-ico">🙏</div><h2>תודה! קיבלנו ❤️</h2>
-      ${queued ? '<p class="muted">המשוב יישלח אוטומטית כשתחזור לרשת</p>' : '<p class="muted">המשוב שלך עוזר לנו לשפר את המשחק.</p>'}
+      ${queued ? `<p class="muted">${esc(gtext('המשוב יישלח אוטומטית {{כשתחזור|כשתחזרי}} לרשת'))}</p>` : '<p class="muted">המשוב שלך עוזר לנו לשפר את המשחק.</p>'}
       <button type="button" class="btn btn-primary" data-act="back">חזרה</button></section></div>`;
   }
 
@@ -84,7 +85,7 @@ export function render(root, params = {}) {
       navigate(game.hasCareer() ? (trigger === 'retired' ? '#/retire' : '#/hub') : '#/title');
     } else if (act === 'send') {
       readInputs();
-      if (!st.rating) { toast('בחר דירוג של 1 עד 5 כוכבים'); return; }
+      if (!st.rating) { toast('{{בחר|בחרי}} דירוג של 1 עד 5 כוכבים'); return; }
       const email = st.email.trim();
       if (email && !EMAIL_RE.test(email)) { toast('כתובת המייל לא נראית תקינה'); return; }
       if (st.sending) return;

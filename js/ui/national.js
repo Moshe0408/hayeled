@@ -2,6 +2,7 @@
 import * as game from '../engine/game.js';
 import { esc } from './dom.js';
 import { call } from './app.js';
+import { gtext } from './gender.js';
 import { badge, fixtureRow, tableView, bracketRound, segmented, statGrid, card, empty } from './components.js';
 
 export function render(root) {
@@ -38,7 +39,7 @@ export function render(root) {
       ${n.qualifier ? card(tableView(n.qualifier, { compact: true }), { title: n.qualifier.he || 'מוקדמות' }) : ''}
       ${tournamentBlock()}
       ${(n.history || []).length ? card(`<div class="nat-hist">${n.history.map((h) => `<div class="kv"><span>${esc(h.seasonHe)} · ${esc(h.he)}</span><b>${esc(h.stageHe)}${h.winnerHe ? ` <small class="muted">(זכתה: ${esc(h.winnerHe)})</small>` : ''}</b></div>`).join('')}</div>`, { title: 'היסטוריה בטורנירים' }) : ''}
-      ${!n.caps && !(n.upcoming || []).length && !n.qualifier && !n.tournament ? '<p class="muted center">תמשיך להופיע טוב, ומאמן הנבחרת ישים לב. 🏳️</p>' : ''}
+      ${!n.caps && !(n.upcoming || []).length && !n.qualifier && !n.tournament ? `<p class="muted center">${esc(gtext('{{תמשיך|תמשיכי}} להופיע טוב, ומאמן הנבחרת ישים לב. 🏳️'))}</p>` : ''}
     </div>`;
   }
 

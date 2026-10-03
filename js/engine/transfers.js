@@ -1,16 +1,16 @@
 // Offers, negotiation, contracts, loans, renewals, free-agent fallback (SPEC §5.13, §5.10).
 import { LEAGUES, LEAGUE_BY_ID } from '../data/leagues.js';
 import { ROLES } from '../data/strings.js';
-import { clamp, fmtSeason, fmtMoney, round1 } from './util.js';
+import { clamp, fmtSeason, fmtMoney, round1, econOf, gtext, femLabel } from './util.js';
 import { nextId, curAw, emit } from './state.js';
-import { cs, clubData, clubLeague, clubCountry, clubPrestige, teamVM, country, leagueMembers, clubName } from './world.js';
+import { cs, clubData, clubLeague, clubCountry, clubPrestige, teamVM, country, leagueMembers, clubName, lgNameHe } from './world.js';
 import { ovrOf, ageOf, formAvgOr, valueOf, fairWage, wageCap } from './player.js';
 import { isWindowOpen } from './calendar.js';
 import { raise, sysMsg } from './narrative.js';
 import { openSpell, closeSpell, addTimeline } from './history.js';
 
 export const ROLE_ORDER = ['prospect', 'squad', 'rotation', 'key', 'star'];
-const TYPE_HE = { transfer: 'העברה', loan: 'השאלה', free: 'חוזה לשחקן חופשי', precontract: 'חוזה מוקדם', renewal: 'הארכת חוזה', pro: 'חוזה מקצועני ראשון' };
+const TYPE_HE = { transfer: 'העברה', loan: 'השאלה', free: 'חוזה {{לשחקן חופשי|לשחקנית חופשית}}', precontract: 'חוזה מוקדם', renewal: 'הארכת חוזה', pro: 'חוזה מקצועני ראשון' };
 const STATUS_HE = { open: 'ממתינה לתשובה', accepted: 'סוכם', rejected: 'נדחתה', expired: 'פג תוקף', club_refused: 'המועדון סירב', withdrawn: 'בוטלה' };
 
 export function effSeason(S) { return S.week >= 45 ? S.season + 1 : S.season; }
@@ -53,13 +53,14 @@ function makeOffer(S, rng, club, type, extra = {}) {
   const c = S.world.clubs[club];
   const pr = clubPrestige(S, club);
   const role = roleFor(ovr - c.s);
-  let wage = Math.round(Math.min(fairWage(ovr, pr) * rng.float(0.9, 1.2), wageCap(c.b)));
+  const E = econOf(S);
+  let wage = Math.round(Math.min(fairWage(ovr, pr, E) * rng.float(0.9, 1.2), wageCap(c.b, E)));
   if (type === 'loan') wage = p.contract ? p.contract.wage : wage;
   let fee = 0;
   if (type === 'transfer') fee = Math.round(value * rng.float(0.85, 1.25) / 1000) * 1000;
   const years = type === 'loan' ? 1 : yearsFor(rng, age);
   const rc = ((role === 'star' || role === 'key') && pr < 8 && type !== 'loan') ? Math.round(value * 2.5 / 1000) * 1000 : 0;
-  const o = { id: nextId(S, 'offer'), aw: curAw(S), club, type, fee, wage: Math.max(100, wage), years, role, rc, exp: curAw(S) + 2, status: 'open', neg: 0 };
+  const o = { id: nextId(S, 'offer'), aw: curAw(S), club, type, fee, wage: Math.max(Math.round(100 * E), wage), years, role, rc, exp: curAw(S) + 2, status: 'open', neg: 0 };
   Object.assign(o, extra);
   S.offers.push(o);
   if (S.wsum) S.wsum.offers = (S.wsum.offers || 0) + 1;
@@ -90,7 +91,7 @@ export function generateOffers(S, rng) {
   const all = allLeagueClubs(S);
   const cands = all.filter((id) => id !== p.club && id !== parentClub && !taken.has(id)).filter((id) => {
     const c = S.world.clubs[id];
-    return c.s >= ovr - 10 && c.s <= ovr + 6 && wageCap(c.b) >= 0.7 * fairWage(ovr, clubPrestige(S, id));
+    return c.s >= ovr - 10 && c.s <= ovr + 6 && wageCap(c.b, econOf(S)) >= 0.7 * fairWage(ovr, clubPrestige(S, id), econOf(S));
   });
   for (let i = 0; i < n && cands.length; i++) {
     const club = rng.weighted(cands, (id) => candWeight(S, id, teamStr));
@@ -102,10 +103,11 @@ export function generateOffers(S, rng) {
     else type = 'transfer';
     if (type === 'transfer') {
       const value = valueOf(S);
-      if (value * 0.85 > S.world.clubs[club].b * 1e6 * 0.5) continue;
+      if (value * 0.85 > S.world.clubs[club].b * 1e6 * 0.5 * econOf(S)) continue;
     }
     const o = makeOffer(S, rng, club, type);
-    if (type === 'transfer' && o.fee > S.world.clubs[club].b * 1e6 * 0.5) o.fee = Math.round(S.world.clubs[club].b * 1e6 * 0.5 / 1000) * 1000;
+    const capFee = S.world.clubs[club].b * 1e6 * 0.5 * econOf(S);
+    if (type === 'transfer' && o.fee > capFee) o.fee = Math.round(capFee / 1000) * 1000;
     made++;
   }
   if (free && made === 0 && (p.freeWeeks === 0 || p.freeWeeks % 3 === 0)) {
@@ -133,7 +135,7 @@ export function renewalCheck(S, rng) {
   const ovr = ovrOf(p);
   if (p.trust < 40 || ovr < cs(S, p.club) - 8) return;
   const pr = clubPrestige(S, p.club);
-  const wage = Math.round(Math.max(1.1 * p.contract.wage, fairWage(ovr, pr)));
+  const wage = Math.round(Math.max(1.1 * p.contract.wage, fairWage(ovr, pr, econOf(S))));
   makeOffer(S, rng, p.club, 'renewal', { wage, fee: 0, role: roleFor(ovr - cs(S, p.club)), exp: curAw(S) + 3 });
   raise(S, 'renewal_offer');
 }
@@ -143,7 +145,7 @@ export function makeProOffer(S, rng, expWeeks) {
   if (S.offers.some((o) => o.status === 'open' && o.type === 'pro')) return null;
   const club = p.club;
   const ovr = ovrOf(p);
-  const wage = Math.round(0.6 * fairWage(ovr, clubPrestige(S, club)));
+  const wage = Math.round(0.6 * fairWage(ovr, clubPrestige(S, club), econOf(S)));
   return makeOffer(S, rng, club, 'pro', { wage, fee: 0, years: 3, role: 'prospect', rc: 0, exp: curAw(S) + expWeeks });
 }
 
@@ -196,7 +198,7 @@ function moveTo(S, o) {
   if (toCountry !== p.nation && toCountry !== fromCountry) raise(S, 'moved_abroad');
   setAbroadFlag(S);
   if (S.names.coach && !S.names.coach[o.club]) { /* generated lazily */ }
-  const txt = o.type === 'loan' ? ('עברת בהשאלה ל' + clubName(o.club) + '. בהצלחה!') : ('ברוך הבא ל' + clubName(o.club) + '! החוזה נחתם.');
+  const txt = o.type === 'loan' ? ('עברת בהשאלה ל' + clubName(o.club) + '. בהצלחה!') : ('{{ברוך הבא|ברוכה הבאה}} ל' + clubName(o.club) + '! החוזה נחתם.');
   sysMsg(S, 'club', txt);
   addTimeline(S, o.type === 'loan' ? 'info' : 'transfer', (o.type === 'loan' ? 'השאלה ל' : 'מעבר ל') + clubName(o.club) + (o.fee ? ' תמורת ' + fmtMoney(o.fee) : ''));
   withdrawOthers(S, o.id);
@@ -219,7 +221,7 @@ export function applyPrecontract(S) {
   raise(S, 'transfer_done');
   if (clubCountry(n.club) !== p.nation && (!from || clubCountry(from) !== clubCountry(n.club))) raise(S, 'moved_abroad');
   setAbroadFlag(S);
-  sysMsg(S, 'club', 'ברוך הבא ל' + clubName(n.club) + '! החוזה המוקדם נכנס לתוקף.');
+  sysMsg(S, 'club', '{{ברוך הבא|ברוכה הבאה}} ל' + clubName(n.club) + '! החוזה המוקדם נכנס לתוקף.');
   addTimeline(S, 'transfer', 'מעבר חופשי ל' + clubName(n.club));
   void o;
   return true;
@@ -234,7 +236,7 @@ export function endLoan(S) {
   if (p.club) {
     const expiring = par.until === S.season && !p.next;
     if (!expiring) openSpell(S, p.club, false, 0, S.season + 1);
-    sysMsg(S, 'club', 'ההשאלה הסתיימה. חוזר ל' + clubName(p.club) + '.');
+    sysMsg(S, 'club', 'ההשאלה הסתיימה. {{חוזר|חוזרת}} ל' + clubName(p.club) + '.');
   }
   setAbroadFlag(S);
   return true;
@@ -249,7 +251,7 @@ export function contractExpiry(S) {
   if (sp && sp.to === null) closeSpell(S, S.season);
   p.stage = 'free'; p.club = null; p.contract = null; p.parent = null; p.freeWeeks = 0; p.treq = false;
   setAbroadFlag(S);
-  sysMsg(S, 'agent', 'החוזה שלך עם ' + clubName(club) + ' הסתיים. אתה שחקן חופשי, ' + (S.names.agent || 'הסוכן') + ' כבר מחפש לך קבוצה.');
+  sysMsg(S, 'agent', 'החוזה שלך עם ' + clubName(club) + ' הסתיים. {{אתה שחקן חופשי|את שחקנית חופשית}}, ' + (S.names.agent || 'הסוכן') + ' כבר מחפש לך קבוצה.');
   addTimeline(S, 'info', 'סיום חוזה ב' + clubName(club));
   return true;
 }
@@ -262,7 +264,7 @@ export function releaseYouth(S) {
   if (S.comp) S.comp.yl = null;
   setAbroadFlag(S);
   raise(S, 'released');
-  sysMsg(S, 'club', clubName(club) + ' החליטה לא להחתים אותך על חוזה מקצועני. זה לא הסוף. אתה שחקן חופשי.');
+  sysMsg(S, 'club', clubName(club) + ' החליטה לא להחתים אותך על חוזה מקצועני. זה לא הסוף. {{אתה שחקן חופשי|את שחקנית חופשית}}.');
   addTimeline(S, 'info', 'שוחררת מהאקדמיה של ' + clubName(club));
 }
 
@@ -275,7 +277,7 @@ export function signPro(S, o) {
   raise(S, 'pro_contract');
   emit('pro_contract', { club: p.club });
   addTimeline(S, 'contract', 'חוזה מקצועני ראשון ב' + clubName(p.club));
-  sysMsg(S, 'club', 'חתמת על חוזה מקצועני ראשון! מעכשיו אתה שחקן הקבוצה הבוגרת.');
+  sysMsg(S, 'club', 'חתמת על חוזה מקצועני ראשון! מעכשיו {{אתה שחקן|את שחקנית}} בקבוצה הבוגרת.');
 }
 
 // ----- respond -----
@@ -349,8 +351,8 @@ export function respond(S, rng, o, action, counter) {
     o.status = 'accepted'; o.cl = curAw(S);
     withdrawOthers(S, o.id);
     addTimeline(S, 'contract', 'סוכם חוזה מוקדם עם ' + clubName(o.club));
-    sysMsg(S, 'agent', 'סגרנו! בקיץ אתה עובר ל' + clubName(o.club) + '.');
-    return { ok: true, status: 'accepted', messageHe: 'סוכם! תעבור בתחילת הקיץ' };
+    sysMsg(S, 'agent', 'סגרנו! בקיץ {{אתה עובר|את עוברת}} ל' + clubName(o.club) + '.');
+    return { ok: true, status: 'accepted', messageHe: gtext('סוכם! {{תעבור|תעברי}} בתחילת הקיץ') };
   }
   if (o.type === 'renewal') {
     const es = effSeason(S);
@@ -400,7 +402,7 @@ export function contractVM(S, c, extra) {
   const p = S.player;
   const until = c.until;
   return {
-    club: teamVM(c.club), wage: c.wage, until, untilHe: 'עד סוף ' + fmtSeason(until), role: c.role, roleHe: (ROLES && ROLES[c.role]) || c.role, rc: c.rc,
+    club: teamVM(c.club), wage: c.wage, until, untilHe: 'עד סוף ' + fmtSeason(until), role: c.role, roleHe: femLabel((ROLES && ROLES[c.role]) || c.role), rc: c.rc,
     loan: !!c.loan, parentHe: p.parent ? clubName(p.parent.club) : null, nextHe: p.next ? (clubName(p.next.club) + ' (מהקיץ)') : null,
     yearsLeft: Math.max(0, until - effSeason(S) + 1),
   };
@@ -412,7 +414,7 @@ export function offerVM(S, o, awLabel) {
   const lid = clubLeague(S, o.club);
   const lg = LEAGUE_BY_ID[lid];
   const cc = country(clubCountry(o.club));
-  const club = Object.assign(teamVM(o.club), { leagueHe: lg ? lg.nameHe : '', countryHe: cc ? cc.nameHe : '', flag: cc ? cc.flag : '', strength: Math.round(cs(S, o.club)) });
+  const club = Object.assign(teamVM(o.club), { leagueHe: lg ? lgNameHe(lid) : '', countryHe: cc ? cc.nameHe : '', flag: cc ? cc.flag : '', strength: Math.round(cs(S, o.club)) });
   const compare = [];
   const curWage = p.contract ? p.contract.wage : 0;
   if (o.type !== 'loan' && curWage > 0 && o.type !== 'renewal') {
@@ -432,11 +434,11 @@ export function offerVM(S, o, awLabel) {
     else if (d <= -3) compare.push('קבוצה חלשה יותר');
   }
   if (cc && cc.id !== p.nation) compare.push('מעבר לחו״ל: ' + cc.nameHe);
-  compare.push('תפקיד: ' + ((ROLES && ROLES[o.role]) || o.role));
+  compare.push('תפקיד: ' + femLabel((ROLES && ROLES[o.role]) || o.role));
   const negotiable = !(o.type === 'loan' || o.type === 'pro');
   return {
-    id: o.id, type: o.type, typeHe: TYPE_HE[o.type] || o.type, club, fee: o.fee, wage: o.wage, years: o.years, role: o.role,
-    roleHe: (ROLES && ROLES[o.role]) || o.role, rc: o.rc, status: o.status, statusHe: STATUS_HE[o.status] || o.status,
+    id: o.id, type: o.type, typeHe: gtext(TYPE_HE[o.type] || o.type), club, fee: o.fee, wage: o.wage, years: o.years, role: o.role,
+    roleHe: femLabel((ROLES && ROLES[o.role]) || o.role), rc: o.rc, status: o.status, statusHe: STATUS_HE[o.status] || o.status,
     expiresHe: o.status === 'open' ? ('בתוקף עד ' + awLabel(o.exp)) : '',
     negotiationsLeft: negotiable && o.status === 'open' ? Math.max(0, 2 - o.neg) : 0,
     compareHe: compare, canAccept: canAcceptNow(S, o),

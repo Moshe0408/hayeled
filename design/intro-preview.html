@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>הילד מהשכונה - תצוגת פתיח וחגיגות</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=Rubik:wght@500;700;900&display=swap">
+<style>
+  :root{--bg:#050B1A;--card:#0B1E42;--gold:#F4C35A;--text:#EEF4FF;--muted:#AFC0DD}
+  html,body{margin:0;min-height:100%;background:radial-gradient(120% 80% at 50% 0%,#0f2a5a 0%,#050B1A 60%);color:var(--text);font:400 15px/1.5 Heebo,system-ui,sans-serif}
+  main{max-width:560px;margin:0 auto;padding:22px 16px 60px}
+  h1{font:900 24px/1.2 Rubik,Heebo,sans-serif;margin:0 0 4px}
+  p{color:var(--muted);margin:0 0 18px}
+  section{background:linear-gradient(180deg,rgba(23,48,94,.72),rgba(10,24,52,.82));border-radius:20px;padding:16px;margin:0 0 14px;box-shadow:0 0 0 1px rgba(125,160,220,.13) inset}
+  h2{font:700 16px/1.3 Rubik,Heebo,sans-serif;margin:0 0 10px}
+  .row{display:flex;flex-wrap:wrap;gap:8px}
+  button{font:700 14px/1 Heebo,sans-serif;border:0;border-radius:14px;padding:12px 16px;cursor:pointer;color:#0A1838;background:linear-gradient(180deg,#FFE7A3,#F4C35A 45%,#C98E2B)}
+  button.ghost{background:rgba(255,255,255,.06);color:var(--text);box-shadow:0 0 0 1px rgba(175,192,221,.2) inset}
+  label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+  input[type=color]{width:34px;height:28px;border:0;background:none;padding:0}
+  input[type=text]{background:rgba(255,255,255,.06);border:0;border-radius:10px;color:var(--text);padding:8px 10px;font:inherit;box-shadow:0 0 0 1px rgba(175,192,221,.2) inset}
+  #log{font:12px/1.5 ui-monospace,Consolas,monospace;color:#7DF0E2;white-space:pre-wrap;direction:ltr;text-align:left}
+</style>
+</head>
+<body>
+<main>
+  <h1>פתיח וחגיגות</h1>
+  <p>תצוגה של <code>js/ui/scene/intro.js</code> ו-<code>js/ui/scene/celebration.js</code>. דף זה לא טוען את המשחק ולא שולח נתונים.</p>
+  <section>
+    <h2>פתיח (8 שניות)</h2>
+    <div class="row">
+      <button id="intro">▶ פתיח</button>
+      <button class="ghost" id="introF">▶ פתיח (בת)</button>
+      <button class="ghost" id="introSound">🔊 פתיח עם סאונד</button>
+    </div>
+  </section>
+  <section>
+    <h2>חגיגות</h2>
+    <div class="row" style="margin-bottom:10px">
+      <label>צבע 1 <input type="color" id="c1" value="#F4C35A"></label>
+      <label>צבע 2 <input type="color" id="c2" value="#0A1838"></label>
+      <label>שורה תחתונה <input type="text" id="sub" value="איתי לוי · 89'"></label>
+    </div>
+    <div class="row">
+      <button data-k="goal">גול</button>
+      <button data-k="mega">גול ענק</button>
+      <button class="ghost" data-k="save">הצלה</button>
+      <button class="ghost" data-k="win">ניצחון</button>
+      <button class="ghost" data-k="trophy">גביע</button>
+    </div>
+  </section>
+  <div id="log"></div>
+</main>
+<script type="module">
+  try { localStorage.setItem('hy.dev.backend', '{"off":true}'); } catch {}
+  const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+  const intro = await import('../js/ui/scene/intro.js');
+  let celeb = null;
+  try { celeb = await import('../js/ui/scene/celebration.js'); } catch (e) { log('celebration.js: ' + e.message); }
+  const q = new URLSearchParams(location.search);
+  document.getElementById('intro').onclick = () => intro.playIntro({ force: true }).then(() => log('intro done'));
+  document.getElementById('introF').onclick = () => intro.playIntro({ force: true, gender: 'f' }).then(() => log('intro done'));
+  document.getElementById('introSound').onclick = () => { localStorage.setItem('hy.sound', '1'); intro.playIntro({ force: true }).then(() => log('intro done')); };
+  document.querySelectorAll('[data-k]').forEach((b) => b.onclick = () => {
+    if (!celeb) return;
+    const colors = [document.getElementById('c1').value, document.getElementById('c2').value];
+    const kind = b.dataset.k, subHe = document.getElementById('sub').value;
+    celeb.celebrate({ kind, colors, subHe: kind === 'save' ? 'הצלה ענקית בדקה 90' : subHe }).then(() => log(kind + ' done'));
+  });
+  // capture hooks: ?t=3.6 (intro frame, paused), ?celeb=mega&t=0.8 (celebration frame, paused), ?run=1 (play intro, report stats)
+  if (q.has('celeb') && celeb) {
+    celeb.celebrate({ kind: q.get('celeb'), colors: (q.get('colors') || '#F4C35A,#0A1838').split(','), subHe: q.get('sub') || "איתי לוי · 89'", debug: true });
+    window.__ready = true;
+  } else if (q.has('t')) {
+    intro.playIntro({ force: true, debug: true, gender: q.get('g') || 'm' });
+    window.__ready = true;
+  } else if (q.has('run')) {
+    intro.playIntro({ force: true, gender: q.get('g') || 'm' }).then(() => { window.__done = true; });
+  }
+</script>
+</body>
+</html>

@@ -6,6 +6,9 @@ import { ctx, svc, toast, openModal, confirmDialog, saveSettings } from './app.j
 import { navigate } from './router.js';
 import { isStandalone } from './install.js';
 import { bytes, ago } from './format.js';
+import { playIntro } from './scene/intro.js';
+import { gtext, currentGender } from './gender.js';
+import { soundWanted, setSound } from './scene/crowd-audio.js';
 
 export async function render(root) {
   root.innerHTML = '<div class="loading-line">טוען הגדרות...</div>';
@@ -39,7 +42,15 @@ export async function render(root) {
     const persisted = status && status.persisted === true;
     root.innerHTML = `<div class="settings">
       <section class="card">
-        <h2 class="card-title">💾 השמירה וההתקדמות שלך</h2>
+        <h2 class="card-title"><span>⚽ המשחק</span></h2>
+        <label class="toggle"><input type="checkbox" data-act="decisions" data-testid="toggle-decisions" ${st.decisions ? 'checked' : ''}><span>החלטות במשחק (רגעי מפתח)</span></label>
+        <p class="muted small">${esc(gtext(st.decisions ? 'במשחקים תעצור{{|י}} ברגעי מפתח ותבחר{{|י}} מה לעשות.' : 'ברירת המחדל: צופים במשחק כמו בשידור, עם חילופים, שערים וחגיגות. אפשר להדליק כדי לבחור בעצמך ברגעי מפתח.'))}</p>
+        <label class="toggle"><input type="checkbox" data-act="sound" data-testid="toggle-sound" ${(() => { try { return soundWanted(); } catch { return false; } })() ? 'checked' : ''}><span>קולות קהל ותופים</span></label>
+        <button type="button" class="btn" data-act="replay-intro" data-testid="btn-replay-intro">🎬 צפייה חוזרת בפתיחה</button>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title"><span>💾 השמירה וההתקדמות שלך</span></h2>
         <ul class="explain">
           <li>ההתקדמות נשמרת <b>אוטומטית אחרי כל פעולה</b>, על המכשיר הזה, בשני מקומות בדפדפן (localStorage ו-IndexedDB). אם אחד מהם נפגם, המשחק משחזר מהשני.</li>
           <li>ההתקדמות <b>לא נשמרת בשרת</b>. מחיקת נתוני הדפדפן או נתוני האתר תמחק אותה.</li>
@@ -56,7 +67,7 @@ export async function render(root) {
       </section>
 
       <section class="card">
-        <h2 class="card-title">📦 גיבוי ושחזור</h2>
+        <h2 class="card-title"><span>📦 גיבוי ושחזור</span></h2>
         ${slots.map((s) => `<div class="slot-backup">
           <div class="sb-title"><b>משבצת ${s.slot}</b>${ctx.activeSlot === s.slot ? ' <span class="chip good">פעילה</span>' : ''}<small class="muted">${esc(slotLabel(s))}${s.savedAt ? ' · ' + esc(ago(s.savedAt)) : ''}</small></div>
           <div class="btn-row wrap">
@@ -67,42 +78,42 @@ export async function render(root) {
           </div></div>`).join('')}
         <button type="button" class="btn" data-act="backup-all" data-testid="btn-backup-all">גיבוי מלא (כל המשבצות + היכל התהילה)</button>
         <h3 class="sub">ייבוא</h3>
-        <label class="file-btn btn">📂 בחר קובץ גיבוי<input type="file" accept=".json,application/json,text/plain" data-testid="inp-import-file" data-act="file"></label>
+        <label class="file-btn btn">📂 בחירת קובץ גיבוי<input type="file" accept=".json,application/json,text/plain" data-testid="inp-import-file" data-act="file"></label>
         <label class="field"><span>או הדבק קוד גיבוי</span><textarea data-testid="inp-import-code" id="imp-code" rows="3" placeholder="HY1:..." autocomplete="off" spellcheck="false"></textarea></label>
         <button type="button" class="btn btn-primary" data-act="imp-code" data-testid="btn-import-code">ייבא קוד</button>
       </section>
 
       <section class="card">
-        <h2 class="card-title">🔒 פרטיות</h2>
+        <h2 class="card-title"><span>🔒 פרטיות</span></h2>
         <label class="toggle"><input type="checkbox" data-act="tm" data-testid="toggle-telemetry" ${consent ? 'checked' : ''}><span>שתף נתוני שימוש אנונימיים</span></label>
         <p class="muted small">אנחנו אוספים נתונים אנונימיים בלבד (מזהה מכשיר אקראי, כמה זמן משחקים, אירועים במשחק) כדי לשפר את המשחק. בלי שם, בלי מיקום, בלי אנשי קשר.</p>
         ${adsense ? `<label class="toggle"><input type="checkbox" data-act="ads-consent" ${st.adsConsent ? 'checked' : ''}><span>אני מסכים לפרסומות מותאמות (Google)</span></label>` : ''}
       </section>
 
-      ${standalone ? '' : '<section class="card"><h2 class="card-title">📲 התקנה</h2><p class="small">התקנה למסך הבית: מסך מלא, משחק בלי אינטרנט, ושמירה מוגנת יותר.</p><a class="btn" href="#/install">איך מתקינים?</a></section>'}
+      ${standalone ? '' : '<section class="card"><h2 class="card-title"><span>📲 התקנה</span></h2><p class="small">התקנה למסך הבית: מסך מלא, משחק בלי אינטרנט, ושמירה מוגנת יותר.</p><a class="btn" href="#/install">איך מתקינים?</a></section>'}
 
       <section class="card">
-        <h2 class="card-title">💬 משוב</h2>
+        <h2 class="card-title"><span>💬 משוב</span></h2>
         <p class="small">יש לך רעיון, באג או סתם מחמאה? נשמח לשמוע.</p>
         <a class="btn" href="#/feedback" data-testid="btn-open-feedback">שלח משוב</a>
       </section>
 
       <section class="card">
-        <h2 class="card-title">🎨 תצוגה</h2>
+        <h2 class="card-title"><span>🎨 תצוגה</span></h2>
         <label class="toggle"><input type="checkbox" data-act="rm" ${st.reduceMotion ? 'checked' : ''}><span>הפחת אנימציות</span></label>
         <label class="toggle"><input type="checkbox" data-act="hap" ${st.haptics ? 'checked' : ''}><span>רטט ברגעים במשחק</span></label>
       </section>
 
       <section class="card">
-        <h2 class="card-title">ℹ️ אודות</h2>
+        <h2 class="card-title"><span>ℹ️ אודות</span></h2>
         <div class="kv"><span>גרסה</span><b class="num">${esc(APP_VERSION)}</b></div>
-        <div class="btn-row wrap"><button type="button" class="btn btn-sm" data-act="update">בדוק עדכונים</button>
+        <div class="btn-row wrap"><button type="button" class="btn btn-sm" data-act="update">בדיקת עדכונים</button>
           <button type="button" class="btn btn-sm btn-ghost" data-act="title">למסך הפתיחה</button></div>
         <p class="muted small">הילד מהשכונה · מהשכונה ועד הבאלון ד'אור. כל השחקנים במשחק בדויים. שמות הקבוצות והמדינות לשם האווירה בלבד.</p>
       </section>
 
       <section class="card danger-zone">
-        <h2 class="card-title">⚠️ אזור מסוכן</h2>
+        <h2 class="card-title"><span>⚠️ אזור מסוכן</span></h2>
         ${slots.filter((s) => !s.empty || s.corrupt).map((s) => `<div class="kv"><span>משבצת ${s.slot}: ${esc(slotLabel(s))}</span><button type="button" class="btn btn-sm btn-danger" data-act="delete" data-slot="${s.slot}" data-testid="btn-delete-slot-${s.slot}">מחק משבצת</button></div>`).join('') || '<p class="muted small">אין משבצות למחיקה.</p>'}
       </section>
     </div>`;
@@ -201,6 +212,8 @@ export async function render(root) {
     if (act === 'tm') { try { svc.telemetry.setConsent(!!el.checked); } catch { /* ignore */ } toast(el.checked ? 'תודה! זה עוזר לנו לשפר' : 'שיתוף הנתונים כובה'); }
     else if (act === 'ads-consent') { saveSettings({ adsConsent: !!el.checked }); if (ctx.hooks.reinitAds) ctx.hooks.reinitAds(); }
     else if (act === 'rm') saveSettings({ reduceMotion: !!el.checked });
+    else if (act === 'decisions') { saveSettings({ decisions: !!el.checked }); toast(el.checked ? 'רגעי המפתח הודלקו' : 'מצב צפייה: המשחקים ירוצו כמו בשידור'); draw(); }
+    else if (act === 'sound') { try { setSound(!!el.checked); } catch { /* ignore */ } }
     else if (act === 'hap') saveSettings({ haptics: !!el.checked });
     else if (act === 'file') {
       const f = el.files && el.files[0];
@@ -257,6 +270,8 @@ export async function render(root) {
             await refresh();
           }
         }
+      } else if (act === 'replay-intro') {
+        try { await playIntro({ force: true, gender: currentGender() }); } catch (err) { console.warn('[hayeled] intro', err); }
       } else if (act === 'update') { if (ctx.hooks.checkUpdates) await ctx.hooks.checkUpdates(); }
       else if (act === 'title') navigate('#/title');
     } catch (err) {

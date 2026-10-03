@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>הילד מהשכונה - סמלים ודמויות</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&family=Rubik:wght@500;700;900&display=swap">
+<style>
+  :root{--bg:#050B1A;--card:#0B1E42;--line:#1C3561;--text:#EEF4FF;--muted:#AFC0DD;--gold:#F4C35A}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(80% 40% at 50% -10%,rgba(47,227,207,.14),transparent 70%),var(--bg);color:var(--text);font-family:Heebo,Rubik,Arial,sans-serif}
+  section{padding:28px 28px 36px;width:1180px}
+  h1,h2{font-family:Rubik,Heebo,sans-serif;font-weight:900;margin:0 0 4px}
+  h2{font-size:22px} p.sub{margin:0 0 18px;color:var(--muted);font-size:14px}
+  .grid{display:grid;grid-template-columns:repeat(10,1fr);gap:14px 10px}
+  .cell{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px 10px;border-radius:16px;
+    background:linear-gradient(180deg,rgba(23,48,94,.55),rgba(10,24,52,.7));box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 6px 18px rgba(0,0,0,.35)}
+  .cell b{font-size:12px;font-weight:700;text-align:center;line-height:1.2;min-height:2.4em;color:var(--text)}
+  .ladder{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap;margin-top:8px}
+  .ladder .row{display:flex;gap:14px;align-items:flex-end;padding:14px 18px;border-radius:16px;background:rgba(11,30,66,.7)}
+  .list{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px}
+  .li{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:12px;background:rgba(11,30,66,.75);font-weight:700;font-size:14px}
+  .li .sc{margin-inline-start:auto;font-family:Rubik;font-weight:900}
+  .nat{grid-template-columns:repeat(12,1fr)}
+  .av{grid-template-columns:repeat(8,1fr)}
+  .av .cell{padding:8px 6px 10px}
+  .full{display:flex;gap:18px;margin-top:18px;justify-content:center}
+  .full .cell{padding:10px 18px}
+</style>
+</head>
+<body>
+<section id="crests">
+  <h2>סמלי מועדונים</h2>
+  <p class="sub">60 סמלים מקוריים מתוך נתוני הליגות - כל סמל נקבע לפי מזהה המועדון</p>
+  <div class="grid" id="g"></div>
+</section>
+<section id="sizes">
+  <h2>קריאות בכל גודל</h2>
+  <p class="sub">16 / 24 / 32 / 48 / 72 / 120 פיקסלים, ובשורת טבלה</p>
+  <div class="ladder" id="ladder"></div>
+  <div class="list" id="list"></div>
+</section>
+<section id="nations">
+  <h2>נבחרות</h2>
+  <p class="sub">מגן בצבעי הדגל (בלי אימוג'י)</p>
+  <div class="grid nat" id="n"></div>
+</section>
+<section id="avatars">
+  <h2>הדמות שלך</h2>
+  <p class="sub">שחקנים ושחקניות - 6 גווני עור, 10 תסרוקות לכל מגדר, חולצה בצבעי הקבוצה</p>
+  <div class="grid av" id="a"></div>
+  <div class="full" id="af"></div>
+</section>
+<script type="module">
+import { LEAGUES, EURO_FILLER_CLUBS } from '../js/data/leagues.js';
+import { COUNTRIES } from '../js/data/countries.js';
+import { crestSVG } from '../js/ui/crests.js';
+
+const all = {};
+for (const l of LEAGUES) for (const c of l.clubs) all[c.id] = c;
+for (const c of EURO_FILLER_CLUBS) all[c.id] = c;
+const isr = LEAGUES.filter((l) => l.countryId === 'isr').flatMap((l) => l.clubs).map((c) => c.id).slice(0, 22);
+const big = ['eng_mcity', 'eng_liverpool', 'eng_arsenal', 'eng_chelsea', 'eng_manutd', 'eng_tottenham', 'eng_newcastle', 'eng_astonvilla',
+  'esp_rmadrid', 'esp_barcelona', 'esp_atletico', 'ita_inter', 'ita_milan', 'ita_juventus', 'ita_roma', 'ita_napoli', 'ger_bayern', 'ger_dortmund',
+  'fra_psg', 'por_benfica', 'por_sporting', 'tur_galata', 'sco_celtic', 'ned_ajax', 'arg_boca', 'bra_flamengo', 'ksa_hilal'];
+const auto = ['eng_brentford', 'esp_girona', 'ger_freiburg', 'fra_lens', 'ita_bologna', 'ned_twente', 'bel_brugge', 'gre_aris', 'usa_seattle', 'eu_bodo', 'eu_ferenc'];
+const ids = [...isr, ...big, ...auto].slice(0, 60);
+document.getElementById('g').innerHTML = ids.map((id) => {
+  const c = all[id];
+  return c ? `<div class="cell">${crestSVG(c, 88)}<b>${c.nameHe}</b></div>` : '';
+}).join('');
+
+const ladderIds = ['isr_mta', 'isr_hbs', 'eng_liverpool', 'ger_bayern', 'esp_rmadrid'];
+document.getElementById('ladder').innerHTML = ladderIds.map((id) => `<div class="row">${[16, 24, 32, 48, 72, 120].map((s) => crestSVG(all[id], s)).join('')}</div>`).join('');
+const rows = [['isr_mta', 'isr_hta', '2 - 1'], ['isr_mhaifa', 'isr_beitar', '0 - 0'], ['eng_arsenal', 'eng_chelsea', '3 - 2'], ['ita_milan', 'ita_inter', '1 - 1'], ['esp_barcelona', 'esp_rmadrid', '2 - 3'], ['isr_ashdod', 'isr_netanya', '1 - 0']];
+document.getElementById('list').innerHTML = rows.map(([h, a, s]) => `<div class="li">${crestSVG(all[h], 24)}${all[h].shortHe}<span class="sc">${s}</span>${all[a].shortHe}${crestSVG(all[a], 24)}</div>`).join('');
+
+const nats = ['isr', 'eng', 'esp', 'ita', 'ger', 'fra', 'por', 'ned', 'bel', 'cro', 'arg', 'bra', 'usa', 'mex', 'jpn', 'kor', 'mar', 'sen', 'tur', 'gre', 'sco', 'sui', 'swe', 'uru'];
+document.getElementById('n').innerHTML = nats.map((id) => {
+  const c = COUNTRIES.find((x) => x.id === id);
+  return `<div class="cell">${crestSVG({ id: c.id, nameHe: c.nameHe, colors: c.colors, flag: c.flag }, 64)}<b>${c.nameHe}</b></div>`;
+}).join('');
+
+try {
+  const { avatarSVG, SKIN_TONES, HAIR_STYLES } = await import('../js/ui/avatar.js');
+  const kits = [['#FFD200', '#0038A8'], ['#D50000', '#FFFFFF'], ['#00843D', '#FFFFFF'], ['#0038A8', '#FFFFFF'], ['#000000', '#FFD200'], ['#6CABDD', '#FFFFFF'], ['#A50044', '#004D98'], ['#FFFFFF', '#132257']];
+  const cells = [];
+  for (let i = 0; i < 24; i++) {
+    const gender = i % 2 ? 'f' : 'm';
+    const styles = HAIR_STYLES[gender];
+    const hair = styles[Math.floor(i / 2) % styles.length].id;
+    const skin = i % SKIN_TONES.length;
+    cells.push(`<div class="cell">${avatarSVG({ gender, skin, hair, hairColor: (i * 7) % 6, kitColors: kits[i % kits.length], number: 7 + (i % 5) * 2, size: 120, pose: 'portrait' })}<b>${gender === 'f' ? 'שחקנית' : 'שחקן'} · ${styles[Math.floor(i / 2) % styles.length].he}</b></div>`);
+  }
+  document.getElementById('a').innerHTML = cells.join('');
+  document.getElementById('af').innerHTML = [0, 1, 2, 3].map((i) => `<div class="cell">${avatarSVG({ gender: i % 2 ? 'f' : 'm', skin: [1, 3, 5, 2][i], hair: HAIR_STYLES[i % 2 ? 'f' : 'm'][[0, 0, 3, 6][i]].id, kitColors: kits[i], number: [10, 9, 7, 11][i], size: 240, pose: 'full' })}</div>`).join('');
+} catch (e) {
+  document.getElementById('a').textContent = 'avatar.js: ' + e.message;
+}
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>

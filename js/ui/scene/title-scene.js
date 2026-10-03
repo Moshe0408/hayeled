@@ -23,7 +23,8 @@
     g.closePath();
   }
 
-  function createTitleScene(canvas) {
+  function createTitleScene(canvas, opts) {
+    const showKid = !(opts && opts.kid === false);
     const ctx = canvas.getContext('2d');
     const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     let W = 0, H = 0, dpr = 1, k = 1, HY = 0, raf = 0, running = false, last = 0, T = 0;
@@ -374,7 +375,7 @@
       ctx.fillStyle = sh; ctx.beginPath();
       ctx.moveTo(kx + kd.w * 0.36, footY - 2 * k); ctx.lineTo(kx + kd.w * 0.72, footY - 2 * k);
       ctx.lineTo(kx + kd.w * 0.95, H); ctx.lineTo(kx + kd.w * 0.05, H); ctx.fill();
-      ctx.drawImage(kd.c, kx, kd.y, kd.w, kd.h);
+      if (showKid) ctx.drawImage(kd.c, kx, kd.y, kd.w, kd.h);
 
       // dust motes (foreground bokeh)
       ctx.globalCompositeOperation = 'lighter';

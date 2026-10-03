@@ -1,6 +1,7 @@
 // app.js: app shell (header, bottom tab bar, banners, toast, modals), shared context, facade call wrapper.
 import * as game from '../engine/game.js';
 import { esc, $, fromHTML } from './dom.js';
+import { gtext } from './gender.js';
 
 /* ------------------------------------------------------------------ */
 /* Shared context (filled by main.js)                                  */
@@ -38,7 +39,7 @@ export const svc = {
 /* ------------------------------------------------------------------ */
 
 const SETTINGS_KEY = 'hy.settings';
-const SETTINGS_DEFAULTS = { lastSlot: null, reduceMotion: false, haptics: true, adsConsent: false, dismissed: [], installDismissedAt: null };
+const SETTINGS_DEFAULTS = { lastSlot: null, reduceMotion: false, haptics: true, adsConsent: false, dismissed: [], installDismissedAt: null, decisions: false };
 
 export function loadSettings() {
   let s = {};
@@ -46,6 +47,7 @@ export function loadSettings() {
   const out = { ...SETTINGS_DEFAULTS, ...(typeof s === 'object' ? s : {}) };
   if (![1, 2, 3].includes(out.lastSlot)) out.lastSlot = null;
   if (!Array.isArray(out.dismissed)) out.dismissed = [];
+  out.decisions = out.decisions === true;
   ctx.settings = out;
   applyDisplaySettings();
   return out;
@@ -135,6 +137,9 @@ const TABS = [
   { id: 'inbox', he: 'הודעות', hash: '#/inbox' },
 ];
 
+const SVG_BACK = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+const SVG_GEAR = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.4A7.4 7.4 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.4 7.4 0 0 0 2.6 1.5l.4 2.4h4l.4-2.4a7.4 7.4 0 0 0 2.6-1.5l2.4.9 2-3.4z"/></svg>';
+
 let els = {};
 let headerState = { title: '', back: null, gear: false };
 
@@ -177,10 +182,10 @@ export function setHeader(opts = {}) {
   const { title, back, gear, show } = headerState;
   if (!els.topbar) return;
   els.topbar.hidden = show === false;
-  els.topbar.innerHTML = `
-    ${back ? '<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">→</button>' : '<span class="icon-sp"></span>'}
-    <h1 class="topbar-title">${esc(title || '')}</h1>
-    ${gear ? '<button type="button" class="icon-btn" data-act="gear" aria-label="הגדרות" data-testid="btn-gear">⚙️</button>' : '<span class="icon-sp"></span>'}`;
+  els.topbar.innerHTML = `<i class="tb-lights" aria-hidden="true"></i>
+    ${back ? `<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">${SVG_BACK}</button>` : '<span class="icon-sp"></span>'}
+    <h1 class="topbar-title">${esc(gtext(title || ''))}</h1>
+    ${gear ? `<button type="button" class="icon-btn" data-act="gear" aria-label="הגדרות" data-testid="btn-gear">${SVG_GEAR}</button>` : '<span class="icon-sp"></span>'}`;
 }
 
 export function resetHeader(meta = {}) {
@@ -226,7 +231,7 @@ export function toast(textHe, { ms = 3400, tone = '' } = {}) {
   if (!textHe) return;
   const t = els.toast || document.getElementById('toast');
   if (!t) return;
-  t.textContent = String(textHe);
+  t.textContent = gtext(String(textHe));
   t.className = 'toast show' + (tone ? ' toast-' + tone : '');
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -304,7 +309,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 /** confirmDialog({ title, text, yes, no, danger }) -> Promise<boolean> */
-export function confirmDialog({ title = 'בטוח?', text = '', yes = 'אישור', no = 'ביטול', danger = false } = {}) {
+export function confirmDialog({ title = 'בטוח{{|ה}}?', text = '', yes = 'אישור', no = 'ביטול', danger = false } = {}) {
+  title = gtext(title); text = gtext(text); yes = gtext(yes); no = gtext(no);
   return new Promise((resolve) => {
     let answered = false;
     const close = openModal(`

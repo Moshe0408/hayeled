@@ -5,9 +5,10 @@ import { call, toast, openModal, confirmDialog, hubSafe } from './app.js';
 import { navigate } from './router.js';
 import { badge, contractCard, card, empty } from './components.js';
 import { money } from './format.js';
+import { gtext } from './gender.js';
 
 const ROLE_ORDER = ['prospect', 'squad', 'rotation', 'key', 'star'];
-const ROLE_HE = { star: 'כוכב הקבוצה', key: 'שחקן מפתח', rotation: 'רוטציה', squad: 'שחקן סגל', prospect: 'כישרון צעיר' };
+const ROLE_HE = { star: '{{כוכב|כוכבת}} הקבוצה', key: '{{שחקן|שחקנית}} מפתח', rotation: 'רוטציה', squad: '{{שחקן|שחקנית}} סגל', prospect: 'כישרון צעיר' };
 const TYPE_ICO = { transfer: '✈️', loan: '🔁', free: '🆓', precontract: '📝', renewal: '✍️', pro: '⭐' };
 
 export function render(root) {
@@ -19,7 +20,7 @@ export function render(root) {
     const closed = offers.filter((o) => o.status !== 'open');
     root.innerHTML = `<div class="offers">
       ${card(contractCard(contract), { title: 'החוזה הנוכחי' })}
-      ${hub && hub.windowOpen ? '<p class="note good">🔁 חלון ההעברות פתוח</p>' : '<p class="muted small">הצעות מגיעות בעיקר בחלונות ההעברות (קיץ וינואר), או בכל שבוע כשאתה שחקן חופשי.</p>'}
+      ${hub && hub.windowOpen ? '<p class="note good">🔁 חלון ההעברות פתוח</p>' : `<p class="muted small">${esc(gtext('הצעות מגיעות בעיקר בחלונות ההעברות (קיץ וינואר), או בכל שבוע {{כשאתה שחקן חופשי|כשאת שחקנית חופשייה}}.'))}</p>`}
       <h2 class="section-title">הצעות פתוחות</h2>
       ${open.length ? open.map(offerCard).join('') : empty('אין הצעות פתוחות כרגע. הסוכן עובד על זה...', '📨')}
       ${closed.length ? `<h2 class="section-title">הצעות קודמות</h2>${closed.map(offerCard).join('')}` : ''}
@@ -63,7 +64,7 @@ function offerCard(o) {
       ${o.fee ? `<div><small>דמי העברה</small><b class="num">${esc(money(o.fee))}</b></div>` : ''}
       <div><small>שכר לשבוע</small><b class="num">${esc(money(o.wage))}</b></div>
       <div><small>שנים</small><b class="num">${esc(o.years)}</b></div>
-      <div><small>תפקיד</small><b>${esc(o.roleHe || ROLE_HE[o.role] || '')}</b></div>
+      <div><small>תפקיד</small><b>${esc(gtext(o.roleHe || ROLE_HE[o.role] || ''))}</b></div>
       ${o.rc ? `<div><small>סעיף שחרור</small><b class="num">${esc(money(o.rc))}</b></div>` : ''}
     </div>
     ${(o.compareHe || []).length ? `<ul class="compare">${o.compareHe.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
@@ -82,13 +83,13 @@ function negotiate(o, onDone) {
   const el = close.el;
   function draw() {
     el.innerHTML = `<h2 class="modal-title">משא ומתן מול ${esc(o.club && o.club.nameHe)}</h2>
-      <p class="muted small">הסוכן: "תגיד לי מה אתה רוצה, אני אסגור את זה." ככל שתבקש יותר, הסיכוי שיסכימו יורד.</p>
+      <p class="muted small">${esc(gtext('הסוכן: "{{תגיד|תגידי}} לי מה {{אתה|את}} {{רוצה|רוצה}}, אני אסגור את זה." ככל ש{{תבקש|תבקשי}} יותר, הסיכוי שיסכימו יורד.'))}</p>
       <h3 class="sub">שכר</h3>
       <div class="seg">${[1.1, 1.2, 1.35].map((m) => `<button type="button" class="seg-btn${st.wageMul === m ? ' on' : ''}" data-n="wage" data-v="${m}">+${Math.round((m - 1) * 100)}% <small class="num">${esc(money(o.wage * m))}</small></button>`).join('')}</div>
       <h3 class="sub">שנים בחוזה</h3>
       <div class="stepper"><button type="button" class="btn btn-sm" data-n="yminus" aria-label="פחות">−</button><b class="num">${st.years}</b><button type="button" class="btn btn-sm" data-n="yplus" aria-label="יותר">+</button></div>
       <h3 class="sub">תפקיד בקבוצה</h3>
-      <div class="chips wrap">${ROLE_ORDER.map((r) => `<button type="button" class="chip chip-btn${st.role === r ? ' on' : ''}" data-n="role" data-v="${r}">${esc(ROLE_HE[r])}</button>`).join('')}</div>
+      <div class="chips wrap">${ROLE_ORDER.map((r) => `<button type="button" class="chip chip-btn${st.role === r ? ' on' : ''}" data-n="role" data-v="${r}">${esc(gtext(ROLE_HE[r]))}</button>`).join('')}</div>
       <h3 class="sub">סעיף שחרור</h3>
       <div class="seg">${[['none', 'בלי'], ['low', 'נמוך'], ['default', 'רגיל']].map(([k, he]) => `<button type="button" class="seg-btn${st.rc === k ? ' on' : ''}" data-n="rc" data-v="${k}">${he}</button>`).join('')}</div>
       <div class="btn-row"><button type="button" class="btn btn-primary" data-n="send" data-testid="btn-negotiate-send">שלח הצעה נגדית</button><button type="button" class="btn btn-ghost" data-close>ביטול</button></div>`;

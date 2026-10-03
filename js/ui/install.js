@@ -2,6 +2,11 @@
 import * as game from '../engine/game.js';
 import * as save from '../core/save.js';
 import { ctx, toast } from './app.js';
+import { g } from './gender.js';
+
+// imperative verb in the player's gender
+const FEM = { 'לחץ': 'לחצי', 'גלול': 'גללי', 'ובחר': 'ובחרי', 'בחר': 'בחרי', 'העתק': 'העתיקי', 'פתח': 'פתחי', 'והדבק': 'והדביקי' };
+const L = (w) => g(w, FEM[w] || w);
 
 let deferredPrompt = null;
 let inited = false;
@@ -54,12 +59,12 @@ export function render(root) {
     const iosBlock = `<section class="card">
       <h2 class="card-title">📱 אייפון / אייפד (Safari)</h2>
       <ol class="steps">
-        <li>${SHARE_SVG}<span>לחץ על כפתור <b>השיתוף</b> בתחתית המסך</span></li>
-        <li>${ADD_SVG}<span>גלול ובחר <b>"הוסף למסך הבית"</b></span></li>
-        <li><span class="step-ico">⚽</span><span>לחץ <b>"הוסף"</b>. האייקון של הילד מהשכונה יופיע במסך הבית</span></li>
+        <li>${SHARE_SVG}<span>${L('לחץ')} על כפתור <b>השיתוף</b> בתחתית המסך</span></li>
+        <li>${ADD_SVG}<span>${L('גלול')} ${L('ובחר')} <b>"הוסף למסך הבית"</b></span></li>
+        <li><span class="step-ico">⚽</span><span>${L('לחץ')} <b>"הוסף"</b>. האייקון של הילד מהשכונה יופיע במסך הבית</span></li>
       </ol>
       <div class="note warn"><b>חשוב באייפון:</b> לאפליקציה המותקנת יש אחסון <b>נפרד</b> מ-Safari. קריירה שהתחלת ב-Safari לא תופיע באפליקציה.
-        לפני ההתקנה העתק קוד גיבוי, ואחרי ההתקנה פתח את המשחק ← הגדרות ← ייבוא והדבק אותו.</div>
+        לפני ההתקנה ${L('העתק')} קוד גיבוי, ואחרי ההתקנה ${L('פתח')} את המשחק ← הגדרות ← ייבוא ${L('והדבק')} אותו.</div>
       ${hasCareer ? '<button type="button" class="btn btn-primary" data-act="copycode" data-testid="btn-install-copy-code">📋 העתק קוד גיבוי</button>' : ''}
       <p class="muted small">טיפ: Safari עלול למחוק נתוני אתרים אחרי כ-7 ימים בלי ביקור. התקנה למסך הבית מונעת את זה.</p>
     </section>`;
@@ -67,16 +72,16 @@ export function render(root) {
       <h2 class="card-title">🤖 אנדרואיד (Chrome)</h2>
       ${canInstall() ? '<button type="button" class="btn btn-primary btn-lg" data-act="install" data-testid="btn-install">📲 התקן</button>' : ''}
       <ol class="steps">
-        <li>${DOTS_SVG}<span>לחץ על <b>⋮</b> (שלוש הנקודות) בפינה</span></li>
-        <li>${ADD_SVG}<span>בחר <b>"הוספה למסך הבית"</b> או <b>"התקנת האפליקציה"</b></span></li>
+        <li>${DOTS_SVG}<span>${L('לחץ')} על <b>⋮</b> (שלוש הנקודות) בפינה</span></li>
+        <li>${ADD_SVG}<span>${L('בחר')} <b>"הוספה למסך הבית"</b> או <b>"התקנת האפליקציה"</b></span></li>
       </ol>
       <p class="muted small">באנדרואיד האפליקציה המותקנת חולקת את האחסון עם Chrome, אז ההתקדמות שלך נשארת. אין צורך להעביר כלום.</p>
     </section>`;
     const desktopBlock = `<section class="card"><h2 class="card-title">💻 מחשב</h2>
       ${canInstall() ? '<button type="button" class="btn btn-primary" data-act="install" data-testid="btn-install">📲 התקן</button>' : ''}
-      <p class="small">ב-Chrome או Edge: לחץ על סמל ההתקנה בשורת הכתובת, או בתפריט ← "התקן את הילד מהשכונה".</p></section>`;
+      <p class="small">ב-Chrome או Edge: ${L('לחץ')} על סמל ההתקנה בשורת הכתובת, או בתפריט ← "התקן את הילד מהשכונה".</p></section>`;
     root.innerHTML = `<div class="install">
-      <section class="card hero-card"><div class="big-ico">📲</div><h2>שחק כמו באפליקציה</h2>
+      <section class="card hero-card"><div class="big-ico">📲</div><h2>לשחק כמו באפליקציה</h2>
         <p class="muted">התקנה למסך הבית: פתיחה במסך מלא, משחק גם בלי אינטרנט, וההתקדמות מוגנת יותר.</p></section>
       ${ios ? iosBlock + androidBlock : isAndroid() ? androidBlock + iosBlock : desktopBlock + androidBlock + iosBlock}
     </div>`;

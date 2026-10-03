@@ -2,13 +2,14 @@
 import * as game from '../engine/game.js';
 import { esc } from './dom.js';
 import { call } from './app.js';
+import { gtext } from './gender.js';
 import { segmented, empty, statGrid, badge, teamLabel, card } from './components.js';
 import { rating } from './format.js';
 
 const ICON = {
   league: '🏆', league2: '⬆️', cup: '🏆', ucl: '⭐', uel: '🟠', uecl: '🟢', wc: '🌍', euro: '🇪🇺', copa: '🏆', afcon: '🌍', asian: '🌏', gold: '🥇',
   u17: '🏳️', u19: '🏳️', u21: '🏳️', youth_league: '🌱', debut: '👟', goal: '⚽', transfer: '✈️', loan: '🔁', injury: '🤕', callup: '🏳️',
-  award: '🏅', ballon_dor: '🟡', info: '•', pro: '✍️', contract: '📝', retired: '👋', record: '📈', golden_boy: '👦',
+  start: '🌱', award: '🏅', ballon_dor: '🟡', info: '•', pro: '✍️', contract: '📝', retired: '👋', record: '📈', golden_boy: '👦',
 };
 
 export function render(root, params = {}) {
@@ -32,9 +33,9 @@ export function render(root, params = {}) {
     if (tab === 'trophies') {
       const tr = c.trophies || [];
       const aw = c.awards || [];
-      return `${tr.length ? `<div class="cabinet">${tr.map((x) => `<div class="cab-item"><span class="cab-ico">${esc(ICON[x.key] || '🏆')}</span><b>${esc(x.he)}</b>${x.count > 1 ? `<span class="cab-n num">×${esc(x.count)}</span>` : ''}<small class="muted">${esc(x.seasonsHe || '')}</small></div>`).join('')}</div>` : empty('ארון התארים עוד ריק. בוא נמלא אותו!', '🏆')}
+      return `${tr.length ? `<div class="cabinet">${tr.map((x) => `<div class="cab-item"><span class="cab-ico">${esc(ICON[x.key] || '🏆')}</span><b>${esc(x.he)}</b>${x.count > 1 ? `<span class="cab-n num">×${esc(x.count)}</span>` : ''}<small class="muted">${esc(x.seasonsHe || '')}</small></div>`).join('')}</div>` : empty('ארון התארים עוד ריק. {{בוא|בואי}} נמלא אותו!', '🏆')}
         ${aw.length ? `<h3 class="sub">פרסים אישיים</h3><div class="cabinet">${aw.map((x) => `<div class="cab-item"><span class="cab-ico">🏅</span><b>${esc(x.he)}</b>${x.count > 1 ? `<span class="cab-n num">×${esc(x.count)}</span>` : ''}<small class="muted">${esc(x.seasonsHe || '')}</small></div>`).join('')}</div>` : ''}
-        <a class="btn btn-ghost" href="#/awards">כל הפרסים וכדור הזהב ‹</a>`;
+        <a class="btn btn-ghost" href="#/awards">${esc(gtext('כל הפרסים וכדור הזהב{{| לנשים}} ‹'))}</a>`;
     }
     const cl = c.clubs || [];
     return cl.length ? `<div class="club-hist">${cl.map((x) => `<div class="ch-row">${badge(x.club)}<div class="grow"><b>${teamLabel(x.club, false)}</b>${x.loan ? ' <span class="chip">השאלה</span>' : ''}<small class="muted">${esc(x.fromHe || '')} – ${esc(x.toHe || 'היום')}</small></div><div class="small num">${esc(x.apps)} הופ׳ · ${esc(x.goals)} שע׳</div></div>`).join('')}</div>` : empty('אין עדיין מועדונים', '🏟️');

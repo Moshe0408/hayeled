@@ -4,7 +4,7 @@ import * as save from '../core/save.js';
 import { esc } from './dom.js';
 import { call } from './app.js';
 import { navigate } from './router.js';
-import { statGrid, card } from './components.js';
+import { statGrid, card, avatarFor, shirtNumber } from './components.js';
 import { rating } from './format.js';
 import { maybePromptFeedback } from './feedback.js';
 
@@ -22,7 +22,7 @@ export function render(root) {
   const t = r.totals || {};
   root.innerHTML = `<div class="retire" data-testid="retire-screen">
     <section class="card hero-card retire-hero">
-      <div class="big-ico">👋</div>
+      <div class="retire-art" aria-hidden="true">${(() => { try { const m = game.getSaveMeta(); return avatarFor(m, { size: 110, pose: 'full', bg: false, number: shirtNumber(m.pos) }); } catch { return '<div class="big-ico">👋</div>'; } })()}</div>
       <h1 class="big-title">תודה, ${esc(r.name)}</h1>
       <p class="muted">${esc(r.reasonHe || '')} · גיל ${esc(r.age)} · ${esc(r.seasons)} עונות</p>
       <div class="legacy-big"><b class="num">${esc(Math.round(r.legacy || 0))}</b><span>${esc(r.tierHe || '')}</span><small class="muted">ציון מורשת</small></div>

@@ -6,6 +6,8 @@ import { navigate } from './router.js';
 import { badge, teamLabel, scoreBox, ratingChip, statGrid, card, empty } from './components.js';
 import { afterWeekAds } from './adslots.js';
 import { money, rating, signed } from './format.js';
+import { gtext, g } from './gender.js';
+import { celebrate } from './scene/celebration.js';
 
 const STOP_HE = {
   until: '', offer: 'עצרנו: הגיעה הצעה חדשה 📨', event: 'עצרנו: יש הודעה שמחכה לתשובה 💬', review: 'העונה הסתיימה 🏁',
@@ -85,7 +87,7 @@ export function render(root) {
     ${(rv.awards || []).length ? card(`<div class="trophy-row">${rv.awards.map((t) => `<span class="trophy">🏅<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'פרסים אישיים' }) : ''}
     ${card(statGrid([
       { label: 'הופעות', value: st.apps ?? 0 }, { label: 'שערים', value: st.goals ?? 0 }, { label: 'בישולים', value: st.assists ?? 0 },
-      { label: 'ציון ממוצע', value: rating(st.avgRating) }, { label: 'מצטיין המשחק', value: st.motm ?? 0 }, { label: 'שער נקי', value: st.cleanSheets ?? 0 },
+      { label: 'ציון ממוצע', value: rating(st.avgRating) }, { label: gtext('{{מצטיין|מצטיינת}} המשחק'), value: st.motm ?? 0 }, { label: 'שער נקי', value: st.cleanSheets ?? 0 },
     ]), { title: 'המספרים' })}
     ${(rv.byComp || []).length ? card(`<table class="tbl simple"><thead><tr><th class="tm">מסגרת</th><th>הופ׳</th><th>שע׳</th><th>בי׳</th><th>ציון</th></tr></thead><tbody>
       ${rv.byComp.map((c) => `<tr><td class="tm">${esc(c.compHe)}</td><td class="num">${esc(c.apps)}</td><td class="num">${esc(c.goals)}</td><td class="num">${esc(c.assists)}</td><td class="num">${esc(rating(c.avgRating))}</td></tr>`).join('')}
@@ -101,6 +103,15 @@ export function render(root) {
     </div>
   </div>`;
 
+  // trophies won this season: the full-screen trophy celebration (C9), once per review
+  const tr = rv.trophies || [];
+  if (pending && tr.length && ctx.celebratedReview !== rv.seasonHe) {
+    ctx.celebratedReview = rv.seasonHe;
+    let reduce = false;
+    try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches || !!(ctx.settings && ctx.settings.reduceMotion); } catch { /* ignore */ }
+    if (!reduce) setTimeout(() => { try { celebrate({ kind: 'trophy', textHe: g('אלופים!', 'אלופות!'), subHe: tr.map((t) => t.he).join(' · ') }); } catch (e) { console.warn('celebrate', e); } }, 350);
+  }
+
   let busy = false;
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
@@ -113,7 +124,7 @@ export function render(root) {
       navigate('#/hub');
       busy = false;
     } else if (b.dataset.act === 'retire') {
-      const ok = await confirmDialog({ title: 'לתלות את הנעליים?', text: 'הפרישה סופית. הקריירה תיכנס להיכל התהילה ותוכל עדיין לדפדף בה.', yes: 'כן, אני פורש', danger: true });
+      const ok = await confirmDialog({ title: 'לתלות את הנעליים?', text: 'הפרישה סופית. הקריירה תיכנס להיכל התהילה ות{{וכל|וכלי}} עדיין לדפדף בה.', yes: 'כן, אני {{פורש|פורשת}}', danger: true });
       if (!ok) return;
       const r = call(() => game.retire());
       if (r && r.ok !== false) navigate('#/retire');

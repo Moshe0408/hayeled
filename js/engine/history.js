@@ -2,16 +2,30 @@
 import { TROPHIES, AWARDS, LEGACY_TIERS, POSITIONS } from '../data/strings.js';
 import { LEAGUE_BY_ID } from '../data/leagues.js';
 import { nextId, curAw, emptyStats, emptyLine } from './state.js';
-import { clubData, clubLeague, teamVM, clubName, country, leagueRankOf, clubPrestige } from './world.js';
-import { fmtSeason, round1 } from './util.js';
+import { clubData, clubLeague, teamVM, clubName, country, leagueRankOf, clubPrestige, lgNameHe } from './world.js';
+import { fmtSeason, round1, gtext, curGender } from './util.js';
 import { ageOf, ovrOf } from './player.js';
 
 export const CLUB_LINES = ['lg', 'cup', 'eu', 'yth'];
 export const ALL_LINES = ['lg', 'cup', 'eu', 'nt', 'yth', 'ynt'];
 
 export function addTimeline(S, icon, text) {
-  S.hist.timeline.push({ id: nextId(S, 'timeline'), aw: curAw(S), icon: icon || 'info', t: text });
+  S.hist.timeline.push({ id: nextId(S, 'timeline'), aw: curAw(S), icon: icon || 'info', t: gtext(text) });
 }
+
+// ---------- trophy / award labels (women's football names when gender 'f', C3) ----------
+const W_AWARDS = {
+  top_scorer: 'מלכת השערים', pots: 'שחקנית העונה', tots: 'נבחרת העונה', young_pots: 'השחקנית הצעירה של העונה',
+  ucl_top_scorer: 'מלכת שערי ליגת האלופות לנשים', golden_boy: 'פרס הכישרון הצעיר', ballon_dor: 'כדור הזהב לנשים',
+  bdo_top3: 'פודיום כדור הזהב לנשים', bdo_top10: 'טופ 10 בכדור הזהב לנשים', golden_boot_tour: 'מלכת שערי הטורניר', motm_final: 'שחקנית הגמר',
+};
+const W_TROPHIES = {
+  league: 'אליפות', league2: 'עלייה ליגה', cup: 'גביע', ucl: 'ליגת האלופות לנשים', uel: 'הליגה האירופית לנשים', uecl: 'הקונפרנס ליג לנשים',
+  wc: 'גביע העולם לנשים', euro: 'אליפות אירופה לנשים', copa: 'קופה אמריקה לנשים', afcon: 'אליפות אפריקה לנשים', asian: 'גביע אסיה לנשים',
+  gold: 'גביע הזהב לנשים', u17: 'אליפות עד 17 לנערות', u19: 'אליפות עד 19 לנערות', u21: 'אליפות עד 21', youth_league: 'אליפות נערות',
+};
+export function awardLabel(k) { if (curGender() === 'f' && W_AWARDS[k]) return W_AWARDS[k]; return gtext((AWARDS && AWARDS[k]) || k); }
+export function trophyLabel(k) { if (curGender() === 'f' && W_TROPHIES[k]) return W_TROPHIES[k]; return gtext((TROPHIES && TROPHIES[k]) || k); }
 
 export function openSpell(S, club, loan, fee, from) {
   S.hist.clubs.push({ club, from: from !== undefined ? from : S.season, to: null, loan: !!loan, fee: fee || 0, apps: 0, g: 0, a: 0 });
@@ -103,28 +117,28 @@ export function legacyTierHe(legacy) {
   const r = Math.round(legacy);
   let he = '';
   for (const t of (LEGACY_TIERS || [])) if (t.min <= r) he = t.he;
-  return he || 'שחקן ליגה';
+  return gtext(he || '{{שחקן ליגה|שחקנית ליגה}}');
 }
 
-function groupCount(list, labels) {
+function groupCount(list, labelFn) {
   const m = {};
   const order = [];
   for (const x of list) {
-    if (!m[x.k]) { m[x.k] = { key: x.k, he: (labels && labels[x.k]) || x.k, count: 0, seasons: [] }; order.push(x.k); }
+    if (!m[x.k]) { m[x.k] = { key: x.k, he: labelFn(x.k), count: 0, seasons: [] }; order.push(x.k); }
     m[x.k].count++;
     m[x.k].seasons.push(fmtSeason(x.s));
   }
   return order.map((k) => ({ key: k, he: m[k].he, count: m[k].count, seasonsHe: m[k].seasons.join(', ') }));
 }
-export function trophiesVM(S) { return groupCount(S.hist.trophies, TROPHIES); }
-export function awardsListVM(S) { return groupCount(S.hist.awards, AWARDS); }
+export function trophiesVM(S) { return groupCount(S.hist.trophies, trophyLabel); }
+export function awardsListVM(S) { return groupCount(S.hist.awards, awardLabel); }
 
 export function careerVM(S, awLabel) {
   const seasons = S.hist.seasons.map((x) => {
     const tot = sumLines(x.stats, ALL_LINES);
     return {
       season: x.s, seasonHe: fmtSeason(x.s), age: x.age, clubHe: x.club ? clubName(x.club) : 'ללא קבוצה',
-      leagueHe: x.lg && LEAGUE_BY_ID[x.lg] ? LEAGUE_BY_ID[x.lg].nameHe : '', rank: x.rank, apps: tot.apps, goals: tot.g, assists: tot.a,
+      leagueHe: x.lg && LEAGUE_BY_ID[x.lg] ? lgNameHe(x.lg) : '', rank: x.rank, apps: tot.apps, goals: tot.g, assists: tot.a,
       avgRating: tot.apps ? round1(tot.rs / tot.apps) : 0, ovr: x.ovr, loan: !!x.loan,
     };
   });
@@ -132,7 +146,7 @@ export function careerVM(S, awLabel) {
   const clubs = S.hist.clubs.map((c) => ({
     club: teamVM(c.club), fromHe: fmtSeason(c.from), toHe: c.to === null ? 'היום' : fmtSeason(c.to), apps: c.apps, goals: c.g, loan: !!c.loan,
   }));
-  const tl = S.hist.timeline.slice().reverse().map((e) => ({ id: e.id, dateHe: awLabel(e.aw), icon: e.icon, textHe: e.t }));
+  const tl = S.hist.timeline.slice().reverse().map((e) => ({ id: e.id, dateHe: awLabel(e.aw), icon: e.icon, textHe: gtext(e.t) }));
   return {
     timeline: tl, seasons,
     totals: { apps: t.apps, goals: t.goals, assists: t.assists, avgRating: t.avgRating, motm: t.motm, caps: t.caps, intlGoals: t.intlGoals },
@@ -154,7 +168,7 @@ export function hofEntry(S, now) {
   const legacy = Number.isFinite(S.retired.legacy) ? S.retired.legacy : legacyScore(S);
   return {
     v: 1, careerId: S.id, name: p.first + ' ' + p.last, nick: p.nick || '', nation: p.nation, flag: nat ? nat.flag : '',
-    pos: p.pos, posHe: (POSITIONS && POSITIONS[p.pos] && POSITIONS[p.pos].he) || p.pos, born: p.born,
+    pos: p.pos, posHe: gtext((POSITIONS && POSITIONS[p.pos] && ((p.gender === 'f' && POSITIONS[p.pos].heF) || POSITIONS[p.pos].he)) || p.pos), born: p.born, gender: p.gender === 'f' ? 'f' : 'm', num: typeof p.num === 'number' ? p.num : null, look: p.look || null,
     startSeason: S.startSeason, endSeason: S.retired.season, seasons: S.retired.season - S.startSeason + 1, age: S.retired.age,
     clubs, apps: t.apps, goals: t.goals, assists: t.assists, caps: t.caps, intlGoals: t.intlGoals, peakOvr: p.peak,
     trophies, awards, legacy, tierHe: legacyTierHe(legacy), reason: S.retired.reason, createdAt: now,
