@@ -116,7 +116,9 @@ async function openSlot(slot, { quiet = false } = {}) {
   ctx.activeSlot = slot;
   ctx.blocked = false;
   saveSettings({ lastSlot: slot });
-  if (r.repaired) toast('שחזרנו את השמירה שלך מהגיבוי במכשיר ✓', { ms: 4500 });
+  // only a real rescue deserves a message: the main copy (localStorage) was missing or stale and IndexedDB saved the day.
+  // A lagging IndexedDB mirror is healed silently.
+  if (r.repaired && r.source === 'idb') toast('שחזרנו את השמירה שלך מהגיבוי במכשיר ✓', { ms: 4500 });
   if (r.migratedFrom !== null && r.migratedFrom !== undefined) saveNow();
   onGameChange(); // HoF safety net for retired careers
   cancelAutosave();

@@ -134,7 +134,8 @@ export function render(root, params = {}) {
     </div>`;
     if (st.step === 1) {
       const f = root.querySelector('#f-first');
-      if (f && !st.first) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { /* ignore */ } }, 60);
+      // don't steal focus if the player already tapped another field
+      if (f && !st.first) setTimeout(() => { try { const a = document.activeElement; if (!a || a === document.body) f.focus({ preventScroll: true }); } catch { /* ignore */ } }, 60);
     }
     setHeader({ back: '#/title' });
   }

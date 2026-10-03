@@ -3,11 +3,11 @@
 // relative to self.registration.scope. CacheStorage is shared by the whole *.github.io origin,
 // so every cache name starts with 'hayeled-' and caches of other apps are never touched.
 
-const VERSION = '1.0.0';                 // MUST equal APP_VERSION in js/config.js (publish.ps1 bumps both)
+const VERSION = '1.1.0';                 // MUST equal APP_VERSION in js/config.js (publish.ps1 bumps both)
 const CACHE = 'hayeled-' + VERSION;
 const FONT_CACHE = 'hayeled-fonts-v1';
-const PRECACHE = [ './', './index.html', './manifest.webmanifest', './css/app.css',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
+const PRECACHE = [ './', './index.html', './manifest.webmanifest', './css/app.css', './css/theme.css',
+  './icons/icon.svg', './icons/logo.svg', './icons/emblem.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
   './js/main.js', './js/config.js',
   './js/core/rng.js', './js/core/save.js', './js/core/idb.js', './js/core/supa.js', './js/core/telemetry.js', './js/core/remote.js', './js/core/feedback.js', './js/core/ads.js',
   './js/data/countries.js', './js/data/leagues.js', './js/data/names.js', './js/data/events.js', './js/data/commentary.js', './js/data/strings.js',
@@ -15,7 +15,7 @@ const PRECACHE = [ './', './index.html', './manifest.webmanifest', './css/app.cs
   './js/engine/world.js', './js/engine/player.js', './js/engine/selection.js', './js/engine/moments.js', './js/engine/match.js', './js/engine/transfers.js',
   './js/engine/europe.js', './js/engine/cups.js', './js/engine/national.js', './js/engine/awards.js', './js/engine/narrative.js', './js/engine/history.js', './js/engine/shop.js',
   './js/ui/dom.js', './js/ui/router.js', './js/ui/app.js', './js/ui/components.js', './js/ui/format.js', './js/ui/title.js', './js/ui/create.js', './js/ui/hub.js',
-  './js/ui/week.js', './js/ui/match.js', './js/ui/inbox.js', './js/ui/schedule.js', './js/ui/tables.js', './js/ui/career.js', './js/ui/profile.js', './js/ui/national.js',
+  './js/ui/week.js', './js/ui/match.js', './js/ui/scene/match-scene.js', './js/ui/scene/title-scene.js', './js/ui/scene/crowd-audio.js', './js/ui/inbox.js', './js/ui/schedule.js', './js/ui/tables.js', './js/ui/career.js', './js/ui/profile.js', './js/ui/national.js',
   './js/ui/offers.js', './js/ui/awards.js', './js/ui/shop.js', './js/ui/hof.js', './js/ui/settings.js', './js/ui/feedback.js', './js/ui/install.js', './js/ui/adslots.js', './js/ui/retire.js' ];
 
 // Files without which the offline game cannot start: install fails (and is retried by the browser) if these fail.

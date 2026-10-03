@@ -6,12 +6,24 @@ import { ctx, toast, openModal, confirmDialog } from './app.js';
 import { navigate } from './router.js';
 import { ago } from './format.js';
 import { isStandalone } from './install.js';
+import { createTitleScene } from './scene/title-scene.js';
+
+let scene = null;
+function stopScene() { if (scene) { try { scene.destroy(); } catch { /* ignore */ } scene = null; } }
+function startScene(root) {
+  stopScene();
+  const c = root.querySelector('.hero-canvas');
+  if (!c) return;
+  try { scene = createTitleScene(c); scene.start(); } catch (e) { console.warn('title scene', e); scene = null; }
+}
 
 export async function render(root) {
-  root.innerHTML = `<div class="title-screen"><div class="hero">${logo()}</div><div class="loading-line">טוען משבצות...</div></div>`;
+  root.innerHTML = `<div class="title-screen">${hero()}<div class="loading-line">טוען משבצות...</div></div>`;
+  startScene(root);
   let slots = [];
   try { slots = await save.listSlots(); } catch (e) { console.warn(e); slots = [1, 2, 3].map((s) => ({ slot: s, empty: true })); }
   draw(root, slots);
+  startScene(root);
 
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
@@ -38,9 +50,13 @@ export async function render(root) {
     }
   });
 
+  // the router calls this when the route changes
+  const cleanup = () => stopScene();
+
   async function refresh() {
     try { slots = await save.listSlots(); } catch { /* keep */ }
     draw(root, slots);
+    startScene(root);
   }
 
   async function load(slot) {
@@ -93,6 +109,7 @@ export async function render(root) {
       }
     });
   }
+  return cleanup;
 }
 
 function continueSlot(slots) {
@@ -102,9 +119,9 @@ function continueSlot(slots) {
   return usable.find((s) => s.slot === last) || usable.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
 }
 
-function logo() {
-  return `<div class="logo"><div class="logo-ball" aria-hidden="true"></div>
-    <h1 class="logo-text">הילד מהשכונה</h1><p class="tagline">מהשכונה ועד הבאלון ד'אור</p></div>`;
+function hero() {
+  return `<div class="title-hero"><canvas class="hero-canvas" aria-hidden="true"></canvas>
+    <h1 class="title-logo-wrap"><img class="title-logo" src="./icons/logo.svg" alt="הילד מהשכונה - מהשכונה ועד הבאלון ד'אור" width="330" height="250"></h1></div>`;
 }
 
 function slotCard(s) {
@@ -139,10 +156,10 @@ function draw(root, slots) {
   const cont = continueSlot(slots);
   const standalone = (() => { try { return isStandalone(); } catch { return false; } })();
   root.innerHTML = `<div class="title-screen">
-    <div class="hero">${logo()}</div>
+    ${hero()}
     <div class="title-actions">
-      ${cont ? `<button type="button" class="btn btn-primary btn-xl" data-act="continue" data-testid="btn-continue">▶ המשך קריירה<small>${esc(cont.meta.name)} · ${esc(cont.meta.clubHe || '')}</small></button>` : ''}
-      <button type="button" class="btn ${cont ? '' : 'btn-primary btn-xl'}" data-act="new" data-testid="btn-new-career">⚽ קריירה חדשה</button>
+      ${cont ? `<button type="button" class="btn btn-gold btn-xl" data-act="continue" data-testid="btn-continue">▶ המשך קריירה<small>${esc(cont.meta.name)} · ${esc(cont.meta.clubHe || '')}</small></button>` : ''}
+      <button type="button" class="btn ${cont ? 'btn-glass' : 'btn-gold btn-xl'}" data-act="new" data-testid="btn-new-career">⚽ קריירה חדשה</button>
     </div>
     <h2 class="section-title">המשבצות שלך</h2>
     <div class="slots">${slots.map(slotCard).join('')}</div>

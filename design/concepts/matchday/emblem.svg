@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 252 296"><defs>
+    <linearGradient id="emg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE58A"/><stop offset=".45" stop-color="#FFC531"/><stop offset="1" stop-color="#D9930B"/></linearGradient>
+    <linearGradient id="emi" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B2E5A"/><stop offset=".55" stop-color="#0D1730"/><stop offset="1" stop-color="#060A15"/></linearGradient>
+    <clipPath id="emk"><path d="M32.21 15L207.79 15L225 32.21L225 171.24L120 263.99L15 171.24L15 32.21Z"/></clipPath>
+  </defs>
+  <path d="M26 0L214 0L240 26L240 178L120 284L0 178L0 26Z" fill="url(#emg)"/>
+  <path d="M29.31 8L210.69 8L232 29.31L232 174.39L120 273.33L8 174.39L8 29.31Z" fill="#070B16"/>
+  <path d="M32.21 15L207.79 15L225 32.21L225 171.24L120 263.99L15 171.24L15 32.21Z" fill="url(#emi)"/>
+  <g clip-path="url(#emk)">
+    <path d="M-10 214L250 198L250 300L-10 300Z" fill="#0A8A3E"/><path d="M-10 214L250 198" stroke="#13C25A" stroke-width="4"/>
+    <path d="M150 -10L250 -10L250 60Z" fill="#C8FF2E" opacity=".0"/>
+    <path d="M178 -4L196 -4L96 300L78 300Z" fill="#fff" opacity=".045"/>
+    <path d="M206 -4L216 -4L116 300L106 300Z" fill="#fff" opacity=".035"/>
+  </g>
+  <path d="M120 28L124.23 38.18L135.22 39.06L126.85 46.22L129.4 56.94L120 51.2L110.6 56.94L113.15 46.22L104.78 39.06L115.77 38.18Z" fill="url(#emg)"/>
+  <g transform="translate(34 80) scale(.74)"><clipPath id="emn"><path d="M28.43 40L150.43 40L178.07 170L56.07 170Z"/></clipPath>
+  <g clip-path="url(#emn)"><path d="M-200 40l130 130M-70 40l-130 130M-183 40l130 130M-53 40l-130 130M-166 40l130 130M-36 40l-130 130M-149 40l130 130M-19 40l-130 130M-132 40l130 130M-2 40l-130 130M-115 40l130 130M15 40l-130 130M-98 40l130 130M32 40l-130 130M-81 40l130 130M49 40l-130 130M-64 40l130 130M66 40l-130 130M-47 40l130 130M83 40l-130 130M-30 40l130 130M100 40l-130 130M-13 40l130 130M117 40l-130 130M4 40l130 130M134 40l-130 130M21 40l130 130M151 40l-130 130M38 40l130 130M168 40l-130 130M55 40l130 130M185 40l-130 130M72 40l130 130M202 40l-130 130M89 40l130 130M219 40l-130 130M106 40l130 130M236 40l-130 130M123 40l130 130M253 40l-130 130M140 40l130 130M270 40l-130 130M157 40l130 130M287 40l-130 130M174 40l130 130M304 40l-130 130M191 40l130 130M321 40l-130 130M208 40l130 130M338 40l-130 130M225 40l130 130M355 40l-130 130M242 40l130 130M372 40l-130 130M259 40l130 130M389 40l-130 130M276 40l130 130M406 40l-130 130M293 40l130 130M423 40l-130 130" transform="translate(-18.07 0) skewX(12)" stroke="#FFFFFF" stroke-width="2.2" opacity=".22" fill="none"/></g>
+  <path d="M-4.07 0L181.93 0L218.07 170L178.07 170L150.43 40L-9.57 40ZM-4.04 66L33.96 66L56.07 170L18.07 170Z" fill="#FFFFFF"/>
+  <path d="M106.71 99.22L138.95 132.41L114.6 93.07ZM94.59 113.75L143.99 166.52L104.84 105.75ZM79.9 120.13L112.14 153.32L87.79 113.98Z" fill="#C8FF2E"/>
+  <g><clipPath id="embc"><circle cx="75.72" cy="79" r="31"/></clipPath>
+  <circle cx="75.72" cy="79" r="31" fill="#070B16"/>
+  <circle cx="75.72" cy="79" r="31" fill="#FFFFFF"/>
+  <g clip-path="url(#embc)" fill="#070B16"><path d="M74.17 67.95L85.76 74.11L83.48 87.03L70.49 88.85L64.73 77.06Z"/><path d="M76.74 39.06L82.49 50.85L73.05 59.97L61.47 53.81L63.74 40.89ZM114.02 67.62L104.58 76.73L93 70.57L95.28 57.65L108.27 55.83ZM98.38 111.9L86.8 105.75L89.08 92.83L102.07 91L107.82 102.79ZM51.43 110.72L53.71 97.8L66.7 95.97L72.45 107.76L63.02 116.88ZM38.05 65.7L51.05 63.87L56.8 75.66L47.36 84.78L35.78 78.62Z"/>
+  <path d="M74.17 67.95L73.05 59.97M85.76 74.11L93 70.57M83.48 87.03L89.08 92.83M70.49 88.85L66.7 95.97M64.73 77.06L56.8 75.66" stroke="#070B16" stroke-width="2.32" fill="none"/>
+  <path d="M44.72 79a31 31 0 0 0 62 0a31 31 0 0 1 -62 0" fill="#9FB0CC" opacity=".0"/></g>
+  <path d="M81.92 109.38A31 31 0 0 0 106.1 85.2" stroke="#AFC0DE" stroke-width="4.34" fill="none" opacity=".55" clip-path="url(#embc)"/>
+  </g></g></svg>

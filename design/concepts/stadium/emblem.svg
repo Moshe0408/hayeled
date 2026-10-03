@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 4 180 232" width="180" height="232" role="img" aria-label="הילד מהשכונה"><defs>
+  <linearGradient id="mk-gold" x1="0" y1="0" x2="0.35" y2="1">
+    <stop offset="0" stop-color="#FFE7A3"/><stop offset=".35" stop-color="#F4C35A"/><stop offset=".7" stop-color="#C98E2B"/><stop offset="1" stop-color="#F2CB6B"/>
+  </linearGradient>
+  <linearGradient id="mk-navy" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#16305C"/><stop offset=".55" stop-color="#0A1A3A"/><stop offset="1" stop-color="#06233A"/>
+  </linearGradient>
+  <radialGradient id="mk-glow" cx=".5" cy=".86" r=".62">
+    <stop offset="0" stop-color="#2FE3CF" stop-opacity=".55"/><stop offset=".45" stop-color="#1AA6A6" stop-opacity=".18"/><stop offset="1" stop-color="#1AA6A6" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="mk-beam" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#E9FFFB" stop-opacity=".5"/><stop offset="1" stop-color="#E9FFFB" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="mk-kid" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#DDF7F3"/>
+  </linearGradient>
+  <clipPath id="mk-clip"><path d="M100 23 L165.5 39.8 Q171 41.3 171 47 L171 118 C171 160 140 191 100 213.5 C60 191 29 160 29 118 L29 47 Q29 41.3 34.5 39.8 Z"/></clipPath></defs>
+  <path d="M100 8 L177 28 Q186 30.5 186 40 L186 118 C186 170 148 206 100 232 C52 206 14 170 14 118 L14 40 Q14 30.5 23 28 Z" fill="url(#mk-gold)"/>
+  <path d="M100 17 L170 35 Q177 37 177 44.5 L177 118 C177 163 144 196 100 220.5 C56 196 23 163 23 118 L23 44.5 Q23 37 30 35 Z" fill="#081530"/>
+  <path d="M100 23 L165.5 39.8 Q171 41.3 171 47 L171 118 C171 160 140 191 100 213.5 C60 191 29 160 29 118 L29 47 Q29 41.3 34.5 39.8 Z" fill="url(#mk-navy)"/>
+  <g clip-path="url(#mk-clip)">
+    <rect x="0" y="0" width="200" height="240" fill="url(#mk-glow)"/>
+    <path d="M38 46 L44 42 L128 214 L60 214 Z" fill="url(#mk-beam)" opacity=".5"/>
+    <path d="M162 46 L156 42 L72 214 L140 214 Z" fill="url(#mk-beam)" opacity=".5"/>
+    <g fill="#F4FFFD"><circle cx="40" cy="45" r="3.2"/><circle cx="160" cy="45" r="3.2"/></g>
+    <path d="M20 196 Q100 176 180 196" fill="none" stroke="#7DF0E2" stroke-opacity=".35" stroke-width="1.6"/>
+    <ellipse cx="100" cy="206" rx="54" ry="9" fill="none" stroke="#7DF0E2" stroke-opacity=".28" stroke-width="1.6"/>
+  </g>
+  <path d="M92.69 105.10 L107.38 134.77 A8.5 8.5 0 0 0 123.17 128.66 L114.06 96.83 A11.5 11.5 0 1 0 92.69 105.10ZM109.28 104.45 L127.01 100.28 A4.4 4.4 0 0 0 125.56 91.62 L107.44 93.43 A5.6 5.6 0 1 0 109.28 104.45ZM129.55 98.60 L140.90 83.13 A3.6 3.6 0 0 0 135.28 78.64 L122.68 93.11 A4.4 4.4 0 1 0 129.55 98.60ZM96.94 98.31 L81.60 108.31 A4.4 4.4 0 0 0 85.90 115.97 L102.42 108.05 A5.6 5.6 0 1 0 96.94 98.31ZM86.11 108.14 L72.72 100.84 A3.6 3.6 0 0 0 68.96 106.96 L81.50 115.62 A4.4 4.4 0 1 0 86.11 108.14ZM109.52 130.54 L104.28 161.02 A5.8 5.8 0 0 0 115.45 163.99 L126.08 134.96 A8.6 8.6 0 1 0 109.52 130.54ZM104.61 164.14 L115.10 190.55 A4.2 4.2 0 0 0 123.05 187.90 L115.60 160.48 A5.8 5.8 0 1 0 104.61 164.14ZM117.47 185.09 L104.84 190.02 A3.2 3.2 0 0 0 106.71 196.12 L119.94 193.09 A4.2 4.2 0 1 0 117.47 185.09ZM107.08 123.94 L83.69 140.24 A5.8 5.8 0 0 0 89.33 150.31 L115.45 138.88 A8.6 8.6 0 1 0 107.08 123.94ZM88.04 139.29 L63.75 134.87 A4.2 4.2 0 0 0 61.72 143.00 L85.23 150.52 A5.8 5.8 0 1 0 88.04 139.29ZM64.42 135.05 L53.08 130.99 A3.2 3.2 0 0 0 50.44 136.79 L60.95 142.67 A4.2 4.2 0 1 0 64.42 135.05Z" fill="url(#mk-kid)" fill-rule="nonzero"/>
+  <circle cx="97" cy="77.5" r="10.5" fill="#fff"/>
+  <g stroke="#7DF0E2" stroke-linecap="round" stroke-width="3" opacity=".75"><path d="M50 112 L64 116"/><path d="M50 124 L72 128" opacity=".7"/><path d="M53 135 L63 137" opacity=".5"/></g>
+  <circle cx="39" cy="124" r="12" fill="#fff"/>
+  <path d="M39.00 118.40L40.53 121.90L44.33 122.27L41.47 124.80L42.29 128.53L39.00 126.60L35.71 128.53L36.53 124.80L33.67 122.27L37.47 121.90Z" fill="#0A1A3A"/>
+  <path d="M100.00 41.00L103.76 50.82L114.27 51.36L106.09 57.98L108.82 68.14L100.00 62.40L91.18 68.14L93.91 57.98L85.73 51.36L96.24 50.82Z" fill="url(#mk-gold)"/>
+  <path d="M70.00 59.40L71.18 62.38L74.37 62.58L71.90 64.62L72.70 67.72L70.00 66.00L67.30 67.72L68.10 64.62L65.63 62.58L68.82 62.38Z" fill="#F4C35A" opacity=".85"/>
+  <path d="M131.00 59.40L132.18 62.38L135.37 62.58L132.90 64.62L133.70 67.72L131.00 66.00L128.30 67.72L129.10 64.62L126.63 62.58L129.82 62.38Z" fill="#F4C35A" opacity=".85"/>
+  <path d="M100 23 L165.5 39.8 Q171 41.3 171 47 L171 118 C171 160 140 191 100 213.5 C60 191 29 160 29 118 L29 47 Q29 41.3 34.5 39.8 Z" fill="none" stroke="#2FE3CF" stroke-opacity=".55" stroke-width="1.2"/></svg>

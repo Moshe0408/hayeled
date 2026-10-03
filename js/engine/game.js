@@ -4,7 +4,7 @@ import { COUNTRIES, COUNTRY_BY_ID } from '../data/countries.js';
 import { LEAGUES, LEAGUE_BY_ID, CLUB_INDEX } from '../data/leagues.js';
 import { NICKNAMES, FRIEND_NAMES, AGENT_NAMES, JOURNALIST_NAMES } from '../data/names.js';
 import { POSITIONS, ATTRS, TRAINING, ROLES, STAGES, SELECTION, EURO_COMPS, ROUND_NAMES, TOURNAMENTS, ALERTS, FORMAT_LABELS, RESULT_LABELS } from '../data/strings.js';
-import { clamp, round1, avg, fmtMoney as _fmtMoney, fmtSeason as _fmtSeason, sortIds, deepClone } from './util.js';
+import { clamp, round1, avg, fmtMoney as _fmtMoney, fmtSeason as _fmtSeason, sortIds, deepClone, hePrefix } from './util.js';
 import { C, SCHEMA_VERSION as SV, emit, curAw, createEmptyState, migrateState as _migrate, emptyStats, STATE_KEYS } from './state.js';
 import { weekLabelHe, isWindowOpen, isIntlWeek, intlSlotIndex, leagueRoundSlots, cupRoundSlots, tournamentSlots, EURO_WEEKS, summerTournaments, INTL_WEEKS } from './calendar.js';
 import { simScore, simKnockout, koWinner } from './sim.js';
@@ -444,13 +444,13 @@ function callups(S) {
   if (p.natLvl !== 'senior') p.natLvl = lvl;
   const nat = country(p.nation);
   const lvlHe = lvl === 'senior' ? 'הנבחרת הבוגרת' : lvl === 'u17' ? 'נבחרת עד גיל 17' : lvl === 'u19' ? 'נבחרת עד גיל 19' : 'נבחרת עד גיל 21';
-  W.callupHe = 'זומנת ל' + lvlHe + ' של ' + (nat ? nat.nameHe : '');
+  W.callupHe = hePrefix('זומנת ל', lvlHe) + ' של ' + (nat ? nat.nameHe : '');
   if (firstAtLevel) {
     W.firstCall = true;
     raise(S, lvl === 'senior' ? 'national_callup' : 'youth_callup');
     emit('national_callup', { level: lvl });
-    sysMsg(S, 'national_coach', 'שלום ' + p.first + ', אני שמח לבשר לך שזומנת ל' + lvlHe + '. כל המדינה מאחוריך!');
-    addTimeline(S, 'callup', 'זימון ראשון ל' + lvlHe);
+    sysMsg(S, 'national_coach', 'שלום ' + p.first + ', אני שמח לבשר לך ש' + hePrefix('זומנת ל', lvlHe) + '. כל המדינה מאחוריך!');
+    addTimeline(S, 'callup', hePrefix('זימון ראשון ל', lvlHe));
   }
   if (week === 45 && (lvl === 'senior' ? S.nt.tour : S.nt.ytour)) raise(S, 'tournament_start');
 }
@@ -590,7 +590,7 @@ function weekEnd(S, ff) {
   if (p.club && S.week <= 44 && S.comp.res.some((r) => r.w === S.week && r.k === 'league')) {
     const lid = clubLeague(S, p.club);
     const rk = lid ? leagueRankOf(S, lid, p.club) : null;
-    if (rk) W.lines.push(clubName(p.club) + ' במקום ' + rk + ' ב' + LEAGUE_BY_ID[lid].nameHe);
+    if (rk) W.lines.push(clubName(p.club) + ' במקום ' + rk + ' ' + hePrefix('ב', LEAGUE_BY_ID[lid].nameHe));
   }
   if (S.week === 44) seasonEnd(S);
   if (!S.retired) runWeekEvents(S, rng, { opp: opponentHint(S), derby: W.derby });
@@ -660,7 +660,7 @@ function seasonEnd(S) {
   emit('season_completed', { season: S.season, n: S.season - S.startSeason + 1, league: S.comp.end.lg, rank: S.comp.end.rank, apps: tot.apps, goals: tot.g, ovr: ovrOf(p) });
   if (W) {
     W.seasonEnded = true;
-    if (S.comp.end.rank) W.lines.push('סיום העונה: מקום ' + S.comp.end.rank + ' ב' + (LEAGUE_BY_ID[lid] ? LEAGUE_BY_ID[lid].nameHe : 'ליגה'));
+    if (S.comp.end.rank) W.lines.push('סיום העונה: מקום ' + S.comp.end.rank + ' ' + hePrefix('ב', LEAGUE_BY_ID[lid] ? LEAGUE_BY_ID[lid].nameHe : 'ליגה'));
   }
 }
 
@@ -1037,7 +1037,7 @@ export function getSeasonReview(season) {
   const ovrEnd = live ? ovrOf(p) : arch.ovr;
   const stats = seasonStatsFrom(st);
   const hl = [];
-  if (end.rank) hl.push('סיימתם במקום ' + end.rank + (lg ? ' ב' + lg.nameHe : ''));
+  if (end.rank) hl.push('סיימתם במקום ' + end.rank + (lg ? ' ' + hePrefix('ב', lg.nameHe) : ''));
   if (stats.goals > 0) hl.push(stats.goals + ' שערים ו-' + stats.assists + ' בישולים');
   if (ovrEnd > ovrStart) hl.push('היכולת עלתה מ-' + ovrStart + ' ל-' + ovrEnd);
   for (const t of trophies) hl.push('🏆 ' + t.he);
@@ -1587,7 +1587,7 @@ export function getNational() {
   if (T) {
     const st = T.stage[p.nation];
     tournament = { key: T.key, he: tourHe(T.key), table: getTable(T.key), bracket: Object.keys(T.ko).length ? getBracket(T.key) : null,
-      stageHe: !nationInTour(T, p.nation) ? STAGE_HE.dnq : st ? (st === 'w' ? STAGE_HE.w : 'הודחה ב' + (STAGE_HE[st] || st)) : 'בטורניר' };
+      stageHe: !nationInTour(T, p.nation) ? STAGE_HE.dnq : st ? (st === 'w' ? STAGE_HE.w : hePrefix('הודחה ב', STAGE_HE[st] || st)) : 'בטורניר' };
   }
   const statusHe = S.retired ? 'פרשת' : isCalled ? 'זומנת לנבחרת!' : p.natLvl === 'none' ? 'עוד לא זומנת. תמשיך להתקדם.' : 'לא זומנת לפגרה הנוכחית';
   return {

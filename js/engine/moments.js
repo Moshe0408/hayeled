@@ -156,7 +156,11 @@ export function optionChance(type, key, ctx) {
   const o = MOMENTS[type].opts[key];
   let skill = 0;
   for (const k in o.w) skill += o.w[k] * (ctx.a[k] || 0);
-  const p = effBase(o, type) + clamp((skill - ctx.oppQ) * 0.011, TUNE.skillMin, TUNE.skillMax) + (ctx.form - 6.6) * 0.03 + (ctx.morale - 50) * 0.0012
+  const base = effBase(o, type);
+  // the skill edge scales with how realistic the option is: a 12% long shot must not become a 24% one
+  // just because the opponent is weak (that made always-shoot an exploit, e.g. vs minnow national teams)
+  const edge = clamp((skill - ctx.oppQ) * 0.011, TUNE.skillMin, TUNE.skillMax) * Math.min(1, 0.45 + base * 1.6);
+  const p = base + edge + (ctx.form - 6.6) * 0.03 + (ctx.morale - 50) * 0.0012
     + (ctx.energy < 40 ? -0.05 : 0) + (ctx.home ? 0.02 : 0) + (ctx.big ? -0.02 : 0);
   return clamp(p, 0.05, 0.95);
 }

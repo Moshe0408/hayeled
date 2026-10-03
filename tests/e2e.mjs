@@ -134,7 +134,11 @@ function watch(page, label) {
     problems.push(`[${label}] console.error: ${text}${loc ? ' @ ' + loc : ''}`);
   });
   page.on('pageerror', (e) => problems.push(`[${label}] pageerror: ${e && e.message || e}`));
-  page.on('request', (r) => allRequests.push(r.url()));
+  page.on('request', (r) => {
+    allRequests.push(r.url());
+    // js/config.js ships the real project: a test must never reach it
+    if (/.supabase.co/.test(r.url())) problems.push(`[${label}] request to the REAL Supabase: ${r.url()}`);
+  });
   page.on('requestfailed', (r) => {
     const u = r.url();
     const why = (r.failure() && r.failure().errorText) || '';
@@ -157,6 +161,8 @@ async function newPage(ctx, label) {
   await page.setUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36');
   await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9' });
   page.setDefaultTimeout(15000);
+  // no backend unless a scenario points the override at the mock (registered later, so it wins)
+  await page.evaluateOnNewDocument(() => { try { if (!localStorage.getItem('hy.dev.backend')) localStorage.setItem('hy.dev.backend', JSON.stringify({ off: true })); } catch { /* opaque origin */ } });
   watch(page, label);
   return page;
 }
@@ -170,8 +176,15 @@ async function goto(page, hash) {
   await sleep(350);
 }
 async function click(page, sel, timeout = 10000) {
-  const el = await page.waitForSelector(sel, { visible: true, timeout });
-  await el.click();
+  // The match screen re-renders cards on its own timer (outcome card -> next moment), so an element can
+  // be replaced between "found" and "clicked". Re-query and retry instead of failing the scenario.
+  for (let attempt = 0; ; attempt++) {
+    const el = await page.waitForSelector(sel, { visible: true, timeout });
+    try { await el.click(); return; } catch (e) {
+      if (attempt >= 3 || !/detached|not clickable|Node is either not visible/i.test(String(e && e.message))) throw e;
+      await sleep(150);
+    }
+  }
 }
 async function present(page, sel) {
   return page.evaluate((s) => {

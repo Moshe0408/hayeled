@@ -42,7 +42,7 @@ export function showWeekSummary(summary, extra = {}) {
     </div>
     ${s.trainingHe ? `<p class="small">🏋️ ${esc(s.trainingHe)}</p>` : ''}
     ${(s.linesHe || []).length ? `<ul class="ws-lines">${s.linesHe.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
-    ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">💬 ${esc(s.newMessages)} הודעות חדשות</span>` : ''}${s.newOffers ? `<span class="chip gold">📨 ${esc(s.newOffers)} הצעות חדשות</span>` : ''}</div>` : ''}
+    ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">💬 ${s.newMessages === 1 ? 'הודעה חדשה' : esc(s.newMessages) + ' הודעות חדשות'}</span>` : ''}${s.newOffers ? `<span class="chip gold">📨 ${s.newOffers === 1 ? 'הצעה חדשה' : esc(s.newOffers) + ' הצעות חדשות'}</span>` : ''}</div>` : ''}
     <button type="button" class="btn btn-primary btn-lg" data-testid="btn-week-ok" data-close>המשך</button>`;
   const close = openModal(html, { testid: 'week-summary', sheet: true, onClose: (why) => { if (why !== 'nav') afterSummary(s); } });
   return close;

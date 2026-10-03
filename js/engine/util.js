@@ -17,9 +17,21 @@ export function avg(arr, fn) {
   if (!arr || arr.length === 0) return 0;
   return sum(arr, fn) / arr.length;
 }
+/** Hebrew: after the prefixes ב/ל/כ the definite article ה is absorbed ("ב" + "הליגה" = "בליגה"). */
+export function hePrefix(prefix, name) {
+  const s = String(name || '');
+  return prefix + (s.length > 1 && s[0] === 'ה' ? s.slice(1) : s);
+}
 export function fill(template, vars) {
   if (typeof template !== 'string') return '';
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (m, k) => {
+  // "ב{comp}" -> "בליגה האירופית", not "בהליגה האירופית". Only competition names: club names such as
+  // "הפועל באר שבע" keep their ה ("להפועל").
+  return template.replace(/(^|[\s"'(״׳-])([בלכ])\{(comp|league|cup|tournament|tour)\}/g, (m, pre, letter, k) => {
+    if (vars && Object.prototype.hasOwnProperty.call(vars, k) && vars[k] !== null && vars[k] !== undefined && vars[k] !== '') {
+      return pre + hePrefix(letter, vars[k]);
+    }
+    return m;
+  }).replace(/\{([a-zA-Z0-9_]+)\}/g, (m, k) => {
     if (vars && Object.prototype.hasOwnProperty.call(vars, k) && vars[k] !== null && vars[k] !== undefined && vars[k] !== '') {
       return String(vars[k]);
     }

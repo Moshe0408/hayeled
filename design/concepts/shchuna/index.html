@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B1433">
+<title>הילד מהשכונה - קונספט "שכונה"</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800;900&family=Secular+One&family=Karantina:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- ============ icon sprite (24px grid, 2px round strokes, duotone fill at 20%) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15v-6H9v6H5.5A1.5 1.5 0 0 1 4 19z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="15" r="2.2" fill="currentColor"/></symbol>
+    <symbol id="i-table" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="3" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="M3.5 9.3h17M3.5 14.6h17M9 4v16" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-career" viewBox="0 0 24 24"><path d="M7 4h10v4.5a5 5 0 0 1-10 0z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.6 3.6M17 6h2.5a2.5 2.5 0 0 1-2.6 3.6M12 13.5V17M8.5 20.5h7l-1-3.5h-5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 3.5V17A2.5 2.5 0 0 1 4 14.5z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 10.5h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 2.8l2 1.9 2.7-.5 1 2.6 2.5 1.2-.4 2.8 1.4 2.4-2 1.9.1 2.8-2.7.7-1.4 2.4-2.6-1-2.6 1-1.4-2.4-2.7-.7.1-2.8-2-1.9 1.4-2.4-.4-2.8 2.5-1.2 1-2.6 2.7.5z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.6-7.5 10-7.5 10z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".25" stroke="currentColor" stroke-width="2"/><path d="M14.6 9.2a3.4 3.4 0 1 0 0 5.6M7.8 11h5M7.8 13h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6a1 1 0 0 0 1.5.9l10.6-6.8a1 1 0 0 0 0-1.7L9.5 4.3A1 1 0 0 0 8 5.2z" fill="currentColor"/></symbol>
+    <symbol id="i-ff" viewBox="0 0 24 24"><path d="M3.5 6.2v11.6a.8.8 0 0 0 1.3.6l7.5-5.8a.8.8 0 0 0 0-1.2L4.8 5.6a.8.8 0 0 0-1.3.6zM12 6.2v11.6a.8.8 0 0 0 1.3.6l7.5-5.8a.8.8 0 0 0 0-1.2l-7.5-5.8a.8.8 0 0 0-1.3.6z" fill="currentColor" transform="scale(-1 1) translate(-24 0)"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="m4 7 8 6 8-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 4.5c4-2 6 2 10 0s4 0 4 0v9s-1-2-4 0-6-2-10 0z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.2" r="4" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="M4.5 20.5c.8-4 3.8-6 7.5-6s6.7 2 7.5 6z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shop" viewBox="0 0 24 24"><path d="M5 8h14l-1.2 11.2a1.5 1.5 0 0 1-1.5 1.3H7.7a1.5 1.5 0 0 1-1.5-1.3z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 10V7a3.5 3.5 0 0 1 7 0v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-medal" viewBox="0 0 24 24"><path d="M8 3h3l2 5-3 1.2zM16 3h-3l-1 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="15" r="5.5" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="m12 12.3.9 1.8 2 .3-1.5 1.4.4 2-1.8-1-1.8 1 .4-2-1.5-1.4 2-.3z" fill="currentColor"/></symbol>
+    <symbol id="i-hall" viewBox="0 0 24 24"><path d="M3.5 9 12 4l8.5 5z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M5.5 10v7.5M9.8 10v7.5M14.2 10v7.5M18.5 10v7.5M3.5 20.5h17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor" fill-opacity=".25" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor" fill-opacity=".25" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m15.5 9.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-ball" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="m12 8.3 3.3 2.4-1.3 3.9h-4l-1.3-3.9z" fill="currentColor"/><path d="M12 8.3V3.6M15.3 10.7l4.4-1.4M14 14.6l2.7 3.8M10 14.6l-2.7 3.8M8.7 10.7 4.3 9.3" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></symbol>
+    <symbol id="i-cone" viewBox="0 0 24 24"><path d="M9.5 4h5l4 14h-13z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3.5 20h17M8 10h8M6.8 14.5h10.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-pass" viewBox="0 0 24 24"><circle cx="5.5" cy="17.5" r="2.5" fill="currentColor"/><path d="M8 15.5c3-6 7-8.5 11.5-9.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="2.5 3"/><path d="m16.5 4.5 3.2 1.4-1.6 3.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-run" viewBox="0 0 24 24"><circle cx="15" cy="4.8" r="2.2" fill="currentColor"/><path d="M9 9.5l3.5-2 3 3 3 .5M12.5 7.5 10.8 13l3.7 2.5-1 5M10.8 13 7 16.5H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shoot" viewBox="0 0 24 24"><path d="M3 19.5h4l3-7 4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="17.5" cy="15.5" r="3" fill="currentColor"/><path d="M14 8.5h7M15.5 5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-cross" viewBox="0 0 24 24"><path d="M4 18c4-10 10-13 16-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="2.5 3"/><circle cx="4.5" cy="18.5" r="2.3" fill="currentColor"/><path d="M17 3.5 20.5 6 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-backpass" viewBox="0 0 24 24"><path d="M19 12H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="2.5 3"/><path d="M9.5 7.5 5 12l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="19.5" cy="12" r="2.4" fill="currentColor"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2.9-1.2 1.8v.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z" fill="currentColor"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.3" fill="currentColor"/></symbol>
+    <!-- club crests -->
+    <symbol id="crest-mta" viewBox="0 0 64 72">
+      <path d="M32 2 60 9v26c0 17-12 28-28 35C16 63 4 52 4 35V9z" fill="#0A47B5"/>
+      <path d="M32 6.5 56 12.6V35c0 14.6-10 24.4-24 30.6C18 59.4 8 49.6 8 35V12.6z" fill="#FFD200"/>
+      <path d="M8 30h48v9H8z" fill="#0A47B5"/>
+      <path d="m32 15 4.8 8.3h-9.6zm0 25-4.8-8.3h9.6z" fill="none"/>
+      <g fill="none" stroke="#0A47B5" stroke-width="2.6" stroke-linejoin="round"><path d="m32 13 6 10.4H26zM32 26.8l-6-10.4h12z" transform="translate(0 0)"/></g>
+      <text x="32" y="56.5" text-anchor="middle" font-family="Secular One, Rubik" font-size="13" fill="#0A47B5">מכבי</text>
+    </symbol>
+    <symbol id="crest-btr" viewBox="0 0 64 72">
+      <path d="M32 2 60 9v26c0 17-12 28-28 35C16 63 4 52 4 35V9z" fill="#FFD200"/>
+      <path d="M32 6.5 56 12.6V35c0 14.6-10 24.4-24 30.6C18 59.4 8 49.6 8 35V12.6z" fill="#15171C"/>
+      <path d="M22 9.2h8v58.4c-2.8-1.4-5.5-3-8-4.7zM34 9.2h8v53.7c-2.5 1.7-5.2 3.3-8 4.7z" fill="#FFD200"/>
+      <path d="M8 29h48v12H8z" fill="#FFD200"/>
+      <text x="32" y="39.6" text-anchor="middle" font-family="Secular One, Rubik" font-size="11.5" fill="#15171C">בית"ר</text>
+    </symbol>
+    <symbol id="flag-il" viewBox="0 0 30 22"><rect width="30" height="22" rx="2.5" fill="#fff"/><rect y="3" width="30" height="3" fill="#1F4FD8"/><rect y="16" width="30" height="3" fill="#1F4FD8"/><g fill="none" stroke="#1F4FD8" stroke-width="1.2"><path d="m15 6.6 3.5 6.1h-7z"/><path d="m15 15.4-3.5-6.1h7z"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="device" id="app">
+  <!-- prototype nav (hidden with ?clean) -->
+  <nav class="proto-nav" aria-label="מסכי האב-טיפוס">
+    <button data-go="title" class="on">פתיחה</button><button data-go="hub">בית</button><button data-go="match">משחק חי</button>
+  </nav>
+
+  <!-- ===================== TITLE ===================== -->
+  <section class="screen screen-title active" id="s-title" aria-label="מסך פתיחה">
+    <canvas class="title-canvas" id="titleCanvas" aria-hidden="true"></canvas>
+    <img class="title-kid" id="titleKid" src="kid.svg" alt="" aria-hidden="true">
+    <header class="title-logo"><img src="logo.svg" alt="הילד מהשכונה - מהשכונה ועד הבאלון ד'אור"></header>
+    <div class="title-actions">
+      <button class="btn btn-primary btn-xl" data-go="hub">
+        <span class="btn-ico"><svg><use href="#i-ball"/></svg></span>
+        <span>קריירה חדשה</span>
+      </button>
+      <button class="btn btn-ghost btn-continue" data-go="hub">
+        <span class="cont-avatar"><svg><use href="#crest-mta"/></svg></span>
+        <span class="cont-text"><b>המשך קריירה</b><small>יוסי אזולאי · מכבי ת"א · שבוע 4</small></span>
+        <span class="cont-ovr">53</span>
+      </button>
+      <div class="title-row">
+        <button class="icon-btn" aria-label="היכל התהילה"><svg><use href="#i-hall"/></svg><span>היכל התהילה</span></button>
+        <button class="icon-btn" aria-label="איך משחקים"><svg><use href="#i-help"/></svg><span>איך משחקים</span></button>
+        <button class="icon-btn" aria-label="הגדרות"><svg><use href="#i-gear"/></svg><span>הגדרות</span></button>
+      </div>
+      <p class="title-ver">גרסה 1.1 · נבנה בשכונה</p>
+    </div>
+  </section>
+
+  <!-- ===================== HUB ===================== -->
+  <section class="screen screen-hub" id="s-hub" aria-label="מסך הבית">
+    <header class="topbar">
+      <div class="tb-week"><img src="emblem.svg" alt="" class="tb-emblem"><div><b>שבוע 1</b><small>אוגוסט · עונת 2026/27</small></div></div>
+      <div class="tb-end">
+        <span class="pill pill-coin"><svg><use href="#i-coin"/></svg>1,500 €</span>
+        <button class="icon-round" aria-label="הגדרות"><svg><use href="#i-gear"/></svg></button>
+      </div>
+    </header>
+
+    <div class="hub-scroll">
+      <!-- player hero -->
+      <section class="player-hero">
+        <div class="ph-bg" aria-hidden="true">
+          <svg viewBox="0 0 390 220" preserveAspectRatio="xMidYMax slice"><defs><linearGradient id="phsky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1A1E57"/><stop offset=".6" stop-color="#5A2C6E"/><stop offset="1" stop-color="#E5654A"/></linearGradient></defs>
+            <rect width="390" height="220" fill="url(#phsky)"/>
+            <circle cx="96" cy="196" r="70" fill="#FFB25A" opacity=".55"/>
+            <g fill="#0E1538"><rect x="0" y="120" width="70" height="100"/><rect x="62" y="150" width="56" height="70"/><rect x="126" y="134" width="44" height="86"/><rect x="292" y="110" width="98" height="110"/><rect x="236" y="160" width="62" height="60"/><rect x="176" y="172" width="64" height="48"/>
+              <rect x="14" y="112" width="14" height="6" rx="3"/><path d="M32 120l5-10h12l-5 10z"/><rect x="304" y="102" width="14" height="6" rx="3"/><path d="M322 110l5-10h12l-5 10z"/></g>
+            <g fill="#FFB35C" opacity=".85"><rect x="10" y="134" width="7" height="5"/><rect x="40" y="148" width="7" height="5"/><rect x="24" y="176" width="7" height="5"/><rect x="74" y="164" width="7" height="5"/><rect x="138" y="150" width="7" height="5"/><rect x="306" y="126" width="7" height="5"/><rect x="350" y="140" width="7" height="5"/><rect x="330" y="170" width="7" height="5"/><rect x="250" y="176" width="7" height="5"/></g>
+          </svg>
+        </div>
+        <div class="ph-content">
+          <div class="fut-card" aria-label="כרטיס שחקן, דירוג 53">
+            <div class="fut-shine"></div>
+            <div class="fut-top">
+              <div class="fut-ovr">53</div>
+              <div class="fut-pos">חלוץ</div>
+              <svg class="fut-flag"><use href="#flag-il"/></svg>
+              <svg class="fut-crest"><use href="#crest-mta"/></svg>
+            </div>
+            <svg class="fut-portrait" viewBox="0 0 120 110" aria-hidden="true">
+              <defs><linearGradient id="skinG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E7B489"/><stop offset="1" stop-color="#B9784C"/></linearGradient>
+                <linearGradient id="shirtG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE15A"/><stop offset="1" stop-color="#F2B800"/></linearGradient></defs>
+              <path d="M10 110c2-22 14-32 34-36l16 10 16-10c20 4 32 14 34 36z" fill="url(#shirtG)"/>
+              <path d="M44 74l16 10 16-10 4 3-20 16-20-16z" fill="#0A47B5"/>
+              <path d="M28 84c6 6 8 16 8 26M92 84c-6 6-8 16-8 26" stroke="#0A47B5" stroke-width="3" fill="none" opacity=".6"/>
+              <path d="M51 60h18v18l-9 6-9-6z" fill="#B9784C"/>
+              <ellipse cx="60" cy="42" rx="19" ry="23" fill="url(#skinG)"/>
+              <ellipse cx="41.5" cy="45" rx="3.4" ry="5.2" fill="#C98E62"/><ellipse cx="78.5" cy="45" rx="3.4" ry="5.2" fill="#C98E62"/>
+              <path d="M40.5 40c-1.8-14 6-23 19.5-23 13 0 21 8 19.5 23-2-5-4-8-6-9.5-7 3.5-19 4-28 .6-2 1.5-3.8 4.6-5 8.9z" fill="#1E1611"/>
+              <path d="M48 47.5c2.4-1.2 5-1.2 7.4 0M64.6 47.5c2.4-1.2 5-1.2 7.4 0" stroke="#3A2618" stroke-width="2" stroke-linecap="round" fill="none"/>
+              <path d="M55 59c3 1.6 7 1.6 10 0" stroke="#8A4E2C" stroke-width="2" stroke-linecap="round" fill="none"/>
+            </svg>
+            <div class="fut-name">אזולאי</div>
+            <div class="fut-stats">
+              <span><b>68</b>מהירות</span><span><b>61</b>כדרור</span>
+              <span><b>57</b>בעיטה</span><span><b>22</b>הגנה</span>
+              <span><b>49</b>מסירה</span><span><b>45</b>פיזיות</span>
+            </div>
+          </div>
+          <div class="ph-info">
+            <h1 class="ph-name">יוסי אזולאי</h1>
+            <p class="ph-sub">חלוץ · גיל 15 · נוער</p>
+            <div class="ph-pot"><span class="stars" aria-label="פוטנציאל 2.5 מתוך 5"><svg><use href="#i-star"/></svg><svg><use href="#i-star"/></svg><svg class="half"><use href="#i-star"/></svg><svg class="off"><use href="#i-star"/></svg><svg class="off"><use href="#i-star"/></svg></span><span class="pot-range">65-77</span></div>
+            <div class="ph-club"><svg><use href="#crest-mta"/></svg><div><b>מכבי תל אביב</b><small>ליגת העל לנוער · מקום 10</small></div></div>
+            <dl class="ph-money"><div><dt>שכר</dt><dd>480 €<small>/שבוע</small></dd></div><div><dt>שווי</dt><dd>390K €</dd></div></dl>
+          </div>
+        </div>
+      </section>
+
+      <!-- status -->
+      <section class="card status">
+        <div class="meter"><div class="meter-h"><span class="mi mi-energy"><svg><use href="#i-bolt"/></svg></span>אנרגיה<b>90</b></div><div class="seg" style="--v:9"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        <div class="meter"><div class="meter-h"><span class="mi mi-morale"><svg><use href="#i-heart"/></svg></span>מורל<b>60</b></div><div class="seg seg-morale" style="--v:6"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        <div class="form"><span>כושר</span><div class="form-dots"><i class="w">נ</i><i class="d">ת</i><i class="w">נ</i><i class="e"></i><i class="e"></i></div></div>
+      </section>
+
+      <!-- next fixture -->
+      <section class="card fixture">
+        <div class="fx-head">
+          <div><span class="kicker">המשחק הבא</span><h2>מחזור 1 · ליגת העל לנוער</h2></div>
+          <span class="chip chip-gold">חלון העברות פתוח</span>
+        </div>
+        <div class="fx-teams">
+          <div class="fx-team"><svg class="crest"><use href="#crest-mta"/></svg><b>מכבי ת"א</b><small>בית · מקום 10</small></div>
+          <div class="fx-mid"><span class="fx-vs">נגד</span><small>שבת · 20:00</small><small class="fx-venue"><svg><use href="#i-pin"/></svg>בלומפילד</small></div>
+          <div class="fx-team"><svg class="crest"><use href="#crest-btr"/></svg><b>בית"ר ירושלים</b><small>חוץ · מקום 4</small></div>
+        </div>
+        <div class="fx-actions">
+          <button class="btn btn-primary btn-play" data-go="match"><svg class="ico"><use href="#i-play"/></svg>שחק את השבוע</button>
+          <button class="btn btn-square" aria-label="סימולציה מהירה"><svg><use href="#i-ff"/></svg></button>
+        </div>
+      </section>
+
+      <!-- training -->
+      <section class="card training">
+        <div class="sec-h"><h2 class="chalk-u">אימון השבוע</h2><small>+2 אנרגיה לאימון מאוזן</small></div>
+        <div class="chips" role="radiogroup" aria-label="סוג אימון">
+          <button class="tchip on" role="radio" aria-checked="true"><svg><use href="#i-cone"/></svg>מאוזן</button>
+          <button class="tchip" role="radio" aria-checked="false"><svg><use href="#i-shoot"/></svg>בעיטות לשער</button>
+          <button class="tchip" role="radio" aria-checked="false"><svg><use href="#i-pass"/></svg>טכניקה</button>
+          <button class="tchip" role="radio" aria-checked="false"><svg><use href="#i-run"/></svg>כושר</button>
+        </div>
+        <p class="hint">קצת מהכול. התקדמות יציבה בכל התכונות.</p>
+      </section>
+
+      <!-- tiles -->
+      <section class="tiles">
+        <button class="tile"><span class="t-ico t-orange"><svg><use href="#i-mail"/></svg><em>3</em></span>הצעות</button>
+        <button class="tile"><span class="t-ico t-blue"><svg><use href="#i-flag"/></svg></span>נבחרת</button>
+        <button class="tile"><span class="t-ico t-violet"><svg><use href="#i-user"/></svg></span>פרופיל</button>
+        <button class="tile"><span class="t-ico t-green"><svg><use href="#i-shop"/></svg></span>חנות</button>
+        <button class="tile"><span class="t-ico t-gold"><svg><use href="#i-medal"/></svg></span>פרסים</button>
+        <button class="tile"><span class="t-ico t-coral"><svg><use href="#i-hall"/></svg></span>היכל התהילה</button>
+      </section>
+    </div>
+
+    <nav class="tabbar" aria-label="ניווט ראשי">
+      <button class="tab on" aria-current="page"><svg><use href="#i-home"/></svg>בית</button>
+      <button class="tab"><svg><use href="#i-calendar"/></svg>לוח</button>
+      <button class="tab"><svg><use href="#i-table"/></svg>טבלאות</button>
+      <button class="tab"><svg><use href="#i-career"/></svg>קריירה</button>
+      <button class="tab"><svg><use href="#i-chat"/></svg>הודעות<em class="badge">2</em></button>
+    </nav>
+  </section>
+
+  <!-- ===================== MATCH ===================== -->
+  <section class="screen screen-match" id="s-match" aria-label="משחק חי">
+    <header class="scorebug">
+      <button class="icon-round sb-back" data-go="hub" aria-label="חזרה"><svg><use href="#i-back"/></svg></button>
+      <div class="sb-main">
+        <div class="sb-team sb-home"><svg class="crest"><use href="#crest-mta"/></svg><b>מת"א</b></div>
+        <div class="sb-score"><span id="scoreH">1</span><i></i><span id="scoreA">0</span></div>
+        <div class="sb-team sb-away"><b>בית"ר</b><svg class="crest"><use href="#crest-btr"/></svg></div>
+      </div>
+      <button class="icon-round sb-sound" id="btnSound" aria-label="הפעלת קול קהל" aria-pressed="false"><svg><use href="#i-mute"/></svg></button>
+      <div class="sb-meta"><span class="live"><i></i>שידור חי</span><span class="sb-clock" id="clock">10'</span><span class="sb-comp">ליגת העל לנוער · מחזור 1</span></div>
+    </header>
+
+    <div class="pitch-wrap">
+      <canvas id="matchCanvas" class="match-canvas" aria-label="המחשה חיה של המשחק"></canvas>
+      <div class="chant" id="chant" aria-live="polite"><svg><use href="#i-sound"/></svg><span>אוהדים: <b>"יאללה יאללה מכבי!"</b></span></div>
+    </div>
+
+    <div class="match-below">
+      <section class="moment" id="moment">
+        <div class="mo-head">
+          <span class="chip chip-attack"><i class="dot"></i>רגע מפתח · התקפה</span>
+          <span class="mo-min" id="moMin">10'</span>
+          <span class="mo-count">1 / 4</span>
+        </div>
+        <p class="mo-text" id="moText">אחד על אחד באגף! <b>אזולאי</b> מול המגן של בית"ר.</p>
+        <div class="choices" id="choices">
+          <button class="choice" data-act="dribble-shot" data-p="0.35">
+            <span class="ch-ico"><svg><use href="#i-shoot"/></svg></span>
+            <span class="ch-t"><b>לעבור ולבעוט</b><small>תגמול גבוה · סיכון גבוה</small></span>
+            <span class="odds odds-low"><i></i><i></i><i></i><em>נמוך</em></span>
+          </button>
+          <button class="choice" data-act="cross" data-p="0.55">
+            <span class="ch-ico"><svg><use href="#i-cross"/></svg></span>
+            <span class="ch-t"><b>לעבור ולהגביה</b><small>בישול לחלוץ ברחבה</small></span>
+            <span class="odds odds-mid"><i></i><i></i><i></i><em>בינוני</em></span>
+          </button>
+          <button class="choice" data-act="pass-back" data-p="0.9">
+            <span class="ch-ico"><svg><use href="#i-backpass"/></svg></span>
+            <span class="ch-t"><b>להחזיר אחורה</b><small>שומרים על הכדור</small></span>
+            <span class="odds odds-high"><i></i><i></i><i></i><em>גבוה</em></span>
+          </button>
+        </div>
+        <div class="mo-result" id="moResult" hidden></div>
+      </section>
+
+      <div class="rating"><span>ציון עד עכשיו</span><b id="rating">6.3</b></div>
+      <ol class="feed" id="feed">
+        <li class="ev-goal"><span class="ev-min">6'</span><span>גול! אליה אשכנזי נוגח לרשת. 1-0.</span></li>
+        <li><span class="ev-min">1'</span><span>שריקת פתיחה בבלומפילד. מישהו מצלם את המשחק בטלפון, כמו תמיד.</span></li>
+      </ol>
+      <button class="btn btn-ghost btn-auto"><svg class="ico"><use href="#i-ff"/></svg>שחק אוטומטית את שאר המשחק</button>
+    </div>
+  </section>
+</div>
+
+<script src="title-scene.js"></script>
+<script src="match-scene.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

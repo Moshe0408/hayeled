@@ -1,0 +1,148 @@
+/* theme.css: "Night Stadium Premium" look, layered on top of app.css.
+   Floodlit midnight navy, glass surfaces, gold for the primary action, teal floodlight accents. */
+
+:root{
+  --bg:#050B1A; --bg2:#081530; --card:#0B1E42; --card2:#132B57; --line:#1C3561;
+  --text:#EEF4FF; --muted:#AFC0DD; --ink-3:#7086AB;
+  --gold:#F4C35A; --gold-hi:#FFE7A3; --gold-lo:#C98E2B;
+  --teal:#2FE3CF; --teal-ink:#7DF0E2; --blue:#7DF0E2;
+  --pitch:#34D399; --pitch2:#15A37A; --red:#FF5A6E; --amber:#FFB547; --live:#FF3B4E;
+  --glass:rgba(8,21,48,.86);
+  --r:20px; --r-sm:12px;
+  --surface:linear-gradient(180deg,rgba(23,48,94,.72) 0%,rgba(10,24,52,.82) 100%);
+  --surface-hi:linear-gradient(180deg,rgba(30,62,118,.8) 0%,rgba(12,30,64,.86) 100%);
+  --sh-1:0 1px 0 rgba(255,255,255,.06) inset,0 6px 18px rgba(0,0,0,.35);
+  --sh-2:0 1px 0 rgba(255,255,255,.08) inset,0 14px 36px rgba(0,0,0,.5);
+  --glow-gold:0 10px 28px rgba(244,195,90,.32),0 0 0 1px rgba(255,231,163,.35) inset;
+  --ease-out:cubic-bezier(.2,.8,.2,1); --ease-spring:cubic-bezier(.34,1.56,.64,1);
+}
+
+html{background:var(--bg)}
+body{
+  background:
+    radial-gradient(70% 40% at 12% -6%,rgba(47,227,207,.16),transparent 70%),
+    radial-gradient(70% 40% at 88% -6%,rgba(47,227,207,.12),transparent 70%),
+    radial-gradient(90% 50% at 50% 110%,rgba(52,211,153,.08),transparent 70%),
+    linear-gradient(180deg,#081530 0%,var(--bg) 45%,#03070F 100%);
+  background-attachment:fixed;-webkit-font-smoothing:antialiased;
+}
+body::before{opacity:.035;background:repeating-linear-gradient(90deg,#34D399 0 46px,transparent 46px 92px)}
+h1,h2,h3,.card-title{letter-spacing:.005em}
+svg.i{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- surfaces ---------- */
+.card{background:var(--surface);border:0;border-radius:var(--r);box-shadow:var(--sh-2),0 0 0 1px rgba(125,160,220,.13) inset}
+.card-title{font-weight:800}
+.hub-head{position:relative;overflow:hidden;isolation:isolate;
+  background:radial-gradient(120% 90% at 85% -20%,rgba(244,195,90,.22),transparent 55%),
+             radial-gradient(90% 80% at 0% 0%,rgba(47,227,207,.14),transparent 60%),var(--surface-hi);
+  box-shadow:var(--sh-2),0 0 0 1px rgba(255,231,163,.28) inset}
+.hub-head::after{content:"";position:absolute;inset:-40% -20%;z-index:-1;pointer-events:none;
+  background:linear-gradient(115deg,transparent 42%,rgba(255,231,163,.12) 50%,transparent 58%)}
+.hero-card{background:radial-gradient(100% 120% at 50% 0%,rgba(244,195,90,.18),transparent 70%),var(--surface)}
+.ovr{background:radial-gradient(circle at 50% 30%,#FFE7A3,#F4C35A 45%,#C98E2B);color:#0A1838;box-shadow:0 6px 18px rgba(244,195,90,.35),0 0 0 2px rgba(255,255,255,.35) inset}
+.ovr small{color:rgba(10,24,56,.7);font-weight:800}
+.ovr.tone-good,.ovr.tone-gold{box-shadow:0 6px 18px rgba(244,195,90,.35),0 0 0 2px rgba(255,255,255,.4) inset}
+.ovr.tone-elite{box-shadow:0 0 0 2px #fff inset,0 0 26px rgba(244,195,90,.75)}
+.note{background:rgba(47,227,207,.08);border-color:rgba(47,227,207,.25)}
+
+/* ---------- buttons ---------- */
+.btn{border-radius:16px;font-weight:800;transition:transform .12s var(--ease-out),filter .2s}
+.btn:active{transform:scale(.975)}
+.btn-primary,.btn-gold{position:relative;overflow:hidden;color:#0A1838;font-family:var(--font-d);font-weight:900;border-color:transparent;
+  background:linear-gradient(180deg,var(--gold-hi) 0%,var(--gold) 42%,#E2A63D 72%,var(--gold-lo) 100%);
+  box-shadow:var(--glow-gold),0 2px 0 rgba(255,255,255,.55) inset,0 -3px 0 rgba(120,70,10,.35) inset}
+.btn-primary small,.btn-gold small{color:rgba(10,24,56,.72)}
+.btn-gold::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.6) 45%,transparent 60%);transform:translateX(-120%);animation:sheen 4.2s 1.2s infinite}
+@keyframes sheen{0%{transform:translateX(120%)}22%,100%{transform:translateX(-120%)}}
+.btn-glass{background:var(--surface);border-color:transparent;box-shadow:var(--sh-1),0 0 0 1px rgba(125,240,226,.18) inset;color:var(--text)}
+.btn-ghost{background:rgba(255,255,255,.04);border-color:transparent;box-shadow:0 0 0 1px rgba(175,192,221,.16) inset;color:var(--muted)}
+.chip{border-color:rgba(175,192,221,.18)}
+.chip.on,.chip.sel,.chip[aria-pressed="true"]{border-color:var(--gold);color:var(--gold-hi);background:rgba(244,195,90,.12)}
+
+/* ---------- top bar & floating tab bar ---------- */
+.topbar{background:linear-gradient(180deg,rgba(5,11,26,.96),rgba(5,11,26,.78));border-bottom:1px solid rgba(28,53,97,.7)}
+.tabbar{bottom:calc(var(--sab) + 8px);width:calc(100% - 20px);max-width:500px;border-radius:22px;border:0;
+  background:linear-gradient(180deg,rgba(16,36,74,.92),rgba(6,16,38,.95));
+  box-shadow:0 14px 34px rgba(0,0,0,.55),0 0 0 1px rgba(125,160,220,.16) inset;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding-bottom:0}
+body.has-tabs .view{padding-bottom:calc(var(--tab-h) + var(--sab) + 34px)}
+.tab{color:var(--ink-3);font-weight:700}
+.tab.on{color:var(--text)}
+.tab.on svg{color:var(--gold)}
+.tab.on::before{background:var(--gold);box-shadow:0 0 12px var(--gold)}
+
+/* ---------- title screen ---------- */
+.title-screen{padding-bottom:24px}
+.title-hero{position:relative;margin:calc(-12px - var(--sat)) -12px 0;height:min(64vh,560px);min-height:430px;overflow:hidden;background:#03070F}
+.title-hero .hero-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.title-hero::after{content:"";position:absolute;inset:auto 0 0 0;height:90px;pointer-events:none;background:linear-gradient(180deg,transparent,var(--bg))}
+.title-logo-wrap{position:relative;z-index:2;margin:0;padding:calc(var(--sat) + 34px) 22px 0;display:flex;justify-content:center}
+.title-logo{width:min(330px,84%);height:auto;filter:drop-shadow(0 14px 30px rgba(0,0,0,.55)) drop-shadow(0 0 40px rgba(47,227,207,.12));animation:logoIn .9s var(--ease-spring) both}
+@keyframes logoIn{from{opacity:0;transform:translateY(-12px) scale(.94)}to{opacity:1;transform:none}}
+.title-actions{position:relative;z-index:3;margin:-46px 0 6px}
+.title-actions .btn-xl{min-height:62px;font-size:20px;border-radius:18px}
+.slot-card{background:var(--surface);border:0;border-radius:16px;box-shadow:var(--sh-1),0 0 0 1px rgba(125,160,220,.14) inset}
+.slot-card.last{box-shadow:var(--sh-1),0 0 0 1.5px rgba(244,195,90,.6) inset}
+.slot-card.is-empty{background:rgba(255,255,255,.02);box-shadow:0 0 0 1px rgba(125,160,220,.22) inset}
+.slot-ovr b{color:var(--gold-hi)}
+
+/* ---------- live match ---------- */
+.match-shell{margin:-12px -12px 0}
+.pitch-wrap{position:relative;height:min(450px,54vh);min-height:330px;overflow:hidden;background:#020611;cursor:pointer}
+.pitch-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.pitch-wrap::after{content:"";position:absolute;inset:auto 0 0 0;height:44px;background:linear-gradient(180deg,transparent,var(--bg));pointer-events:none}
+.sb-slot{position:absolute;z-index:3;top:0;inset-inline:0;pointer-events:none}
+.sb-slot .scorebug{position:static;margin:0;padding:calc(var(--sat) + 8px) 10px 10px;border:0;
+  background:linear-gradient(180deg,rgba(3,7,15,.82),rgba(3,7,15,.35) 75%,transparent)}
+.sb-slot .sb-score{font-size:30px;padding:2px 12px;border-radius:12px;background:linear-gradient(180deg,#F8FBFF,#D9E3F2);color:#081530;box-shadow:0 8px 20px rgba(0,0,0,.45)}
+.sb-slot .sb-score i{color:#7C8BA6}
+.sb-slot .sb-min{background:rgba(255,59,78,.18);color:#FFD0D5;box-shadow:0 0 0 1px rgba(255,59,78,.45) inset}
+.sb-slot .sb-team b{text-shadow:0 2px 6px rgba(0,0,0,.8)}
+.sb-slot .sb-team.mine b{color:var(--gold-hi)}
+.sb-slot .sb-comp{color:var(--muted);text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.hud-top{position:absolute;z-index:3;bottom:52px;inset-inline:12px;display:flex;justify-content:space-between;align-items:center;pointer-events:none}
+.chant{display:flex;align-items:center;gap:7px;max-width:74%;padding:5px 11px 5px 6px;border-radius:999px;background:rgba(3,8,20,.66);
+  box-shadow:0 0 0 1px rgba(244,195,90,.35) inset;font-size:12.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chant .drum{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;flex:none;background:linear-gradient(160deg,var(--gold-hi),var(--gold-lo));color:#0A1838}
+.chant .drum svg{width:15px;height:15px;stroke-width:2}
+.chant.beat .drum{animation:thump .5s ease-out}
+@keyframes thump{0%{transform:scale(1.25)}100%{transform:scale(1)}}
+.chant em{font-style:normal;color:var(--gold-hi)}
+.mute{pointer-events:auto;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;border:0;background:rgba(3,8,20,.66);box-shadow:0 0 0 1px rgba(175,192,221,.25) inset;color:var(--muted)}
+.mute svg{width:19px;height:19px}
+.mute.on{color:var(--teal);box-shadow:0 0 0 1px rgba(47,227,207,.6) inset}
+.coach-bubble{position:absolute;z-index:3;max-width:190px;padding:8px 12px;border-radius:14px 14px 4px 14px;background:#fff;color:#081530;
+  font-family:var(--font-d);font-weight:900;font-size:15px;line-height:1.15;box-shadow:0 10px 24px rgba(0,0,0,.45);transform-origin:100% 100%;transition:opacity .2s;pointer-events:none}
+.coach-bubble::after{content:"";position:absolute;bottom:-7px;right:10px;border:8px solid transparent;border-top-color:#fff;border-bottom:0;border-right:0}
+.coach-bubble small{display:block;font-family:var(--font);font-weight:700;font-size:10.5px;color:#55698E;margin-bottom:2px}
+.coach-bubble.angry{background:#FF5A6E;color:#fff}.coach-bubble.angry::after{border-top-color:#FF5A6E}.coach-bubble.angry small{color:#FFE1E5}
+.coach-bubble.happy{background:linear-gradient(180deg,var(--gold-hi),var(--gold))}.coach-bubble.happy::after{border-top-color:var(--gold)}
+.coach-bubble.in{animation:bubbleIn .42s var(--ease-spring)}
+@keyframes bubbleIn{from{transform:scale(.4) rotate(6deg);opacity:0}to{transform:none;opacity:1}}
+.goal-flash{position:absolute;z-index:4;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;font-size:inherit;background:none;animation:none}
+.goal-flash b{font-family:var(--font-d);font-style:italic;font-weight:900;font-size:84px;line-height:1;
+  background:linear-gradient(180deg,#FFF6D6 10%,var(--gold) 55%,var(--gold-lo));-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 6px 0 rgba(8,21,48,.85)) drop-shadow(0 0 30px rgba(244,195,90,.6))}
+.goal-flash.show{animation:goalIn 2.6s var(--ease-out) forwards}
+@keyframes goalIn{0%{opacity:0;transform:scale(2.2)}12%{opacity:1;transform:scale(.94)}20%{transform:scale(1.04)}26%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.08)}}
+.goal-flash.save b{font-size:58px;background:linear-gradient(180deg,#fff,#9FD8FF);-webkit-background-clip:text;background-clip:text}
+.match-body{position:relative;z-index:2;margin-top:-26px;padding:0 12px 18px}
+.match-body .moment{border:0;background:linear-gradient(180deg,rgba(23,48,94,.94),rgba(9,22,48,.97));box-shadow:var(--sh-2),0 0 0 1px rgba(47,227,207,.3) inset}
+.match-body .mo-min{font-family:var(--font-d);font-weight:900;font-size:20px;color:var(--gold)}
+.match-body .mo-text{font-size:16.5px;font-weight:600;line-height:1.45}
+.mo-opt{min-height:56px;border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02));border-color:transparent;
+  box-shadow:0 0 0 1px rgba(175,192,221,.2) inset;font-family:var(--font-d);font-weight:800;font-size:16px;text-align:start;transition:transform .12s,box-shadow .2s,opacity .3s}
+.mo-opt.picked{box-shadow:0 0 0 1.5px var(--gold) inset,0 0 24px rgba(244,195,90,.25);background:linear-gradient(180deg,rgba(244,195,90,.18),rgba(244,195,90,.04))}
+.mo-opts.locked .mo-opt:not(.picked){opacity:.35}
+.mo-opts.locked .mo-opt{pointer-events:none}
+.match-body .match-pre,.match-body .match-ended{text-align:center}
+.feed-row{border-radius:12px;background:rgba(255,255,255,.03)}
+
+@media (prefers-reduced-motion:reduce){
+  .btn-gold::after,.title-logo,.goal-flash.show,.coach-bubble.in{animation:none!important}
+}
+
+/* weekly training: every option visible (rest included), no hidden horizontal scroller */
+.hub .chips.scroll{flex-wrap:wrap;overflow:visible;white-space:normal}
+.hub .chips.scroll .chip{flex:0 0 auto}
