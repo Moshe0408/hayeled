@@ -1,0 +1,8 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Test tooling for hayeled. Only e2e.mjs needs puppeteer-core (npm i in this folder, or set PUPPETEER_CORE_PATH).",
+  "devDependencies": {
+    "puppeteer-core": "^24"
+  }
+}

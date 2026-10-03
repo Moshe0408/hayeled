@@ -1,0 +1,15 @@
+# dependencies (only tests/ may have devDependencies, e.g. puppeteer-core)
+node_modules/
+tests/node_modules/
+
+# test output and screenshots
+tests/out/
+tests/output/
+screenshots/
+*.screenshot.png
+
+# logs and OS junk
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini

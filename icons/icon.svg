@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>הילד מהשכונה</title>
+  <defs>
+    <radialGradient id="bg" cx="256" cy="200" r="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1a2b4a"/><stop offset="1" stop-color="#0b1220"/>
+    </radialGradient>
+    <radialGradient id="ball" cx="296" cy="217" r="204.8" gradientUnits="userSpaceOnUse">
+      <stop offset="0.35" stop-color="#f8fafc"/><stop offset="1" stop-color="#c9d3e0"/>
+    </radialGradient>
+    <clipPath id="round"><rect width="512" height="512" rx="104"/></clipPath>
+    <clipPath id="ballClip"><circle cx="256" cy="262" r="128"/></clipPath>
+    <clipPath id="hillClip"><circle cx="256" cy="860" r="450"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="104" fill="url(#bg)"/>
+  <circle cx="92" cy="92" r="41.6" fill="#fff4c2" opacity="0.12"/><circle cx="92" cy="92" r="13" fill="#fff4c2"/>
+  <circle cx="132" cy="70" r="28.8" fill="#fff4c2" opacity="0.12"/><circle cx="132" cy="70" r="9" fill="#fff4c2"/>
+  <g clip-path="url(#round)">
+    <circle cx="256" cy="860" r="470" fill="#1fbf5a"/>
+    <circle cx="256" cy="860" r="450" fill="#127a3a"/>
+    <ellipse cx="256" cy="402" rx="121.6" ry="16" fill="#0b1220" opacity="0.45" clip-path="url(#hillClip)"/>
+  </g>
+  <circle cx="256" cy="262" r="135" fill="#0b1220"/>
+  <circle cx="256" cy="262" r="128" fill="url(#ball)"/>
+  <g clip-path="url(#ballClip)" fill="#141c2b" stroke="#141c2b" stroke-width="8.4" stroke-linecap="round">
+    <polygon points="256,218 297.8,248.4 281.9,297.6 230.1,297.6 214.2,248.4" stroke="none"/>
+    <polygon points="373.6,100.2 391.7,156.1 344.2,190.6 296.6,156.1 314.8,100.2" stroke="none"/>
+    <polygon points="446.2,323.8 398.7,358.4 351.1,323.8 369.3,267.9 428,267.9" stroke="none"/>
+    <polygon points="256,462 208.4,427.5 226.6,371.5 285.4,371.5 303.6,427.5" stroke="none"/>
+    <polygon points="65.8,323.8 84,267.9 142.7,267.9 160.9,323.8 113.3,358.4" stroke="none"/>
+    <polygon points="138.4,100.2 197.2,100.2 215.4,156.1 167.8,190.6 120.3,156.1" stroke="none"/>
+    <line x1="256" y1="218" x2="256" y2="172"/>
+    <line x1="256" y1="172" x2="296.6" y2="156.1"/>
+    <line x1="256" y1="172" x2="215.4" y2="156.1"/>
+    <line x1="297.8" y1="248.4" x2="341.6" y2="234.2"/>
+    <line x1="341.6" y1="234.2" x2="369.3" y2="267.9"/>
+    <line x1="341.6" y1="234.2" x2="344.2" y2="190.6"/>
+    <line x1="281.9" y1="297.6" x2="308.9" y2="334.8"/>
+    <line x1="308.9" y1="334.8" x2="285.4" y2="371.5"/>
+    <line x1="308.9" y1="334.8" x2="351.1" y2="323.8"/>
+    <line x1="230.1" y1="297.6" x2="203.1" y2="334.8"/>
+    <line x1="203.1" y1="334.8" x2="160.9" y2="323.8"/>
+    <line x1="203.1" y1="334.8" x2="226.6" y2="371.5"/>
+    <line x1="214.2" y1="248.4" x2="170.4" y2="234.2"/>
+    <line x1="170.4" y1="234.2" x2="167.8" y2="190.6"/>
+    <line x1="170.4" y1="234.2" x2="142.7" y2="267.9"/>
+    <line x1="344.2" y1="190.6" x2="360.2" y2="177.7"/>
+    <line x1="296.6" y1="156.1" x2="304" y2="136.9"/>
+    <line x1="351.1" y1="323.8" x2="368.4" y2="335"/>
+    <line x1="369.3" y1="267.9" x2="389.8" y2="269"/>
+    <line x1="226.6" y1="371.5" x2="221.3" y2="391.4"/>
+    <line x1="285.4" y1="371.5" x2="290.7" y2="391.4"/>
+    <line x1="142.7" y1="267.9" x2="122.2" y2="269"/>
+    <line x1="160.9" y1="323.8" x2="143.6" y2="335"/>
+    <line x1="215.4" y1="156.1" x2="208" y2="136.9"/>
+    <line x1="167.8" y1="190.6" x2="151.8" y2="177.7"/>
+  </g>
+  <polygon points="404,60 418.1,98.6 459.2,100.1 426.8,125.4 438.1,164.9 404,142 369.9,164.9 381.2,125.4 348.8,100.1 389.9,98.6" fill="#f5c518"/>
+</svg>
