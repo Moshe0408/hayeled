@@ -180,6 +180,46 @@ export function resetStats(confirm) {
   return callV21('admin_reset_stats', { p_confirm: String(confirm || '') });
 }
 
+// ---------- v2.2 (supabase/update-2.2.sql) ----------
+let v22 = null;   // null = unknown, true = update-2.2.sql installed, false = not yet
+
+/** Last known state of the 2.2 server update: null (unknown) | true | false. */
+export function v22Status() {
+  return v22;
+}
+
+/** -> 2.2 stats (training load, burnouts, training injuries, coach talks), or null when update-2.2.sql
+ *  is not installed yet (other errors are thrown). */
+export async function getStatsV3(days = 30) {
+  try {
+    const r = await call('admin_stats_v3', { p_days: days, p_tz: 'Asia/Jerusalem' });
+    v22 = true;
+    return r;
+  } catch (e) {
+    if (isMissingFunction(e)) { v22 = false; return null; }
+    throw e;
+  }
+}
+
+/** The "שחקנים" tab: one row per career (latest career_snapshot). sort: 'last_seen' | 'matches' | 'ovr'.
+ *  -> { total, rows:[...] }, or null when update-2.2.sql is not installed yet (other errors are thrown). */
+export async function getPlayers({ limit = 50, offset = 0, search = '', sort = 'last_seen' } = {}) {
+  try {
+    const r = await call('admin_players', { p_limit: limit, p_offset: offset, p_search: String(search || '').trim() || null, p_sort: sort });
+    v22 = true;
+    return r;
+  } catch (e) {
+    if (isMissingFunction(e)) { v22 = false; return null; }
+    throw e;
+  }
+}
+
+/** Ask the server whether the 2.2 function exists. */
+export async function probeV22() {
+  try { await getStatsV3(1); } catch { /* unknown stays as it was on network errors */ }
+  return v22;
+}
+
 /** All feedback rows for the CSV export (pages of 200, capped at 10,000 rows). */
 export async function fetchAllFeedback({ unreadOnly = false, rating = null } = {}) {
   const out = [];

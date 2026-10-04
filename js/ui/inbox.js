@@ -1,10 +1,17 @@
 // inbox.js: #/inbox (WhatsApp-style list) and #/chat/:id (thread with choices).
 import * as game from '../engine/game.js';
 import { esc } from './dom.js';
-import { call, toast, setHeader, reducedMotion } from './app.js';
+import { call, toast, setHeader, reducedMotion, hubSafe } from './app.js';
 import { navigate } from './router.js';
 import { bubble, empty } from './components.js';
-import { personaIco } from './icons.js';
+import { personaIco, ico } from './icons.js';
+// v2.2: threads that link to a screen (bench nudge -> #/coach-talk). The engine may send thread.route; ev id as fallback.
+const ROUTE_HE = { '#/coach-talk': 'לדבר עם המאמן' };
+function threadRoute(t) {
+  if (t && typeof t.route === 'string' && t.route.startsWith('#/')) return t.route;
+  if (t && (t.ev === 'bench_nudge' || /bench_nudge/.test(String(t.id || '')))) return '#/coach-talk';
+  return null;
+}
 function avatar(from) { const p = personaIco(from); return `<span class="avatar ${p.tint}" aria-hidden="true">${p.svg}</span>`; }
 
 export function render(root, params = {}) {
@@ -45,16 +52,21 @@ function renderChat(root, id) {
 
   function draw(messages, typing = false, showChoices = true) {
     const msgs = messages || thread.messages || [];
+    let link = threadRoute(thread);
+    if (link === '#/coach-talk') { const h = hubSafe(); if (!(h && h.coachTalk && h.coachTalk.ok)) link = null; }
     root.innerHTML = `<div class="chat">
       <div class="chat-head">${avatar(thread.from)}<b>${esc(thread.fromHe)}</b><small class="muted">${esc(thread.dateHe || '')}</small></div>
       <div class="bubbles">${msgs.map((m) => bubble(m, thread.isGroup)).join('')}${typing ? '<div class="bub them typing" aria-label="מקליד"><i></i><i></i><i></i></div>' : ''}</div>
       ${showChoices && thread.choices && thread.choices.length ? `<div class="chat-choices">${thread.choices.map((c, i) => `<button type="button" class="btn chat-choice" data-act="choice" data-i="${esc(c.index ?? i)}" data-testid="chat-choice-${esc(c.index ?? i)}" ${c.disabled ? 'disabled' : ''}>${esc(c.he)}</button>`).join('')}</div>` : ''}
+      ${link && !typing ? `<div class="chat-link"><button type="button" class="btn btn-gold btn-lg" data-act="route" data-to="${esc(link)}" data-testid="chat-link">${ico('talk')}${esc(thread.routeHe || ROUTE_HE[link] || 'פתח')}</button></div>` : ''}
     </div>`;
     const last = root.querySelector('.bubbles > :last-child');
     if (last && last.scrollIntoView) { try { last.scrollIntoView({ block: 'nearest' }); } catch { /* ignore */ } }
   }
 
   root.addEventListener('click', (e) => {
+    const lk = e.target.closest('[data-act="route"]');
+    if (lk && !busy) { navigate(lk.dataset.to); return; }
     const b = e.target.closest('[data-act="choice"]');
     if (!b || busy || b.disabled) return;
     busy = true;

@@ -3,22 +3,23 @@
 // relative to self.registration.scope. CacheStorage is shared by the whole *.github.io origin,
 // so every cache name starts with 'hayeled-' and caches of other apps are never touched.
 
-const VERSION = '2.1.0';                 // MUST equal APP_VERSION in js/config.js (publish.ps1 bumps both)
+const VERSION = '2.2.0';                 // MUST equal APP_VERSION in js/config.js (publish.ps1 bumps both)
 const CACHE = 'hayeled-' + VERSION;
 const FONT_CACHE = 'hayeled-fonts-v1';
-const PRECACHE = [ './', './index.html', './manifest.webmanifest', './css/app.css', './css/theme.css', './css/match.css', './css/v21.css',
+const PRECACHE = [ './', './index.html', './manifest.webmanifest', './css/app.css', './css/theme.css', './css/match.css', './css/v21.css', './css/v22.css',
   './icons/icon.svg', './icons/logo.svg', './icons/emblem.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
   './js/main.js', './js/config.js',
   './js/core/rng.js', './js/core/save.js', './js/core/idb.js', './js/core/supa.js', './js/core/telemetry.js', './js/core/remote.js', './js/core/feedback.js', './js/core/ads.js',
   './js/data/countries.js', './js/data/leagues.js', './js/data/names.js', './js/data/events.js', './js/data/commentary.js', './js/data/strings.js',
   './js/engine/game.js', './js/engine/state.js', './js/engine/util.js', './js/engine/calendar.js', './js/engine/schedule.js', './js/engine/sim.js',
   './js/engine/world.js', './js/engine/player.js', './js/engine/selection.js', './js/engine/moments.js', './js/engine/match.js', './js/engine/transfers.js',
-  './js/engine/europe.js', './js/engine/cups.js', './js/engine/national.js', './js/engine/awards.js', './js/engine/narrative.js', './js/engine/history.js', './js/engine/shop.js', './js/engine/manager.js',
+  './js/engine/europe.js', './js/engine/cups.js', './js/engine/national.js', './js/engine/awards.js', './js/engine/narrative.js', './js/engine/history.js', './js/engine/shop.js', './js/engine/manager.js', './js/engine/load.js', './js/engine/talk.js',
   './js/ui/dom.js', './js/ui/router.js', './js/ui/app.js', './js/ui/components.js', './js/ui/format.js', './js/ui/title.js', './js/ui/create.js', './js/ui/hub.js',
   './js/ui/week.js', './js/ui/match.js', './js/ui/scene/match-scene.js', './js/ui/scene/title-scene.js', './js/ui/scene/crowd-audio.js', './js/ui/inbox.js', './js/ui/schedule.js', './js/ui/tables.js', './js/ui/career.js', './js/ui/profile.js', './js/ui/national.js',
   './js/ui/offers.js', './js/ui/awards.js', './js/ui/shop.js', './js/ui/hof.js', './js/ui/settings.js', './js/ui/feedback.js', './js/ui/install.js', './js/ui/adslots.js', './js/ui/retire.js', './js/ui/manager.js',
   './js/ui/gender.js', './js/ui/ext.js', './js/ui/fx.js', './js/ui/crests.js', './js/ui/crest-data.js', './js/ui/avatar.js',
-  './js/ui/scene/intro.js', './js/ui/scene/celebration.js', './js/ui/shop-art.js', './js/ui/icons.js' ];
+  './js/ui/scene/intro.js', './js/ui/scene/celebration.js', './js/ui/shop-art.js', './js/ui/icons.js',
+  './js/ui/training.js', './js/ui/coach-talk.js' ];
 
 // Files without which the offline game cannot start: install fails (and is retried by the browser) if these fail.
 const CRITICAL = ['./', './index.html', './js/main.js', './js/engine/game.js', './css/app.css'];

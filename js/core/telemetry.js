@@ -35,6 +35,25 @@ let errorsThisSession = 0;
 let hiddenAt = 0;
 
 // ---------- small safe helpers ----------
+/** Drop unpaired UTF-16 surrogates (e.g. half an emoji left behind by a .slice cut). Postgres rejects a lone
+ *  "\ud83d" in json (22P02), which would fail the whole track_events batch. (No regex lookbehind: old Safari.) */
+export function wellFormed(v) {
+  const s = String(v == null ? '' : v);
+  if (!/[\uD800-\uDFFF]/.test(s)) return s;
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {
+      const d = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      if (d >= 0xDC00 && d <= 0xDFFF) { out += s[i] + s[i + 1]; i++; }
+    } else if (!(c >= 0xDC00 && c <= 0xDFFF)) out += s[i];
+  }
+  return out;
+}
+/** Cut to at most n UTF-16 units without leaving half a surrogate pair behind. */
+export function cutText(v, n) {
+  return wellFormed(String(v == null ? '' : v).slice(0, n));
+}
 function ls() {
   try { return globalThis.localStorage || null; } catch { return null; }
 }
@@ -179,13 +198,13 @@ function cleanProps(props) {
     const v = props[k];
     if (v === undefined || typeof v === 'function') continue;
     const key = String(k).slice(0, 32);
-    if (typeof v === 'string') out[key] = v.slice(0, 120);
+    if (typeof v === 'string') out[key] = cutText(v, 120);
     else if (typeof v === 'number') out[key] = Number.isFinite(v) ? v : null;
     else if (typeof v === 'boolean' || v === null) out[key] = v;
     else {
       let s = '';
       try { s = JSON.stringify(v); } catch { s = ''; }
-      out[key] = String(s || '').slice(0, 120);
+      out[key] = cutText(s || '', 120);
     }
     n++;
   }
@@ -202,6 +221,19 @@ function active() {
 //   goal            {mega: true|false, n}                      n = goals batched into this row (default 1)
 //   manager_started {tier, gender, ...}
 //   retired         {league, tier, legacy, gender, ...}        optional top5:true = played in a top-5 league
+// ---------- v2.2 event shapes (supabase/update-2.2.sql admin_stats_v3 reads these exact props) ----------
+//   training        {focus, intensity, n}    intensity: light|normal|hard|extreme; focus 'rest' = rest week
+//   burnout         {n}
+//   injury_training {n}
+//   coach_talk      {approach, success, n}   approach: ask|demand|threat; success: true|false
+//   n = signals merged into this row (trackSignals batches them so a simulated season stays a few rows)
+//   career_snapshot {name, nick, gender, nation, pos, club, clubHe, league, ovr, age, season, seasons, apps, goals,
+//                    stage, careerId, why}  built by js/ui/app.js (careerSnapshot); admin_players reads the latest
+//                    one per (device, careerId). name = the character name chosen in the game (first + last, <= 40).
+//   career_started  also carries {name, nick} since 2.2
+const INTENSITIES = ['light', 'normal', 'hard', 'extreme'];
+const APPROACHES = ['ask', 'demand', 'threat'];
+const isTrue = (v) => v === true || v === 'true' || v === 1;
 function normGender(g) {
   const v = String(g == null ? '' : g).toLowerCase();
   if (v === 'm' || v === 'male' || v === 'boy') return 'm';
@@ -211,12 +243,29 @@ function normGender(g) {
 function normProps(name, props) {
   const p = props && typeof props === 'object' ? { ...props } : {};
   if ('gender' in p) p.gender = normGender(p.gender);
+  if ((name === 'career_snapshot' || name === 'career_started') && p.name !== undefined) {
+    p.name = cutText(String(p.name == null ? '' : p.name).replace(/\s+/g, ' ').trim(), 40).trim();
+    if (p.nick !== undefined) p.nick = cutText(String(p.nick == null ? '' : p.nick).trim(), 16).trim();
+  }
   if (name === 'intro') p.done = p.done === true || p.done === 'true' || p.done === 1;
   if (name === 'goal') {
     p.mega = p.mega === true || p.mega === 'true' || p.mega === 1;
     if (p.n !== undefined) p.n = Math.max(1, Math.min(500, Math.floor(Number(p.n) || 1)));
   }
   if (name === 'retired' && p.top5 !== undefined) p.top5 = !!p.top5;
+  if (name === 'training') {
+    p.focus = String(p.focus == null ? '' : p.focus).slice(0, 24) || 'balanced';
+    const it = String(p.intensity == null ? '' : p.intensity).toLowerCase();
+    p.intensity = p.focus === 'rest' ? 'light' : INTENSITIES.includes(it) ? it : 'normal';
+  }
+  if (name === 'coach_talk') {
+    const a = String(p.approach == null ? '' : p.approach).toLowerCase();
+    p.approach = APPROACHES.includes(a) ? a : '?';
+    p.success = isTrue(p.success);
+  }
+  if ((name === 'training' || name === 'burnout' || name === 'injury_training' || name === 'coach_talk') && p.n !== undefined) {
+    p.n = Math.max(1, Math.min(500, Math.floor(Number(p.n) || 1)));
+  }
   return p;
 }
 
@@ -232,12 +281,18 @@ export function track(name, props = {}) {
   } catch { /* never throw */ }
 }
 
+// v2.2 signals merged per call: name -> key props (rows with the same key collapse into one row with n)
+const MERGE_KEYS = { training: ['focus', 'intensity'], burnout: [], injury_training: [], coach_talk: ['approach', 'success'] };
+
 /** Forward engine signals ({name, props}). Goal signals are batched into at most two rows per call
- *  (goal {mega:false, n} and goal {mega:true, n}) so a simulated season never floods the queue. */
+ *  (goal {mega:false, n} and goal {mega:true, n}) so a simulated season never floods the queue.
+ *  The 2.2 signals (training / burnout / injury_training / coach_talk) are merged the same way:
+ *  one row per distinct key (e.g. training {focus, intensity}) with n = how many were merged. */
 export function trackSignals(signals) {
   try {
     if (!active() || !Array.isArray(signals)) return;
     const goals = [0, 0];   // [normal, mega]
+    const merged = new Map();   // 'name|k1|k2' -> { name, props, n }
     for (const s of signals) {
       if (!s || typeof s.name !== 'string') continue;
       if (s.name === 'goal') {
@@ -245,10 +300,26 @@ export function trackSignals(signals) {
         goals[p.mega ? 1 : 0] += p.n || 1;
         continue;
       }
+      const keys = MERGE_KEYS[s.name];
+      if (keys) {
+        const p = normProps(s.name, s.props || {});
+        const n = p.n || 1;
+        const props = {};
+        for (const k of keys) props[k] = p[k];
+        const id = s.name + '|' + keys.map((k) => String(props[k])).join('|');
+        const cur = merged.get(id);
+        if (cur) cur.n += n;
+        else merged.set(id, { name: s.name, props, n });
+        continue;
+      }
       track(s.name, s.props || {});
     }
     if (goals[0]) track('goal', { mega: false, n: goals[0] });
     if (goals[1]) track('goal', { mega: true, n: goals[1] });
+    for (const m of merged.values()) {
+      // n > 500 is split so the server-side clamp (hy_event_n) never loses weeks
+      for (let left = m.n; left > 0; left -= 500) track(m.name, { ...m.props, n: Math.min(500, left) });
+    }
   } catch { /* never throw */ }
 }
 
@@ -258,6 +329,7 @@ export function trackIntro(done) {
 }
 
 const inflight = new Set();   // queue ids currently being sent (never sent twice concurrently)
+let batchCap = BATCH_MAX;      // shrinks while a batch the server rejects as bad data is being bisected
 let eidSeq = 0;
 function eid() {
   eidSeq = (eidSeq + 1) % 1679616;
@@ -265,8 +337,15 @@ function eid() {
 }
 
 function buildBatch(q, keepalive) {
-  let batch = q.filter((e) => !inflight.has(e.i)).slice(0, BATCH_MAX);
-  const strip = (arr) => arr.map((e) => ({ n: e.n, p: e.p, t: e.t, s: e.s }));
+  let batch = q.filter((e) => !inflight.has(e.i)).slice(0, batchCap);
+  // wellFormed() also repairs events queued by an older build (a lone surrogate would fail the whole batch)
+  const fixP = (p) => {
+    if (!p || typeof p !== 'object') return p;
+    const o = {};
+    for (const k of Object.keys(p)) o[k] = typeof p[k] === 'string' ? wellFormed(p[k]) : p[k];
+    return o;
+  };
+  const strip = (arr) => arr.map((e) => ({ n: e.n, p: fixP(e.p), t: e.t, s: e.s }));
   if (keepalive) {
     const dev = getDeviceId();
     const sid = getSessionId();
@@ -275,6 +354,13 @@ function buildBatch(q, keepalive) {
     }
   }
   return { ids: batch.map((e) => e.i), events: strip(batch) };
+}
+
+/** 400 invalid json / data exception (22xxx) or 413: retrying the same payload can never succeed. */
+function isBadData(e) {
+  const st = e && e.status;
+  const code = String((e && e.code) || '');
+  return st === 413 || (st === 400 && (code === 'PGRST102' || /^22/.test(code)));
 }
 
 export async function flush({ keepalive = false } = {}) {
@@ -295,8 +381,19 @@ export async function flush({ keepalive = false } = {}) {
         writeQueue(readQueue().filter((e) => !sent.has(e.i)));
         backoffMs = 0;
         nextFlushAt = 0;
+        batchCap = Math.min(BATCH_MAX, batchCap * 2);
         return true;
-      } catch {
+      } catch (e) {
+        if (isBadData(e)) {
+          // the server rejected the payload itself (not an outage): bisect until the bad event is alone, then drop it,
+          // so one malformed event can never block the device's telemetry forever
+          if (ids.length > 1) batchCap = Math.max(1, Math.floor(ids.length / 2));
+          else { writeQueue(readQueue().filter((x) => x.i !== ids[0])); batchCap = BATCH_MAX; }
+          backoffMs = 0;
+          nextFlushAt = Date.now() + 1000;
+          if (!keepalive) setTimeout(() => { flush().catch(() => {}); }, 1100);
+          return false;
+        }
         backoffMs = backoffMs ? Math.min(backoffMs * 2, BACKOFF_MAX_MS) : 30000;
         nextFlushAt = Date.now() + backoffMs;
         return false;
@@ -366,7 +463,7 @@ function trackError(msg, src) {
   try {
     if (errorsThisSession >= MAX_ERRORS) return;
     errorsThisSession++;
-    track('error', { msg: String(msg || '').slice(0, 200), src: String(src || '').slice(0, 120) });
+    track('error', { msg: cutText(msg || '', 200), src: cutText(src || '', 120) });
   } catch { /* ignore */ }
 }
 

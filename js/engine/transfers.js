@@ -166,6 +166,14 @@ export function setAbroadFlag(S) {
   if (p.club && clubCountry(p.club) !== p.nation) S.ev.flags.abroad = true; else delete S.ev.flags.abroad;
 }
 
+/** v2.2: a new club (or the step from the academy to the first team) = a new coach: the bench run, the cameo run and
+ *  everything said to the old coach (promise, punishment, rotation role, the season's talk count) start again. */
+export function resetBenchTalk(p) {
+  p.benchRun = 0; p.lowMin = 0;
+  const t = p.talk;
+  if (t && typeof t === 'object') { t.promise = null; t.ev = null; t.pen = 0; t.rot = null; t.recall = false; t.broken = false; t.brokenAt = null; t.n = 0; t.ns = null; }
+}
+
 function moveTo(S, o) {
   const p = S.player;
   const from = p.club;
@@ -186,6 +194,7 @@ function moveTo(S, o) {
   openSpell(S, o.club, o.type === 'loan', o.fee, es);
   p.trust = (o.role === 'star' || o.role === 'key') ? 60 : 45;
   p.treq = false; p.freeWeeks = 0; p.bench = 0;
+  resetBenchTalk(p);
   if (bigger) p.morale = Math.min(100, p.morale + 10);
   p.money += 4 * o.wage;
   if (S.comp) {
@@ -217,6 +226,7 @@ export function applyPrecontract(S) {
   openSpell(S, n.club, false, 0, S.season + 1);
   p.trust = (n.role === 'star' || n.role === 'key') ? 60 : 45;
   p.treq = false; p.freeWeeks = 0; p.bench = 0;
+  resetBenchTalk(p);
   emit('transfer', { type: 'precontract', from: from || null, to: n.club, fee: 0 });
   raise(S, 'transfer_done');
   if (clubCountry(n.club) !== p.nation && (!from || clubCountry(from) !== clubCountry(n.club))) raise(S, 'moved_abroad');
@@ -233,6 +243,8 @@ export function endLoan(S) {
   const par = p.parent;
   closeSpell(S, S.season);
   p.contract = par; p.parent = null; p.club = par ? par.club : null;
+  p.bench = 0;
+  resetBenchTalk(p);
   if (p.club) {
     const expiring = par.until === S.season && !p.next;
     if (!expiring) openSpell(S, p.club, false, 0, S.season + 1);
@@ -274,6 +286,8 @@ export function signPro(S, o) {
   p.stage = 'pro';
   p.youth = null;
   p.contract = { club: p.club, wage: o.wage, until: es + o.years - 1, role: o.role, rc: o.rc, since: S.season, loan: false };
+  p.bench = 0;
+  resetBenchTalk(p);   // the academy bench run does not follow the player into the first team
   raise(S, 'pro_contract');
   emit('pro_contract', { club: p.club });
   addTimeline(S, 'contract', 'חוזה מקצועני ראשון ב' + clubName(p.club));
@@ -442,5 +456,7 @@ export function offerVM(S, o, awLabel) {
     expiresHe: o.status === 'open' ? ('בתוקף עד ' + awLabel(o.exp)) : '',
     negotiationsLeft: negotiable && o.status === 'open' ? Math.max(0, 2 - o.neg) : 0,
     compareHe: compare, canAccept: canAcceptNow(S, o),
+    // v2.2: after a failed 'threat' talk, open offers are marked as clubs that want the player
+    interested: !!o.keen && o.status === 'open', interestedHe: o.keen && o.status === 'open' ? 'מעוניינים בך' : '',
   };
 }

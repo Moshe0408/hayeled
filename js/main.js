@@ -4,7 +4,7 @@ import * as save from './core/save.js';
 import { APP_VERSION } from './config.js';
 import {
   ctx, svc, initShell, loadSettings, saveSettings, toast, overlay, showUpdateBanner, showAnnouncement,
-  call, showErrorScreen, viewRoot, hubSafe,
+  call, showErrorScreen, viewRoot, hubSafe, snapshotOnOpen,
 } from './ui/app.js';
 import { startRouter, setGuard, onRoute, isKnownHash, currentRoute } from './ui/router.js';
 import { initInstall } from './ui/install.js';
@@ -131,6 +131,7 @@ async function openSlot(slot, { quiet = false } = {}) {
   if (r.repaired && r.source === 'idb') toast('שחזרנו את השמירה שלך מהגיבוי במכשיר ✓', { ms: 4500 });
   if (r.migratedFrom !== null && r.migratedFrom !== undefined) saveNow();
   onGameChange(); // HoF safety net for retired careers
+  snapshotOnOpen(); // v2.2: one career_snapshot per telemetry session (consent + backend checked inside)
   cancelAutosave();
   return { ok: true };
 }

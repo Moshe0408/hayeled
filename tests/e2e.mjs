@@ -1,13 +1,16 @@
 // tests/e2e.mjs: end-to-end browser test (SPEC §10.2). Integrate agent.
-// Usage: node tests/e2e.mjs [--only a|b|c|d] [--headful]
+// Usage: node tests/e2e.mjs [--only a|b|c|d|e] [--headful]
 // Env:   PUPPETEER_CORE_PATH  absolute path of a puppeteer-core package dir (default: tests/node_modules/puppeteer-core)
 //        CHROME_PATH          browser executable (default: installed Chrome, then Edge)
 //        SHOTS_DIR            screenshot directory (default: tests/out)
+//        E2E_PORT / E2E_MOCK_PORT  ports of the static server / the mock backend (default 8123 / 54329)
 // Spawns tests/serve.mjs 8123 --base /hayeled/ and tests/mock-supabase.mjs 54329, kills them at the end.
 // Scenario group A runs with the shipped (empty) backend config; group B injects the mock backend through the
 // SPEC §1.2 dev override (localStorage 'hy.dev.backend', set with evaluateOnNewDocument in that context only).
 // Group C covers v2: the opening cinematic, a girl career (feminine Hebrew, women's football) and goal celebrations.
 // Group D covers v2.1: the coaching career after retirement (boy and girl), manager screens, HoF "שחקן + מאמן".
+// Group E covers v2.2: training intensity (preview + energy), the coach talk after a bench run (promise -> starts),
+// feminine Hebrew in a girl's coach talk. B13 checks the v2.2 telemetry signals and the admin 2.2 cards (mock).
 // Every page skips the 8 s intro ('hy.intro.skip'='1') except scenario C1.
 
 import { createRequire } from 'node:module';
@@ -17,8 +20,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
-const PORT = 8123;
-const MOCK_PORT = 54329;
+const PORT = Number(process.env.E2E_PORT) || 8123;
+const MOCK_PORT = Number(process.env.E2E_MOCK_PORT) || 54329;
 const BASE = `http://localhost:${PORT}/hayeled/`;
 const MOCK = `http://localhost:${MOCK_PORT}`;
 const SHOTS = process.env.SHOTS_DIR || path.join(ROOT, 'tests', 'out');
@@ -1395,6 +1398,230 @@ await scenario('B11 admin v2.1 tools: rating filter, delete feedback (2 taps), C
     if (cs.length) assert('gender' in (cs[cs.length - 1].props || {}), 'career_started without gender');
   });
 
+  await scenario('B13 v2.2 telemetry + admin: training / coach_talk signals reach the mock; admin 2.2 cards and KPIs', async () => {
+    // B12's simulated career sent a training signal every week; add a hard week and a coach talk through the facade
+    await page.bringToFront();
+    const talk = await page.evaluate(() => {
+      const g = window.__hy.game;
+      const ac = g.getAcademyOptions('isr', {});
+      g.newCareer({ first: 'דני', last: 'טלמטריה', nick: '', nation: 'isr', pos: 'CM', foot: 'R', club: ac.groups[0].clubs[0].id, gender: 'm', seed: 99, now: Date.now() });
+      let a = g.advanceWeek({ focus: 'shooting', intensity: 'hard' });
+      while (a.ok && a.status === 'match') { g.autoPlayMatch(); g.finishMatch(); a = g.resumeWeek(); }
+      g.devSetBench(4);
+      const r = g.talkToCoach('ask');
+      return { ok: r.ok, success: r.success, err: r.error || null };
+    });
+    assert(talk.ok, 'talkToCoach in B13 ' + JSON.stringify(talk));
+    await goto(page, '#/hub');            // the facade wrapper forwards the engine signals to telemetry
+    await page.waitForSelector(T('hub'), { visible: true });
+    await sleep(500);
+    let st = null;
+    for (let i = 0; i < 30; i++) {
+      await page.evaluate(() => window.__hy.telemetry.flush({ keepalive: true }));
+      await sleep(250);
+      st = await mockState();
+      if (st.events.some((e) => e.name === 'coach_talk') && st.events.some((e) => e.name === 'training' && e.props && e.props.intensity === 'hard')) break;
+    }
+    const tr = st.events.filter((e) => e.name === 'training');
+    const ct = st.events.filter((e) => e.name === 'coach_talk');
+    assert(tr.length >= 1 && ct.length >= 1, 'v2.2 events ' + [...new Set(st.events.map((e) => e.name))].join(','));
+    assert(tr.every((e) => e.props && ['light', 'normal', 'hard', 'extreme'].includes(e.props.intensity) && typeof e.props.focus === 'string'), 'training props ' + JSON.stringify(tr[0].props));
+    assert(tr.some((e) => e.props.intensity === 'hard' && e.props.focus === 'shooting'), 'no hard shooting week in the signals');
+    assert(ct.some((e) => e.props && e.props.approach === 'ask' && typeof e.props.success === 'boolean'), 'coach_talk props ' + JSON.stringify(ct[0].props));
+    // admin dashboard: the 2.2 section with real numbers from these events
+    await admin.bringToFront();
+    await admin.setViewport({ width: 1280, height: 900 });
+    await admin.reload({ waitUntil: 'load' });
+    await admin.waitForSelector(`${T('nav-dash')}, ${T('adm-email')}`, { visible: true, timeout: 10000 });
+    if (await present(admin, T('adm-email'))) {
+      await admin.type(T('adm-email'), 'admin@test.local');
+      await admin.type(T('adm-password'), 'test1234');
+      await click(admin, T('adm-login'));
+    }
+    await click(admin, T('nav-dash'));
+    await admin.waitForSelector(T('v22-kpis'), { visible: true, timeout: 10000 });
+    const kp = await admin.evaluate(() => Object.fromEntries(['kpi-train-weeks', 'kpi-train-hard', 'kpi-burnouts', 'kpi-injury-training', 'kpi-coach-talks', 'kpi-coach-success'].map((k) => [k, ((document.querySelector(`[data-testid="${k}"]`) || {}).textContent || '').trim()])));
+    const firstNum = (s) => { const m = String(s).match(/\d[\d,]*/); return m ? Number(m[0].replace(/,/g, '')) : NaN; };
+    assert(firstNum(kp['kpi-train-weeks']) >= 1 && firstNum(kp['kpi-coach-talks']) >= 1 && /%/.test(kp['kpi-train-hard']) && /%/.test(kp['kpi-coach-success']), 'v2.2 KPIs ' + JSON.stringify(kp));
+    for (const id of ['v22-intensity', 'chart-intensity', 'v22-coach', 'chart-coach-approach', 'coach-rate-ask', 'v22-per-day', 'v22-focus']) assert(await admin.$(T(id)), 'admin 2.2 card missing: ' + id);
+    assert(!(await admin.$(T('adm-schema-banner-22'))), '2.2 banner shown on a 2.2 backend');
+    assert(!(await admin.$(T('v22-error'))), '2.2 stats error line');
+    await noOverflow(admin, 'admin 2.2 dashboard 1280');
+    await admin.$eval(T('v22-kpis'), (e) => e.scrollIntoView({ block: 'start' }));
+    await sleep(250);
+    await shot(admin, 'admin-v22-dashboard', { full: false });
+    await setWidth(admin, 390);
+    await admin.waitForSelector(T('v22-kpis'), { visible: true });
+    await noOverflow(admin, 'admin 2.2 dashboard 390');
+  });
+
+  await scenario('B14 v2.2 career_snapshot + admin: plain-words summary card, "שחקנים" tab (name, search, sort, paging, details)', async () => {
+    // B12 continued B1's career (דני לוי) into coaching, B13 started "דני טלמטריה": both sent career_snapshot events
+    await page.bringToFront();
+    let st = null;
+    for (let i = 0; i < 30; i++) {
+      await page.evaluate(() => window.__hy.telemetry.flush({ keepalive: true }));
+      await sleep(200);
+      st = await mockState();
+      if (st.events.some((e) => e.name === 'career_snapshot' && e.props && e.props.name === 'דני טלמטריה')) break;
+    }
+    const snaps = st.events.filter((e) => e.name === 'career_snapshot');
+    const mine = snaps.filter((e) => e.props && e.props.name === 'דני טלמטריה');
+    assert(mine.length >= 1, 'no career_snapshot for דני טלמטריה (' + snaps.map((e) => e.props && e.props.name).join(',') + ')');
+    const sp = mine[mine.length - 1].props;
+    for (const k of ['name', 'nick', 'gender', 'nation', 'pos', 'club', 'clubHe', 'league', 'ovr', 'age', 'season', 'seasons', 'apps', 'goals', 'stage', 'careerId', 'why']) assert(k in sp, 'career_snapshot without ' + k + ': ' + JSON.stringify(sp));
+    assert(sp.gender === 'm' && sp.nation === 'isr' && sp.pos === 'CM' && typeof sp.ovr === 'number' && sp.stage === 'youth' && /^c_/.test(sp.careerId) && sp.league, 'career_snapshot props ' + JSON.stringify(sp));
+    assert(Buffer.byteLength(JSON.stringify(sp)) < 2048, 'career_snapshot payload too big');
+    const cs = st.events.filter((e) => e.name === 'career_started' && e.props && e.props.name === 'דני טלמטריה');
+    assert(cs.length >= 1, 'career_started without the character name');
+    const levi = snaps.filter((e) => e.props && e.props.name === 'דני לוי');
+    step('career_snapshot rows: ' + snaps.length + ' (דני לוי: ' + levi.map((e) => e.props.stage + '/' + e.props.why).join(',') + ')');
+    if (levi.length) assert(levi[levi.length - 1].props.stage === 'manager', 'דני לוי latest snapshot stage ' + levi[levi.length - 1].props.stage + ' (B12 started coaching)');
+    // the consent toggle switches the snapshot off with everything else - through the REAL game paths
+    // (trackCareerSnapshot, snapshotOnOpen, and a new career whose career_started goes through forwardSignals)
+    const off = await page.evaluate(async () => {
+      const t = window.__hy.telemetry; const g = window.__hy.game;
+      const app = await import(new URL('js/ui/app.js', document.baseURI).href);
+      await t.flush({ keepalive: true });
+      const keep = JSON.parse(JSON.stringify(g.serialize()));
+      t.setConsent(false);
+      app.trackCareerSnapshot('season');
+      app.snapshotOnOpen();
+      const ac = g.getAcademyOptions('isr', {});
+      app.call(() => g.newCareer({ first: 'לא', last: 'נשלח', nick: '', nation: 'isr', pos: 'ST', foot: 'R', club: ac.groups[0].clubs[0].id, gender: 'm', seed: 7, now: Date.now() }));
+      app.call(() => g.getSaveMeta());
+      const q = localStorage.getItem('hy.tm.q') || '';
+      g.loadState(keep);
+      t.setConsent(true);
+      return { leaked: q.includes('נשלח') || q.includes('career_snapshot') || q.includes('career_started'), q: q.slice(0, 200) };
+    });
+    assert(!off.leaked, 'career data queued with telemetry off: ' + off.q);
+    st = await mockState();
+    assert(!st.events.some((e) => e.props && typeof e.props.name === 'string' && e.props.name.includes('נשלח')), 'career sent with telemetry off');
+
+    // a 20 + 20 character name ending in an emoji: the 40-unit cut must not leave half an emoji (Postgres 22P02),
+    // and a bad event already in the queue (older build) is bisected out instead of blocking telemetry forever
+    net.allowMock4xx = true;   // the mock answers 400 22P02 (like Postgres) while the bad event is bisected out
+    const sur = await page.evaluate(async () => {
+      const t = window.__hy.telemetry;
+      const app = await import(new URL('js/ui/app.js', document.baseURI).href);
+      await t.flush({ keepalive: true });
+      const first = 'אבגדהוזחטיכלמנסעפצקר';
+      const last = 'אבגדהוזחטיכלמנסעפצ😀';
+      t.track('career_snapshot', { name: first + ' ' + last, nick: 'נננננננננננננננ😀', careerId: 'c_surrogate', stage: 'youth' });
+      const snap = app.careerSnapshot('season');
+      // an event queued by an older build with a broken prop key (wellFormed() repairs values, not keys)
+      const q = JSON.parse(localStorage.getItem('hy.tm.q') || '[]');
+      q.unshift({ i: 'oldbad1', n: 'career_snapshot', p: { ['x\ud83d']: 1 }, t: new Date().toISOString(), s: t.getSessionId() });
+      localStorage.setItem('hy.tm.q', JSON.stringify(q));
+      t.track('test_probe', { k: 'after_bad' });
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (let i = 0; i < 12; i++) {
+        await t.flush({ keepalive: true });
+        if (!(localStorage.getItem('hy.tm.q') || '').length) break;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return { left: localStorage.getItem('hy.tm.q') || '', snapName: snap && snap.name, snapLone: !!(snap && (lone.test(snap.name) || lone.test(snap.nick))) };
+    });
+    await sleep(1500);         // let the app's own follow-up flush (1.1 s after a 400) finish inside the allowance
+    net.allowMock4xx = false;
+    assert(!sur.snapLone, 'careerSnapshot left a lone surrogate: ' + JSON.stringify(sur.snapName));
+    assert(!sur.left, 'telemetry queue stuck after a bad event: ' + sur.left.slice(0, 200));
+    st = await mockState();
+    const surE = st.events.find((e) => e.name === 'career_snapshot' && e.props && e.props.careerId === 'c_surrogate');
+    assert(surE && surE.props.name.length <= 40 && surE.props.name.startsWith('אבגדהוזחטיכלמנסעפצקר אבגדה') && !/[\uD800-\uDFFF]/.test(surE.props.name) && surE.props.nick === 'נננננננננננננננ', 'surrogate-safe snapshot ' + JSON.stringify(surE && surE.props));
+    assert(st.events.some((e) => e.name === 'test_probe' && e.props && e.props.k === 'after_bad'), 'events after the bad one were not delivered');
+    assert(!st.events.some((e) => e.props && Object.keys(e.props).some((k) => k.startsWith('x'))), 'bad event reached the server');
+
+    // demo data: 60 more devices (with snapshots and feedback) so the tab pages and the rating line shows
+    await fetch(MOCK + '/__mock/seed', { method: 'POST', body: JSON.stringify({ devices: 60 }) });
+    await admin.bringToFront();
+    await admin.setViewport({ width: 1280, height: 900 });
+    await admin.reload({ waitUntil: 'load' });
+    await admin.waitForSelector(`${T('nav-dash')}, ${T('adm-email')}`, { visible: true, timeout: 10000 });
+    if (await present(admin, T('adm-email'))) {
+      await admin.type(T('adm-email'), 'admin@test.local');
+      await admin.type(T('adm-password'), 'test1234');
+      await click(admin, T('adm-login'));
+    }
+    await click(admin, T('nav-dash'));
+    await admin.waitForSelector(T('summary-card'), { visible: true, timeout: 10000 });
+    await admin.waitForSelector(T('kpi-devices'), { visible: true });
+    const sum = await admin.evaluate(() => {
+      const v = (id) => { const e = document.querySelector(`[data-testid="${id}"]`); return e ? e.getAttribute('data-value') : null; };
+      const ids = ['sum-people', 'sum-today', 'sum-week', 'sum-online', 'sum-matches', 'sum-careers', 'sum-rating', 'sum-rating-count',
+        'kpi-devices', 'kpi-dau', 'kpi-wau', 'kpi-online', 'kpi-matches', 'kpi-careers'];
+      return { ...Object.fromEntries(ids.map((k) => [k, v(k)])), text: (document.querySelector('[data-testid="summary-text"]') || {}).textContent || '',
+        note: (document.querySelector('[data-testid="summary-note"]') || {}).textContent || '' };
+    });
+    st = await mockState();
+    const pairs = [['sum-people', 'kpi-devices'], ['sum-today', 'kpi-dau'], ['sum-week', 'kpi-wau'], ['sum-online', 'kpi-online'], ['sum-matches', 'kpi-matches'], ['sum-careers', 'kpi-careers']];
+    for (const [a, b] of pairs) assert(sum[a] !== null && sum[a] === sum[b], `summary ${a}=${sum[a]} but ${b}=${sum[b]}`);
+    assert(Number(sum['sum-people']) === st.devices.length, 'sum-people ' + sum['sum-people'] + ' vs devices ' + st.devices.length);
+    assert(Number(sum['sum-matches']) === st.events.filter((e) => e.name === 'match_played').length, 'sum-matches vs mock');
+    assert(Number(sum['sum-careers']) === st.events.filter((e) => e.name === 'career_started').length, 'sum-careers vs mock');
+    const ratings = st.feedback.map((f) => f.rating);
+    const avg = (Math.round((Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 100) / 100) * 10) / 10).toFixed(1);
+    assert(sum['sum-rating'] === avg && Number(sum['sum-rating-count']) === ratings.length, 'rating ' + sum['sum-rating'] + '/' + sum['sum-rating-count'] + ' vs ' + avg + '/' + ratings.length);
+    assert(/עד היום נכנסו/.test(sum.text) && /אנשים/.test(sum.text) && /מחוברים עכשיו/.test(sum.text) && /משובים/.test(sum.text), 'summary text ' + sum.text);
+    assert(/"אנשים" = מכשירים/.test(sum.note), 'summary note ' + sum.note);
+    await noOverflow(admin, 'admin summary 1280');
+    await admin.evaluate(() => window.scrollTo(0, 0));
+    await shot(admin, 'admin-summary-1280', { full: false });
+
+    // the players tab
+    const pairsAll = new Set(st.events.filter((e) => e.name === 'career_snapshot').map((e) => e.device_id + '|' + ((e.props && e.props.careerId) || '-')));
+    await click(admin, T('nav-players'));
+    await admin.waitForSelector(T('player-item'), { visible: true, timeout: 10000 });
+    const cnt = await admin.$eval(T('players-count'), (e) => e.textContent);
+    assert(new RegExp('\\b' + pairsAll.size + '\\b').test(cnt), 'players count "' + cnt + '" vs ' + pairsAll.size + ' careers');
+    assert((await admin.$$(T('player-item'))).length === Math.min(50, pairsAll.size), 'rows on page 1');
+    assert(pairsAll.size > 50 && (await present(admin, T('players-next'))), 'pager missing for ' + pairsAll.size + ' careers');
+    await noOverflow(admin, 'admin players 1280');
+    await shot(admin, 'admin-players-1280', { full: false });
+    await click(admin, T('players-next'));
+    await admin.waitForFunction((n) => document.querySelectorAll('[data-testid="player-item"]').length === n && /עמוד 2/.test((document.querySelector('[data-testid="players-page"]') || {}).textContent || ''), { timeout: 8000 }, pairsAll.size - 50);
+    // sort by OVR: non-increasing
+    await click(admin, T('players-sort-ovr'));
+    await admin.waitForFunction(() => document.querySelector('[data-testid="players-sort-ovr"]').classList.contains('on') && document.querySelectorAll('[data-testid="player-item"]').length >= 2 && !document.querySelector('.adm-pl .adm-loading'), { timeout: 8000 });
+    const ovrs = await admin.$$eval('[data-testid="player-item"] .pl-ovr', (e) => e.map((x) => Number(x.textContent)).filter((x) => Number.isFinite(x)));
+    assert(ovrs.length >= 2 && ovrs.every((v, i) => i === 0 || ovrs[i - 1] >= v), 'OVR sort ' + ovrs.slice(0, 12).join(','));
+    // search by the character name the player chose
+    await admin.type(T('players-search'), 'טלמטריה');
+    await admin.waitForFunction(() => { const n = [...document.querySelectorAll('[data-testid="player-name"]')].map((e) => e.textContent); return n.length >= 1 && n.every((x) => x.includes('טלמטריה')); }, { timeout: 8000 });
+    const found = await admin.$$eval(T('player-name'), (e) => e.map((x) => x.textContent));
+    assert(found.includes('דני טלמטריה'), 'search result ' + JSON.stringify(found));
+    await click(admin, T('player-row-0'));
+    await admin.waitForSelector(T('player-details'), { visible: true });
+    const det = await admin.$eval(T('player-details'), (e) => e.textContent);
+    assert(/דני טלמטריה/.test(det) && /נוער/.test(det) && /OVR/.test(det), 'details ' + det.slice(0, 200));
+    await shot(admin, 'admin-players-1280-search', { full: false });
+    await admin.$eval(T('players-search'), (e) => { e.value = ''; });
+    await admin.type(T('players-search'), 'אין-כזה-שם');
+    await admin.waitForSelector(T('players-empty'), { visible: true, timeout: 8000 });
+    await admin.$eval(T('players-search'), (e) => { e.value = ''; });
+    await admin.type(T('players-search'), 'דני');
+    await admin.waitForFunction(() => { const n = [...document.querySelectorAll('[data-testid="player-name"]')].map((e) => e.textContent); return n.length >= 1 && n.every((x) => x.includes('דני')); }, { timeout: 8000 });
+    // mobile
+    await setWidth(admin, 390);
+    await admin.waitForSelector(T('player-item'), { visible: true });
+    await noOverflow(admin, 'admin players 390');
+    await admin.evaluate(() => window.scrollTo(0, 0));
+    await shot(admin, 'admin-players-390', { full: false });
+    await admin.$eval(T('players-search'), (e) => { e.value = ''; });
+    await admin.type(T('players-search'), 'טלמטריה');
+    await admin.waitForFunction(() => { const n = [...document.querySelectorAll('[data-testid="player-name"]')].map((e) => e.textContent); return n.length >= 1 && n.every((x) => x.includes('טלמטריה')); }, { timeout: 8000 });
+    await click(admin, T('player-row-0'));
+    await admin.waitForSelector(T('player-details'), { visible: true });
+    await noOverflow(admin, 'admin player details 390');
+    await shot(admin, 'admin-players-390-details', { full: false });
+    await click(admin, T('nav-dash'));
+    await admin.waitForSelector(T('summary-card'), { visible: true, timeout: 10000 });
+    await noOverflow(admin, 'admin summary 390');
+    await admin.evaluate(() => window.scrollTo(0, 0));
+    await shot(admin, 'admin-summary-390', { full: false });
+  });
+
   await scenario('B10 sub-path safety: every request is under /hayeled/, a font, the mock or an ad URL', async () => {
     const bad = allRequests.slice(startReq).filter((u) => !isOurs(u) && !isFont(u) && !isMock(u) && !isAd(u) && !u.startsWith('data:') && !u.startsWith('blob:'));
     assert(!bad.length, 'requests outside the allowed set: ' + [...new Set(bad)].slice(0, 10).join(', '));
@@ -1619,6 +1846,226 @@ async function groupD(browser) {
 /* Main                                                                */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Group E: v2.2 training load + coach talk (SPEC-2.2 §9)             */
+/* ------------------------------------------------------------------ */
+
+/** Hub VM fields of a v2.2 career in the page. */
+const hubLoad = (page) => page.evaluate(() => { const h = window.__hy.game.getHub(); return { energy: h.player.energy, load: h.player.load, sharp: h.player.sharp, intensity: h.training.intensity, focus: h.training.current, preview: h.training.preview, status: h.status, age: h.player.age, stage: h.player.stage }; });
+
+/** Put the career on a bench run (engine test hook), raise the coach's trust and make the talk succeed deterministically. */
+async function benchAndAsk(page, tag, onOpen) {
+  const thr = await page.evaluate(() => (window.__hy.game.getHub().player.stage === 'youth' ? 4 : 3));
+  // trust 95: odds ~0.85; a failed roll is retried from the same snapshot with another rng state (deterministic per state)
+  const snap = await page.evaluate((n) => {
+    const g = window.__hy.game;
+    g.devSetBench(n);
+    const S = JSON.parse(JSON.stringify(g.serialize()));
+    S.player.trust = 95;
+    S.player.injury = null; S.player.susp = 0;   // a talk needs a fit, available player
+    window.__e2eSnap = S;
+    return { ok: g.loadState(JSON.parse(JSON.stringify(S))).ok };
+  }, thr);
+  assert(snap.ok, 'bench snapshot did not load');
+  for (let k = 0; k < 8; k++) {
+    await goto(page, '#/settings');
+    await goto(page, '#/hub');
+    await page.waitForSelector(T('btn-coach-talk'), { visible: true, timeout: 8000 });
+    if (k === 0) await shot(page, 'v22-hub-coach-talk' + tag, { full: false });
+    await click(page, T('btn-coach-talk'));
+    await page.waitForSelector(T('coach-talk-ask'), { visible: true, timeout: 8000 });
+    await noMarkers(page, 'coach talk open' + tag);
+    await noOverflow(page, 'coach talk' + tag);
+    if (k === 0) await shot(page, 'v22-coach-talk-open' + tag, { full: false });
+    if (k === 0 && onOpen) await onOpen();
+    const odds = await page.$$eval('[data-testid^="coach-talk-"] .ctc-odds', (e) => e.length);
+    assert(odds === 3, 'odds chips on the approaches: ' + odds);
+    await click(page, T('coach-talk-ask'));
+    await page.waitForSelector(T('coach-talk-result'), { visible: true, timeout: 10000 });
+    const ok = await page.$eval(T('coach-talk-result'), (e) => e.dataset.success === '1');
+    if (ok) return true;
+    await page.evaluate((kk) => { const S = JSON.parse(JSON.stringify(window.__e2eSnap)); S.rng = (S.rng + 7919 * (kk + 1)) >>> 0; window.__hy.game.loadState(S); }, k);
+  }
+  throw new Error('coach talk never succeeded');
+}
+
+/** Advance weeks through the UI until the promise is settled (kept / broken). */
+async function playUntilPromise(page) {
+  const read = () => page.evaluate(() => { const p = window.__hy.game.serialize().player; return { res: p.talk.res || null, active: !!(p.talk.promise && p.talk.promise.ok === null), benchRun: p.benchRun }; });
+  for (let i = 0; i < 8; i++) {
+    const r = await read();
+    if (r.res === 'kept' || r.res === 'broken') return r;
+    await advanceUI(page, 'auto');
+  }
+  return read();
+}
+
+/** Is `text` the feminine (and not the masculine) rendering of one of the content templates at COACH_TALK[keyPath]? */
+async function feminineOf(page, text, keyPath) {
+  return page.evaluate(async (txt, kp) => {
+    const STR = await import(new URL('js/data/strings.js', location.href).href);
+    let node = STR.COACH_TALK;
+    for (const k of kp) node = node && node[k];
+    const list = Array.isArray(node) ? node : typeof node === 'string' ? [node] : [];
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const norm = (s) => s.replace(/\s+/g, ' ').trim();
+    const toRe = (tpl, fem) => new RegExp('^' + norm(tpl).split(/(\{\{[^}]*\}\}|\{[a-z]+\})/).map((part) => {
+      const m = part.match(/^\{\{([^|}]*)\|([^}]*)\}\}$/);
+      if (m) return esc(fem ? m[2] : m[1]);
+      if (/^\{[a-z]+\}$/.test(part)) return '.+?';
+      return esc(part);
+    }).join('') + '$');
+    const t = norm(txt);
+    const fem = list.some((tpl) => toRe(tpl, true).test(t));
+    const masc = list.some((tpl) => tpl.includes('{{') && toRe(tpl, false).test(t) && !toRe(tpl, true).test(t));
+    return { fem, masc, n: list.length };
+  }, text, keyPath);
+}
+
+async function groupE(browser) {
+  const ctx = await browser.createBrowserContext();
+  const page = await newPage(ctx, 'E');
+
+  await scenario('E1 training intensity: hard changes the preview; after the week the energy is below a normal week', async () => {
+    await page.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(page);
+    await createCareerUI(page, { first: 'עומר', last: 'עומס', shotsOn: false, tag: '-e' });
+    await closeTopModals(page);
+    await page.waitForSelector(T('intensity-row'), { visible: true });
+    await click(page, T('training-shooting'));
+    await click(page, T('intensity-normal'));
+    await sleep(200);
+    const pvNormal = (await page.$eval(T('training-preview'), (e) => e.textContent)).replace(/\s+/g, ' ').trim();
+    const vmN = await hubLoad(page);
+    await click(page, T('intensity-hard'));
+    await sleep(200);
+    const pvHard = (await page.$eval(T('training-preview'), (e) => e.textContent)).replace(/\s+/g, ' ').trim();
+    const vmH = await hubLoad(page);
+    assert(vmH.intensity === 'hard' && vmH.focus === 'shooting', 'hard not selected ' + JSON.stringify(vmH));
+    assert(pvHard !== pvNormal, 'preview did not change: ' + pvHard);
+    assert(vmH.preview.energyDelta < vmN.preview.energyDelta && vmH.preview.loadDelta > vmN.preview.loadDelta && vmH.preview.growthMult > vmN.preview.growthMult, 'preview numbers ' + JSON.stringify([vmN.preview, vmH.preview]));
+    assert(pvHard.includes(String(Math.abs(vmH.preview.energyDelta))) && pvHard.includes(String(vmH.preview.growthMult)), 'preview text vs VM: ' + pvHard);
+    assert((await page.$eval(T('intensity-extreme'), (e) => e.disabled)) === (vmH.age < 16), 'extreme lock below 16');
+    await noMarkers(page, 'hub training'); await noOverflow(page, 'hub training');
+    // the same week with normal intensity from the same snapshot (facade) -> the hard week must end with less energy
+    const snap = await page.evaluate(() => JSON.stringify(window.__hy.game.serialize()));
+    const r = await advanceUI(page, 'auto');
+    assert(r.state === 'hub' || r.state === 'season', 'after the week: ' + r.state);
+    const after = await hubLoad(page);
+    assert(after.intensity === 'hard', 'intensity not kept from week to week: ' + after.intensity);
+    // the same week at hard and at normal from the same snapshot (facade). An injury that week means no training at all
+    // (both weeks end equal), so rng variants with an injury are skipped (deterministic per rng state).
+    const cmp = await page.evaluate((s) => {
+      const g = window.__hy.game;
+      const keep = JSON.stringify(g.serialize());
+      const run = (it, k) => {
+        const S = JSON.parse(s); S.trainInt = it; S.rng = (S.rng + k * 2654435761) >>> 0;
+        g.loadState(S);
+        let a = g.advanceWeek({ focus: 'shooting', intensity: it });
+        while (a.ok && a.status === 'match') { g.autoPlayMatch(); g.finishMatch(); a = g.resumeWeek(); }
+        const h = g.getHub().player;
+        return { energy: h.energy, injured: !!h.injury };
+      };
+      let out = null;
+      for (let k = 0; k < 12 && !out; k++) { const H = run('hard', k), N = run('normal', k); if (!H.injured && !N.injured) out = { hard: H.energy, normal: N.energy, k }; }
+      g.loadState(JSON.parse(keep));
+      return out;
+    }, snap);
+    assert(cmp, 'no injury-free week to compare in 12 rng variants');
+    assert(cmp.hard < cmp.normal, `hard week energy ${cmp.hard} not below the normal week ${cmp.normal}`);
+    await goto(page, '#/settings');
+    await goto(page, '#/hub');
+    await page.waitForSelector(T('hub-load'), { visible: true });
+    await goto(page, '#/profile');
+    await page.waitForSelector(T('profile-load'), { visible: true });
+    await noMarkers(page, 'profile load');
+  });
+
+  await scenario('E2 bench run (engine hook) -> "לדבר עם המאמן" -> ask -> promise shown -> starts the next match', async () => {
+    await goto(page, '#/hub');
+    await closeTopModals(page);
+    assert(!(await present(page, T('btn-coach-talk'))), 'coach talk button before the bench run');
+    await benchAndAsk(page, '');
+    const pr = await page.$eval(T('coach-talk-promise'), (e) => e.textContent.replace(/\s+/g, ' ').trim());
+    assert(/תפתח/.test(pr), 'promise text: ' + pr);
+    await noMarkers(page, 'coach talk result');
+    await shot(page, 'v22-coach-talk-ask-ok', { full: false });
+    await click(page, T('btn-coach-talk-done'));
+    await page.waitForSelector(T('hub-promise'), { visible: true });
+    assert(!(await present(page, T('btn-coach-talk'))), 'talk button still offered while a promise is active');
+    const st = await playUntilPromise(page);
+    assert(st.res === 'kept', 'promise not kept: ' + JSON.stringify(st));
+    assert(st.benchRun === 0, 'bench run not reset after the start: ' + st.benchRun);
+    const th = await page.evaluate(() => window.__hy.game.getInbox().filter((x) => x.from === 'coach').length);
+    assert(th >= 1, 'coach talk thread not in the inbox');
+  });
+
+  await scenario('E3 girl career: the coach talk is in feminine Hebrew (button, opener, reply, promise, load label)', async () => {
+    const pg = await newPage(ctx, 'E-girl');
+    await pg.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(pg);
+    await createCareerUI(pg, { first: 'נועה', last: 'ספסל', shotsOn: false, gender: 'f', tag: '-ef' });
+    await closeTopModals(pg);
+    const band = await pg.$eval(T('hub-load'), (e) => e.textContent);
+    assert(!/רענן(?!ה)|עייף(?!ה)|עמוס(?!ה)|שחוק(?!ה)/.test(band), 'load band label not feminine: ' + band);
+    let demand = '';
+    await benchAndAsk(pg, '-girl', async () => { demand = await pg.$eval(T('coach-talk-demand'), (e) => e.querySelector('b').textContent.trim()); });
+    assert(/דורשת/.test(demand) && !/דורש /.test(demand + ' '), 'demand button not feminine: ' + demand);
+    const bubbles = await pg.$$eval('.ct-bubbles .bub.them span', (e) => e.map((x) => x.textContent.trim()));
+    assert(bubbles.length >= 2, 'coach bubbles ' + bubbles.length);
+    let open = { fem: false, masc: false };
+    for (const k of ['youth', 'bench', 'default']) { const o = await feminineOf(pg, bubbles[0], ['open', k]); if (o.fem || o.masc) { open = o; break; } }
+    assert(open.fem && !open.masc, 'opener not the feminine template: ' + bubbles[0]);
+    const reply = await feminineOf(pg, bubbles[bubbles.length - 1], ['reply', 'ask', 'ok']);
+    assert(reply.fem && !reply.masc, 'reply not the feminine template: ' + bubbles[bubbles.length - 1]);
+    const pr = await pg.$eval(T('coach-talk-promise'), (e) => e.textContent);
+    assert(/תפתחי/.test(pr) && !/תפתח /.test(pr + ' '), 'promise not feminine: ' + pr);
+    await noMarkers(pg, 'girl coach talk');
+    await shot(pg, 'v22-coach-talk-girl', { full: false });
+    await pg.close();
+  });
+
+  await scenario('E4 week summary load line, profile sparkline, hub and profile at 360 px', async () => {
+    await page.bringToFront();
+    await goto(page, '#/hub');
+    await closeTopModals(page);
+    let saw = false;
+    for (let w = 0; w < 6 && !saw; w++) {
+      await closeTopModals(page);
+      await click(page, T('btn-advance'));
+      await sleep(300);
+      for (let i = 0; i < 20; i++) {
+        let s = await uiState(page);
+        if (s === 'match') { await playMatch(page, 'auto'); continue; }
+        if (s === 'interstitial') { await click(page, T('btn-ad-close')); continue; }
+        if (s === 'hub') { await sleep(700); if (await present(page, T('week-summary'))) s = 'week'; }
+        if (s !== 'week') break;
+        saw = await present(page, T('week-load-line'));
+        const line = saw ? await page.$eval(T('week-load-line'), (e) => e.textContent) : '';
+        assert(/אנרגיה/.test(line) && /עומס/.test(line) && !/כוח/.test(line), 'week load line: ' + line);
+        await noMarkers(page, 'week summary');
+        await shot(page, 'v22-week-summary', { full: false });
+        await click(page, T('btn-week-ok'));
+        await sleep(300);
+        break;
+      }
+    }
+    assert(saw, 'week summary with the load line not shown');
+    for (let i = 0; i < 3; i++) await advanceUI(page, 'auto');
+    await goto(page, '#/profile');
+    await page.waitForSelector(T('load-sparkline'), { visible: true });
+    await noMarkers(page, 'profile sparkline');
+    await setWidth(page, 360);
+    await noOverflow(page, 'profile 360');
+    await goto(page, '#/hub');
+    await page.waitForSelector(T('intensity-row'), { visible: true });
+    await noOverflow(page, 'hub 360');
+    await setWidth(page, 390);
+  });
+
+  await ctx.close();
+}
+
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
   await startServe();
@@ -1634,6 +2081,7 @@ async function main() {
     if (!ONLY || ONLY === 'c') await groupC(browser);
     if (!ONLY || ONLY === 'b') await groupB(browser);
     if (!ONLY || ONLY === 'd') await groupD(browser);
+    if (!ONLY || ONLY === 'e') await groupE(browser);
   } finally {
     await browser.close().catch(() => {});
     for (const c of children) { try { c.kill(); } catch { /* ignore */ } }

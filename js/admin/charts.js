@@ -308,3 +308,56 @@ export function splitBar(parts, { testid, empty = 'אין עדיין נתוני�
   wrap.appendChild(tip);
   return wrap;
 }
+
+/**
+ * Success-rate rows (v2.2 coach talks): one row per category with "success / total · rate%", a bar whose
+ * length is the rate (0..100%) and an optional reference tick (e.g. the formula's base chance).
+ * items: [{ name, success, total, ref, refLabel, testid }] in a FIXED order.
+ */
+export function rateBars(items, { empty = 'אין עדיין נתונים', color = '#3987e5', testid } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.some((it) => Number(it.total) > 0)) {
+    const e = htmlEl('div', 'adm-empty', empty);
+    if (testid) e.setAttribute('data-testid', testid);
+    return e;
+  }
+  const ul = htmlEl('ul', 'adm-list adm-rates');
+  if (testid) ul.setAttribute('data-testid', testid);
+  const wrap = htmlEl('div', 'adm-chart');
+  const tip = htmlEl('div', 'adm-tip');
+  tip.hidden = true;
+  list.forEach((it) => {
+    const total = Math.max(0, Number(it.total) || 0);
+    const ok = Math.min(total, Math.max(0, Number(it.success) || 0));
+    const rate = total ? ok / total : 0;
+    const li = htmlEl('li');
+    if (it.testid) li.setAttribute('data-testid', it.testid);
+    li.setAttribute('data-rate', String(Math.round(rate * 100)));
+    li.appendChild(htmlEl('span', '', it.name));
+    li.appendChild(htmlEl('span', 'num', total ? ok + ' / ' + total + ' · ' + Math.round(rate * 100) + '%' : '0 · –'));
+    const track = htmlEl('span', 'track');
+    const bar = htmlEl('span', 'bar');
+    bar.style.width = (total ? Math.max(2, rate * 100) : 0) + '%';
+    bar.style.background = it.color || color;
+    track.appendChild(bar);
+    if (typeof it.ref === 'number' && it.ref > 0 && it.ref < 1) {
+      const tick = htmlEl('span', 'ref');
+      tick.style.insetInlineStart = (it.ref * 100).toFixed(1) + '%';
+      track.appendChild(tick);
+    }
+    const show = (ev) => {
+      tip.textContent = it.name + ': ' + (total ? ok + ' הצליחו מתוך ' + total + ' (' + Math.round(rate * 100) + '%)' : 'אין עדיין')
+        + (it.refLabel ? ' · ' + it.refLabel : '');
+      tip.hidden = false;
+      placeTip(tip, wrap, ev.clientX, ev.clientY);
+    };
+    li.addEventListener('pointermove', show);
+    li.addEventListener('pointerdown', show);
+    li.addEventListener('pointerleave', () => { tip.hidden = true; });
+    li.appendChild(track);
+    ul.appendChild(li);
+  });
+  wrap.appendChild(ul);
+  wrap.appendChild(tip);
+  return wrap;
+}

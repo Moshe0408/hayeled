@@ -62,6 +62,12 @@ const P = {
   pin: '<path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.8 12 21 12 21z"/><circle cx="12" cy="9.8" r="2.4"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.2"/>',
   chevron: '<path d="M15 6l-6 6 6 6"/>',
+  // v2.2: training load + coach talk
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3M12 14.5v2.5"/>',
+  talk: '<path d="M3.5 5.5h11A1.5 1.5 0 0 1 16 7v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h-2A1.5 1.5 0 0 1 2 13V7a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M16 9h4.5A1.5 1.5 0 0 1 22 10.5v6a1.5 1.5 0 0 1-1.5 1.5h-1.5v3l-3.5-3H11a1.5 1.5 0 0 1-1.5-1.5v-1.5"/>',
+  bench: '<path d="M3 11h18M4.5 11v7M19.5 11v7M3 15h18M6 7.5h12"/>',
+  promise: '<path d="M12 3.2 19 6v5.5c0 4.3-3 7.7-7 9.3-4-1.6-7-5-7-9.3V6z"/><path d="m8.8 12 2.2 2.2 4.4-4.6"/>',
+  fist: '<path d="M7 11V8.5a1.5 1.5 0 0 1 3 0V11M10 10V7.5a1.5 1.5 0 0 1 3 0V10M13 10V8a1.5 1.5 0 0 1 3 0v2.5M16 10.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5A5.5 5.5 0 0 1 6 15.5V12a1.5 1.5 0 0 1 3 0v1.5"/>',
 };
 const FILLED = { ff: 1, skip: 1, play: 1, card: 1 };
 
@@ -105,7 +111,7 @@ const PERSONA = {
   mom: ['heart', 'p-rose'], dad: ['user', 'p-blue'], grandma: ['heart', 'p-rose'], brother: ['user', 'p-teal'], partner: ['heart', 'p-rose'],
   friends: ['users', 'p-teal'], agent: ['briefcase', 'p-gold'], coach: ['clipboard', 'p-green'], staff: ['clipboard', 'p-green'], journalist: ['mic', 'p-blue'],
   sponsor: ['briefcase', 'p-gold'], social: ['phone', 'p-violet'], captain: ['shield', 'p-green'], fan: ['mega', 'p-teal'], national_coach: ['flag', 'p-blue'],
-  owner: ['hat', 'p-gold'], doctor: ['medic', 'p-red'], club: ['stadium', 'p-green'], system: ['star', 'p-gold'], board: ['bank', 'p-gold'], federation: ['flag', 'p-blue'],
+  owner: ['hat', 'p-gold'], doctor: ['medic', 'p-red'], physio: ['medic', 'p-red'], club: ['stadium', 'p-green'], system: ['star', 'p-gold'], board: ['bank', 'p-gold'], federation: ['flag', 'p-blue'],
 };
 export function personaIco(from) {
   const p = PERSONA[from] || ['chat', 'p-blue'];

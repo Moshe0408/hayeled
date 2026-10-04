@@ -11,6 +11,7 @@ import { maybePromptFeedback } from './feedback.js';
 import { g, gtext } from './gender.js';
 import { mountTilt, mountStadium } from './fx.js';
 import { ico } from './icons.js';
+import { intensityRow, previewLine, loadBar, sharpTag, normInt, benchRunHe } from './training.js';
 
 const MAIN_BTN = {
   idle: 'שחק{{|י}} את השבוע',
@@ -37,7 +38,7 @@ const QUICK_ICO = {
   awards: '<circle cx="12" cy="9" r="5.5"/><path d="M9 13.8 7.5 21l4.5-2.5 4.5 2.5-1.5-7.2"/>',
   hof: '<path d="M3 21h18M5 18h14M6 18V10M10 18V10M14 18V10M18 18V10M3.5 10h17L12 4z"/>',
 };
-const ALERT_ICO = { contract_expiring: ['pen', 'warn'], injured: ['medic', 'bad'], callup: ['flag', 'teal'], window_open: ['swap', 'teal'], offer: ['mail', 'gold'], energy_low: ['battery', 'warn'], suspended: ['card', 'bad'], free_agent: ['briefcase', 'warn'], season_review: ['flag', 'gold'] };
+const ALERT_ICO = { contract_expiring: ['pen', 'warn'], injured: ['medic', 'bad'], callup: ['flag', 'teal'], window_open: ['swap', 'teal'], offer: ['mail', 'gold'], energy_low: ['battery', 'warn'], load_high: ['dumbbell', 'warn'], load_burnt: ['dumbbell', 'bad'], suspended: ['card', 'bad'], free_agent: ['briefcase', 'warn'], season_review: ['flag', 'gold'] };
 const svgI = (d) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 
 export function render(root) {
@@ -45,6 +46,7 @@ export function render(root) {
   if (!first) { navigate('#/title'); return; }
   if (first.status === 'retired') { navigate('#/retire'); return; }
   let training = first.training && first.training.current;
+  let intensity = normInt(first.training && first.training.intensity);
   let unmountAd = null;
   let untilt = () => {};
   let unstadium = () => {};
@@ -55,11 +57,12 @@ export function render(root) {
     if (!hub) return;
     if (hub.status === 'retired') { navigate('#/retire'); return; }
     training = (hub.training && hub.training.current) || training;
+    intensity = normInt((hub.training && hub.training.intensity) || intensity);
     const prof = call(() => game.getProfile(), { quiet: true });
     let meta = null;
     try { meta = game.getSaveMeta(); } catch { meta = null; }
     untilt(); unstadium();
-    root.innerHTML = tpl(hub, training, prof, meta);
+    root.innerHTML = tpl(hub, training, intensity, prof, meta);
     if (unmountAd) unmountAd();
     unmountAd = mountAdSlot(root.querySelector('.ad-slot'), 'hub_banner');
     rewardedButton(root.querySelector('.rw-slot'), () => draw());
@@ -92,7 +95,7 @@ export function render(root) {
     if (hub.status === 'retired') { navigate('#/retire'); return; }
     busy = true;
     try {
-      const r = call(() => (hub.status === 'in_week' ? game.resumeWeek() : game.advanceWeek(training)));
+      const r = call(() => (hub.status === 'in_week' ? game.resumeWeek() : game.advanceWeek({ focus: training, intensity })));
       handleResult(r);
     } finally { busy = false; }
   }
@@ -182,8 +185,16 @@ export function render(root) {
     else if (act === 'train') {
       const id = b.dataset.v;
       if (b.disabled) return;
-      const r = call(() => game.setTraining(id));
+      const r = call(() => game.setTraining(id, intensity));
       if (r && r.ok !== false) training = id;
+      else if (r && r.messageHe) toast(r.messageHe);
+      draw();
+    } else if (act === 'int') {
+      const id = b.dataset.v;
+      if (b.disabled) return;
+      const r = call(() => game.setTraining(training, id));
+      if (r && r.ok !== false) intensity = normInt(id);
+      else if (r && r.messageHe) toast(gtext(r.messageHe));
       draw();
     } else if (act === 'go') {
       const to = b.dataset.to;
@@ -245,6 +256,7 @@ function hero(hub, prof, meta) {
 
 function statusPanel(hub) {
   const p = hub.player || {};
+  const hasLoad = p.load !== undefined && p.load !== null;
   return `<section class="card status-card">
     ${p.injury ? `<p class="note warn">${ico('medic', 'bad')} ${esc(gtext('פצוע{{|ה}}'))}: ${esc(p.injury.he)} (${esc(p.injury.weeks)} שבועות)</p>` : ''}
     ${p.susp ? `<p class="note warn">${ico('card', 'bad')} ${esc(gtext('מורחק{{|ת}}'))} ל-${esc(p.susp)} משחקים</p>` : ''}
@@ -252,6 +264,7 @@ function statusPanel(hub) {
       ${bar('אנרגיה', p.energy, { testid: 'hub-energy', ico: '<i class="bi bi-energy"></i>' })}
       ${bar('מורל', p.morale, { ico: '<i class="bi bi-morale"></i>' })}
     </div>
+    ${hasLoad ? `<div class="hh-load">${loadBar(p.load, p.loadBand, { bandLabel: p.loadHe || p.loadBandHe })}${sharpTag(p.sharp, p.sharpHe)}</div>` : ''}
     <div class="rw-slot" hidden></div>
     <div class="money-row">
       <div class="mr-item"><small>בבנק</small><b class="num">${esc(money(p.money))}</b></div>
@@ -275,7 +288,36 @@ function matchPreview(fx, label) {
   </div>`;
 }
 
-function tpl(hub, training, prof, meta) {
+/** v2.2: "לדבר עם המאמן" call-to-action (only when the engine allows a talk). */
+function coachTalkCta(hub) {
+  const ct = hub.coachTalk;
+  if (ct && !ct.ok && ct.promise && ct.promise.he) return `<p class="note good ct-promise-note" data-testid="hub-promise">${ico('promise', 'gold')} <span><b>הבטחה מהמאמן:</b> ${esc(gtext(ct.promise.he))}</span></p>`;
+  if (!ct || !ct.ok) return '';
+  const sub = benchRunHe(ct) || gtext('הגיע הזמן לשיחה');
+  return `<button type="button" class="ct-cta" data-act="go" data-to="#/coach-talk" data-testid="btn-coach-talk">
+    <span class="ct-cta-ico">${ico('talk')}</span>
+    <span class="grow"><b>לדבר עם המאמן</b><small>${ico('bench')} ${esc(sub)}</small></span>
+    <span class="chev" aria-hidden="true">‹</span></button>`;
+}
+
+function trainCardHtml(hub, training, intensity) {
+  const opts = (hub.training && hub.training.options) || [];
+  const cur = opts.find((o) => o.id === training);
+  const rest = training === 'rest';
+  const tr = hub.training || {};
+  const pv = tr.preview || null;
+  const ext = (tr.intensities || []).find((x) => x && x.id === 'extreme');
+  const lockExtreme = ext ? !!ext.locked : Number((hub.player || {}).age) < 16;
+  return `<section class="card train-card int-${rest ? 'rest' : esc(intensity)}"><h2 class="card-title"><span>אימון השבוע</span></h2>
+    <div class="tc-label">${ico('target')}<span>פוקוס</span></div>
+    <div class="train-grid">${opts.map((o) => `<button type="button" class="train${o.id === training ? ' on' : ''}" data-act="train" data-v="${esc(o.id)}" data-testid="training-${esc(o.id)}" ${o.disabled ? 'disabled' : ''}>${svgI(TRAIN_ICO[o.id] || TRAIN_ICO.balanced)}<span>${esc(gtext(o.he))}</span></button>`).join('')}</div>
+    ${rest ? ''
+      : `<div class="tc-label">${ico('dumbbell')}<span>עוצמה</span></div>${intensityRow({ current: intensity, lockExtreme, lockHe: 'מגיל 16', titleHe: ext && ext.lockHe })}`}
+    ${previewLine(pv, tr.physioWeek ? 'light' : intensity, { rest, noteHe: tr.physioHe || '' })}
+    ${cur && cur.desc ? `<p class="muted small train-desc">${esc(gtext(cur.desc))}</p>` : ''}</section>`;
+}
+
+function tpl(hub, training, intensity, prof, meta) {
   const status = hub.status;
   const week = hub.thisWeek || [];
   const main = week[0] || null;
@@ -293,11 +335,7 @@ function tpl(hub, training, prof, meta) {
     </div>
   </section>`;
 
-  const opts = (hub.training && hub.training.options) || [];
-  const cur = opts.find((o) => o.id === training);
-  const trainCard = `<section class="card train-card"><h2 class="card-title"><span>אימון השבוע</span></h2>
-    <div class="train-grid">${opts.map((o) => `<button type="button" class="train${o.id === training ? ' on' : ''}" data-act="train" data-v="${esc(o.id)}" data-testid="training-${esc(o.id)}" ${o.disabled ? 'disabled' : ''}>${svgI(TRAIN_ICO[o.id] || TRAIN_ICO.balanced)}<span>${esc(gtext(o.he))}</span></button>`).join('')}</div>
-    ${cur && cur.desc ? `<p class="muted small train-desc">${esc(gtext(cur.desc))}</p>` : ''}</section>`;
+  const trainCard = trainCardHtml(hub, training, intensity);
 
   const alerts = (hub.alerts || []).filter((a) => a && a.textHe);
   const alertsHtml = alerts.length ? `<div class="alerts">${alerts.map((a) => `<button type="button" class="alert alert-${esc(a.type)}" ${a.route ? `data-act="go" data-to="${esc(a.route)}"` : 'disabled'}><span class="al-ico">${ico(...(ALERT_ICO[a.type] || ['info', '']))}</span><span class="grow">${esc(gtext(a.textHe))}</span>${a.route ? '<span class="chev">‹</span>' : ''}</button>`).join('')}</div>` : '';
@@ -317,6 +355,7 @@ function tpl(hub, training, prof, meta) {
     ${hero(hub, prof, meta)}
     ${notes}
     ${alertsHtml}
+    ${coachTalkCta(hub)}
     ${weekCard}
     ${statusPanel(hub)}
     ${trainCard}

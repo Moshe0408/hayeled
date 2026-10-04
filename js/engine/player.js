@@ -86,6 +86,8 @@ export function createPlayer(rng, o, season, econ = 1) {
     gender: o.gender === 'f' ? 'f' : 'm', look: o.look || null, num: typeof o.num === 'number' ? o.num : defaultShirt(pos),
     stage: 'youth', club: o.club, contract: null, parent: null, next: null, youth: 'u17', owned: [],
     mins: [], bench: 0, freeWeeks: 0, treq: false, agentPush: 0, natLvl: 'none',
+    // v2.2: training load, match sharpness, bench run and coach talks
+    load: 20, sharp: 60, benchRun: 0, lowMin: 0, talk: { lastWeekAbs: -99, promise: null, mood: 0 }, lh: [], ld: { burn: 0, lastBurn: -99, burns: 0, hard: 0, ntNo: 0 },
     caps: { u17: 0, u19: 0, u21: 0, senior: 0 }, ig: { u17: 0, u19: 0, u21: 0, senior: 0 }, s: emptyStats(),
   };
 }
@@ -109,8 +111,14 @@ export const FOCUS = {
 };
 const DECL = { pac: 1.6, phy: 1.3 };
 
-// Weekly development; returns { d: ovr delta (raw), attrs: {k: delta} }
-export function developWeek(S, rng, training) {
+// v2.2 growth multiplier per training intensity (SPEC-2.2 §3.5)
+export const INT_GROWTH = { light: 0.75, normal: 1.0, hard: 1.25, extreme: 1.45 };
+// calibration (SPEC-2.2 §3.5): OVR points the growth target moves per +1.0 of the intensity multiplier
+// (x fatigue; the focus bonus does not move it): hard +2, extreme +3 (capped), light -2, burnt normal -2.4.
+// The target never goes more than `above` points past the potential.
+export const DEV22 = { over: 8, above: 0 };   // owner 2026-10-04: the potential is a hard ceiling
+// Weekly development; returns { d: ovr delta (raw), attrs: {k: delta} }. intensity: light|normal|hard|extreme (default S.trainInt)
+export function developWeek(S, rng, training, intensity) {
   const p = S.player;
   const out = { d: 0, attrs: {} };
   if (S.week > 44 || p.injury || p.stage === 'retired') return out;
@@ -125,15 +133,24 @@ export function developWeek(S, rng, training) {
     const totMin = (p.mins || []).reduce((s, x) => s + x, 0);
     const fa = formAvgOr(p);
     const minutesF = 0.55 + 0.45 * Math.min(1, totMin / (8 * 90 * 0.8)) + clamp((fa - 6.6) * 0.15, -0.1, 0.15);
-    const trainF = training === 'balanced' ? 1.0 : 1.05;
-    mult = clamp((p.pot - before) / Math.max(2, growthLeft(age)), 0, 1.3) * minutesF * trainF * (0.9 + p.morale / 500);
+    const focusF = training === 'balanced' ? 1.0 : 1.05;
+    const it = INT_GROWTH[intensity] !== undefined ? intensity : (INT_GROWTH[S.trainInt] !== undefined ? S.trainInt : 'normal');
+    const load = typeof p.load === 'number' ? p.load : 20;
+    const fatigueF = load >= 80 ? 0.7 : load >= 60 ? 0.9 : 1.0;   // a burnt player does not learn
+    const trainF = focusF * INT_GROWTH[it] * fatigueF;
+    // v2.2: the growth target moves with the week's intensity (hard work squeezes a little past the potential,
+    // light work / a burnt body stops short of it); at most DEV22.above past the potential (SPEC-2.2 §3.5)
+    const target = p.pot + Math.min(DEV22.above, (INT_GROWTH[it] * fatigueF - 1) * DEV22.over);
+    mult = clamp((target - before) / Math.max(2, growthLeft(age)), 0, 1.3) * minutesF * trainF * (0.9 + p.morale / 500);
     let fw = FOCUS[training];
     if (training === 'goalkeeping' && p.pos !== 'GK') fw = null;
     if (!fw) fw = pw;
     const keys = new Set(Object.keys(pw).concat(Object.keys(fw)));
     for (const k of keys) share[k] = 0.65 * (pw[k] || 0) + 0.35 * (fw[k] || 0);
   } else {
-    mult = training === 'physical' ? 0.85 : 1;
+    // veterans: hard / extreme physical work slows the decline further (at a high load cost)
+    const it = INT_GROWTH[intensity] !== undefined ? intensity : (INT_GROWTH[S.trainInt] !== undefined ? S.trainInt : 'normal');
+    mult = training === 'physical' ? (it === 'hard' || it === 'extreme' ? 0.75 : 0.85) : 1;
     for (const k in pw) share[k] = pw[k] * (DECL[k] || 0.7);
   }
   const d = g / 44 * mult;

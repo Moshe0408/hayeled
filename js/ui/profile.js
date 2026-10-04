@@ -9,6 +9,7 @@ import { g, gtext } from './gender.js';
 import { mountTilt } from './fx.js';
 import { storeModel, collectionHTML } from './shop.js';
 import { ico } from './icons.js';
+import { loadBar, sharpTag, loadSparkline } from './training.js';
 
 const TABS = [{ id: 'overview', he: 'סקירה' }, { id: 'attrs', he: 'יכולות' }, { id: 'contract', he: 'כסף ואוסף' }, { id: 'stats', he: 'סטטיסטיקה' }];
 
@@ -28,6 +29,17 @@ function collectionCard(p) {
   return card(sum + inner, { title: 'האוסף שלי', cls: 'prof-coll', extra: ' <a class="small" href="#/shop" data-testid="link-shop">לחנות ‹</a>' });
 }
 
+/** v2.2: load bar + match-sharpness tag + 8-week load sparkline inside the "מצב" card. */
+function loadCard(st, hub) {
+  const hp = (hub && hub.player) || {};
+  const load = st.load !== undefined ? st.load : hp.load;
+  if (load === undefined || load === null) return '';
+  const hist = st.loadHist || st.loadHistory || hp.loadHist || hp.loadHistory || null;
+  return `<div class="prof-load">${loadBar(load, st.loadBand || hp.loadBand, { testid: 'profile-load', bandLabel: st.loadHe || hp.loadHe })}
+    <div class="pl-tags">${sharpTag(st.sharp !== undefined ? st.sharp : hp.sharp, st.sharpHe || hp.sharpHe)}</div>
+    ${loadSparkline(hist)}</div>`;
+}
+
 export function render(root, params = {}) {
   let tab = TABS.some((t) => t.id === params.tab) ? params.tab : 'overview';
   let untilt = () => {};
@@ -42,6 +54,7 @@ export function render(root, params = {}) {
     const rep = st.rep || {};
     const retired = hub && hub.status === 'retired';
     const canReq = !!(hub && hub.canRequestTransfer);
+    const talk = hub && hub.coachTalk && hub.coachTalk.ok;
     const hasClub = !!(hub && hub.club);
     const club = hub && hub.club;
     const nat = meta ? nationTeam(meta.nation) : null;
@@ -70,7 +83,7 @@ export function render(root, params = {}) {
           <div class="kpi"><small>מורל</small>${moraleIcon(st.morale)}</div>
           <div class="kpi"><small>כושר אחרון</small>${formDots(hub && hub.player ? hub.player.form : [], { max: 5 })}</div>
         </div>
-        ${bar('אנרגיה', st.energy)}${bar('מורל', st.morale)}${bar('אמון המאמן', st.trust)}${bar('אהבת הקהל', st.fans)}${bar('יחסים בקבוצה', st.mates)}`, { title: 'מצב' })}
+        ${bar('אנרגיה', st.energy)}${loadCard(st, hub)}${bar('מורל', st.morale)}${bar('אמון המאמן', st.trust)}${bar('אהבת הקהל', st.fans)}${bar('יחסים בקבוצה', st.mates)}`, { title: 'מצב' })}
         ${card(`${bar('בארץ', rep.l)}${bar('ביבשת', rep.c)}${bar('בעולם', rep.w)}`, { title: 'מוניטין' })}
         ${card(attrTable(p.attrs || []), { title: p.gk ? 'יכולות שוער' : 'יכולות', extra: '<a class="small" href="#/profile?tab=attrs" data-act="tab" data-v="attrs">לפירוט ‹</a>' })}
         ${(p.owned || []).length ? collectionCard(p) : ''}`;
@@ -102,6 +115,7 @@ export function render(root, params = {}) {
       ${segmented('ptab', TABS, tab)}
       <div class="tab-body">${body}</div>
       ${retired ? '' : `<div class="btn-col">
+        ${talk ? '<button type="button" class="btn btn-gold" data-act="talk" data-testid="btn-coach-talk-profile">' + ico('talk') + 'לדבר עם המאמן</button>' : ''}
         ${canReq ? '<button type="button" class="btn" data-act="treq" data-testid="btn-transfer-request">' + ico('mega') + 'בקשת העברה</button>'
           : hasClub && p.stageHe && hub.player.stage === 'pro' ? '<button type="button" class="btn btn-ghost" data-act="treq-cancel" data-testid="btn-transfer-cancel">ביטול בקשת העברה</button>' : ''}
         ${hub && hub.canRetire ? `<button type="button" class="btn btn-danger" data-act="retire" data-testid="btn-retire">${ico('wave')}${esc(g('לפרוש', 'לפרוש'))}</button>` : ''}
@@ -116,6 +130,7 @@ export function render(root, params = {}) {
     const act = b.dataset.act;
     if (act === 'seg') { tab = b.dataset.val; draw(); return; }
     if (act === 'tab') { e.preventDefault(); tab = b.dataset.v; draw(); return; }
+    if (act === 'talk') { navigate('#/coach-talk'); return; }
     if (act === 'treq') {
       const ok = await confirmDialog({ title: 'לבקש העברה?', text: 'האמון של המאמן והאוהדים ירד, אבל יגיעו יותר הצעות.', yes: 'כן, אני רוצה לעזוב' });
       if (!ok) return;

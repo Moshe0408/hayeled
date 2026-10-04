@@ -26,6 +26,8 @@ const E = (o) => ({
   messages: o.messages,
   choices: o.choices ?? [],
   defaultChoice: o.defaultChoice ?? 0,
+  // v2.2: optional call-to-action shown under the thread ({ route, labelHe }).
+  link: o.link ?? null,
 });
 const C = (label, reply, effects, followUp) => ({ label, reply, effects: effects ?? {}, followUp: followUp ?? null });
 
@@ -1826,6 +1828,181 @@ const MEN_EVENTS = [
     ] }),
 ];
 
+// ---------------------------------------------------------------------------
+// v2.2 (docs/SPEC-2.2-training-bench.md §3.6, §4.1, §4.4): training load and
+// bench talks. These events are ENGINE-DRIVEN: each has a private trigger with
+// the same name as its canonical id, so none of them ever enters the random
+// pool. The engine queues the canonical id (queueEvent); to get variety it can
+// pick an eligible id from EVENT_VARIANTS[canonical] first (same trigger).
+//  - who 'physio' is a new persona (PERSONAS.physio, male in both worlds, like
+//    the doctor), so the player's replies to him are not gendered.
+//  - physio_warn choice 0 uses a NEW effect key: { trainInt: 'light' } = a light
+//    week for the NEXT week only (engine: S.trainNext; the stored S.trainInt is
+//    kept). defaultChoice 1 ("I'm fine"): an unanswered message changes nothing.
+//  - burnout and coach_praise_work are info-only (no choices). The engine applies
+//    their numbers itself (attribute loss, trust +3). The national-coach note
+//    (SPEC §4.4) lives in strings.js COACH_TALK.national.
+//  - bench_nudge* and minutes_nudge* carry link { route: '#/coach-talk' }.
+//  - Only placeholderVars keys are used here ({first} {nick} {coach} {club}
+//    {agent} {friend1..3}), plus {n} in the canonical bench_nudge (the engine
+//    passes { n: benchRun }). Variants write the number out in words.
+// ---------------------------------------------------------------------------
+const TALK_LINK = { route: '#/coach-talk', labelHe: 'לדבר עם המאמן' };
+const T22_EVENTS = [
+  // physio_warn (load >= 70)
+  E({ id: 'physio_warn', who: 'physio', trigger: 'physio_warn', cooldown: 6, defaultChoice: 1,
+    messages: ['{first}, הרגליים שלך צועקות. העומס אצלך בשמיים, ואני רואה את זה בכל ריצה. שבוע קל?'],
+    choices: [
+      C('אתה צודק, אימון קל', 'אתה צודק. השבוע אני {{מוריד|מורידה}} הילוך', { trainInt: 'light' }, 'יפה. שבוע קל, הרבה מתיחות, {{ואתה חוזר חד|ואת חוזרת חדה}} כמו סכין.'),
+      C('אני בסדר', 'אני בסדר, באמת. הגוף שלי רגיל לזה', { morale: 2 }, 'רשמתי שאמרת את זה. אם משהו נתפס, {{אתה בא|את באה}} אליי מיד. לא אחרי המשחק.'),
+    ] }),
+  E({ id: 'physio_warn_b', who: 'physio', trigger: 'physio_warn', cooldown: 6, defaultChoice: 1,
+    messages: ['עברתי על הנתונים מהשבוע. בספרינטים האחרונים {{אתה איטי|את איטית}} יותר, והשרירים תפוסים כמו חבל. זה הזמן להוריד עומס, לפני שזה נגמר בקרע.'],
+    choices: [
+      C('בסדר, שבוע קל', 'בסדר. שבוע קל, אני {{מבטיח|מבטיחה}}', { trainInt: 'light' }, 'תודה. ככה {{שחקנים|שחקניות}} {{מחזיקים|מחזיקות}} עשר שנים ולא שלוש.'),
+      C('אני {{ממשיך|ממשיכה}} כרגיל', 'אני {{מרגיש|מרגישה}} טוב. {{ממשיך|ממשיכה}} כרגיל', { morale: 2 }, 'זו ההחלטה שלך. אני רק אומר: קרח אחרי כל אימון, ובלי גבורה.'),
+    ] }),
+  E({ id: 'physio_warn_c', who: 'physio', trigger: 'physio_warn', cooldown: 6, defaultChoice: 1,
+    messages: ['{{תקשיב|תקשיבי}} לי רגע. עשרים שנה אני בחדר הזה. {{שחקנים שלא מורידים|שחקניות שלא מורידות}} הילוך בזמן {{מגיעים|מגיעות}} אליי על קביים. נעשה שבוע קל?'],
+    choices: [
+      C('עשינו עסק, שבוע קל', 'עשינו עסק. שבוע קל', { trainInt: 'light' }, 'מצוין. ואל {{תספר|תספרי}} לאף אחד, אבל יש לי גם עיסוי בשבילך.'),
+      C('קביים זה לא אני', 'קביים זה לא אני. אני בסדר', { morale: 2 }, 'כולם אומרים את זה. בדיוק עד שזה קורה.'),
+    ] }),
+  E({ id: 'physio_warn_d', who: 'physio', trigger: 'physio_warn', cooldown: 6, defaultChoice: 1,
+    messages: ['ראיתי אותך {{צולע|צולעת}} קצת בסוף האימון. אל {{תעשה|תעשי}} לי פרצוף, ראיתי. {{בוא|בואי}} נוריד עומס לשבוע אחד, רק הפעם.'],
+    choices: [
+      C('רק הפעם, אימון קל', 'טוב, תפסת אותי. רק הפעם, אימון קל', { trainInt: 'light' }, 'רק הפעם. ואם זה עוזר, גם בפעם הבאה.'),
+      C('זה כלום, באמת', 'זה כלום, סתם מכה מהתרגיל', { morale: 2 }, 'סתם מכה, סתם מכה... {{תשים|תשימי}} קרח, ומחר אני בודק שוב.'),
+    ] }),
+  E({ id: 'physio_warn_vet', who: 'physio', trigger: 'physio_warn', cooldown: 6, defaultChoice: 1, cond: { stage: ['pro'], minAge: 30 },
+    messages: ['בגיל שלך הגוף כבר לא סולח כמו פעם. העומס גבוה, וההתאוששות לוקחת יותר זמן. אני ממליץ על שבוע קל, ואני לא ממליץ סתם.'],
+    choices: [
+      C('אתה צודק, שבוע קל', 'אתה צודק. הגוף כבר לא בן עשרים', { trainInt: 'light' }, 'בדיוק. {{הוותיקים החכמים|הוותיקות החכמות}} {{משחקים|משחקות}} עד גיל 36.'),
+      C('הגוף שלי עוד בסדר', 'הגוף שלי עוד בסדר גמור', { morale: 2 }, 'אני מקווה {{שאתה צודק|שאת צודקת}}. הדלת שלי פתוחה.'),
+    ] }),
+
+  // burnout (first time 4 weeks in a row at load >= 80): info only
+  E({ id: 'burnout', who: 'physio', trigger: 'burnout', cooldown: 4,
+    messages: [
+      'הגוף מתחיל לגבות מחיר. ארבעה שבועות {{אתה|את}} על עומס מקסימלי, ועכשיו כבר רואים את זה במדידות: המהירות והכוח ירדו.',
+      'זה לא שבוע רע, זו שחיקה. שבוע או שבועיים של אימון קל או מנוחה, והעומס יורד. אם לא, זה ימשיך לרדת.',
+    ] }),
+  E({ id: 'burnout_b', who: 'physio', trigger: 'burnout', cooldown: 4,
+    messages: [
+      'עשיתי לך בדיקות כוח. המספרים ירדו, וזה לא במקרה: חודש {{שאתה שחוק|שאת שחוקה}} מאימונים.',
+      'הגוף משלם על זה במהירות ובכוח. עד שהעומס לא יורד מתחת ל־80, כל שבוע כזה לוקח עוד קצת.',
+    ] }),
+  E({ id: 'burnout_c', who: 'physio', trigger: 'burnout', cooldown: 4,
+    messages: [
+      'אני אגיד לך את זה פשוט: {{אתה רץ|את רצה}} על ריק. ארבעה שבועות בלי לנשום, והגוף התחיל לפרק את מה שבנית.',
+      'מהירות ופיזיות ירדו השבוע. אימון קל או מנוחה, ו{{אתה תחזור|את תחזרי}} לעצמך.',
+    ] }),
+  E({ id: 'burnout_vet', who: 'physio', trigger: 'burnout', cooldown: 4, cond: { stage: ['pro'], minAge: 30 },
+    messages: [
+      'אחרי גיל שלושים, שחיקה עולה ביוקר. ארבעה שבועות של עומס מקסימלי, והגוף כבר לא מתאושש כמו פעם.',
+      'המהירות והכוח ירדו. מה שיורד עכשיו כמעט לא חוזר, אז בבקשה: שבוע קל.',
+    ] }),
+
+  // rusty (sharp < 35)
+  E({ id: 'rusty', who: 'coach', trigger: 'rusty', cooldown: 8,
+    messages: ['נראה שהחלדת. יותר מדי מנוחה, והרגליים שכחו את הקצב. {{תתאמן|תתאמני}}.'],
+    choices: [
+      C('{{חוזר|חוזרת}} לעבוד', 'הבנתי, המאמן. מהשבוע אני {{חוזר|חוזרת}} להתאמן ברצינות', { trust: 1 }, 'יופי. אני רוצה לראות זיעה.'),
+      C('הגוף ביקש מנוחה', 'הגוף שלי ביקש מנוחה, המאמן', { trust: -1, morale: 1 }, 'הגוף שלך נח מספיק. עכשיו הוא צריך עבודה.'),
+    ] }),
+  E({ id: 'rusty_b', who: 'coach', trigger: 'rusty', cooldown: 8,
+    messages: ['באימון היום כל כדור ברח לך מהרגל. ככה זה כשנחים יותר מדי. השבוע אני רוצה לראות אותך {{עובד|עובדת}}.'],
+    choices: [
+      C('תראה אותי השבוע', 'השבוע תראה אותי בכל תרגיל', { trust: 1 }, 'נראה. אני לא מסתכל על מילים, אני מסתכל על המגרש.'),
+      C('זה היה יום רע', 'סתם היה יום רע, המאמן', { morale: 1 }, 'יום רע זה יום אחד. אצלך זה כבר שבועיים.'),
+    ] }),
+  E({ id: 'rusty_c', who: 'coach', trigger: 'rusty', cooldown: 8,
+    messages: ['מנוחה זה טוב, אבל {{אתה|את}} כבר לא {{נח|נחה}}, {{אתה מחליד|את מחלידה}}. שבוע רגיל של אימונים, ונחזיר אותך לקצב.'],
+    choices: [
+      C('{{מתחיל|מתחילה}} מחר', '{{מחר אני ראשון במגרש|מחר אני ראשונה במגרש}}', { trust: 1 }, 'ככה אני אוהב. שבע וחצי, בלי איחורים.'),
+      C('עוד שבוע מנוחה', 'אני {{צריך|צריכה}} עוד שבוע אחד של מנוחה', { trust: -2, morale: 1 }, 'עוד שבוע, ואני אצטרך לחפש לך מקום בסגל.'),
+    ] }),
+  E({ id: 'rusty_d', who: 'coach', trigger: 'rusty', cooldown: 8,
+    messages: ['ראיתי אותך בתרגיל המהירות. היית צעד אחד מאחור כל הזמן. החדות לא מחכה לאף אחד. {{תחזור|תחזרי}} להתאמן ברצינות.'],
+    choices: [
+      C('צודק, המאמן', 'אתה צודק. אני {{מחזיר|מחזירה}} את הקצב', { trust: 1 }, 'זה מה שרציתי לשמוע. ושבוע הבא תרגיל המהירות שוב.'),
+      C('אני עוד {{מתאושש|מתאוששת}}', 'אני עוד {{מתאושש|מתאוששת}} מהעונה, המאמן', { morale: 1, trust: -1 }, 'התאוששת. עכשיו {{אתה|את}} {{מחליד|מחלידה}}. יש הבדל.'),
+    ] }),
+
+  // rusty_return (sharp < 35 within 6 weeks of an injury): the layoff, not the player, took the sharpness
+  E({ id: 'rusty_return', who: 'coach', trigger: 'rusty_return', cooldown: 8,
+    messages: ['אחרי הפציעה צריך לחזור לקצב. באימון היום הכדור עוד בורח לך קצת מהרגל, וזה טבעי. כמה שבועות של אימונים רגילים, והחדות תחזור.'],
+    choices: [
+      C('{{חוזר|חוזרת}} לקצב', 'אני {{מרגיש|מרגישה}} שהגוף כבר בסדר. עכשיו רק הקצב', { trust: 1 }, 'בדיוק. בלי למהר, אבל גם בלי להתחבא.'),
+      C('{{צריך|צריכה}} עוד זמן', 'אני עוד {{מפחד|מפחדת}} להיכנס חזק לתיקולים', { morale: 1 }, 'זה נורמלי אחרי פציעה. נעבוד על זה יחד באימונים.'),
+    ] }),
+  E({ id: 'rusty_return_b', who: 'coach', trigger: 'rusty_return', cooldown: 8,
+    messages: ['טוב לראות אותך שוב על הדשא. אחרי השבועות בחוץ החדות ירדה, וזה בדיוק מה שאימונים מחזירים. אני רוצה אותך בכל תרגיל השבוע.'],
+    choices: [
+      C('בכל תרגיל', 'אני שם בכל תרגיל, המאמן', { trust: 1 }, 'ככה אני אוהב. תוך חודש {{אתה|את}} בקצב של כולם.'),
+      C('בהדרגה', 'אני {{מעדיף|מעדיפה}} לחזור בהדרגה', { morale: 1 }, 'בהדרגה זה בסדר. רק לא לאט מדי.'),
+    ] }),
+
+  // coach_praise_work (4 hard weeks in a row, no injury, load < 70): info only, engine applies trust +3
+  E({ id: 'coach_praise_work', who: 'coach', trigger: 'coach_praise_work', cooldown: 12,
+    messages: ['ארבעה שבועות {{אתה נותן|את נותנת}} הכול באימונים, ועדיין {{שלם ורענן|שלמה ורעננה}}. ככה {{עובד מקצוען|עובדת מקצוענית}}. אני רושם את זה.'] }),
+  E({ id: 'coach_praise_work_b', who: 'coach', trigger: 'coach_praise_work', cooldown: 12,
+    messages: ['שמתי לב {{שאתה האחרון שיוצא|שאת האחרונה שיוצאת}} מהמגרש, ובכל זאת {{לא נשבר|לא נשברת}}. זה בדיוק השילוב שאני מחפש. {{תמשיך|תמשיכי}} ככה.'] }),
+  E({ id: 'coach_praise_work_c', who: 'coach', trigger: 'coach_praise_work', cooldown: 12,
+    messages: ['הצוות המקצועי הראה לי את הנתונים שלך מהחודש האחרון. עבודה קשה, ובלי פציעה אחת. אני לא מחמיא הרבה, אז {{תשמור|תשמרי}} את זה.'] }),
+  E({ id: 'coach_praise_work_d', who: 'coach', trigger: 'coach_praise_work', cooldown: 12,
+    messages: ['אמרתי היום {{לחבר׳ה|לבנות}} בחדר: תסתכלו על {first}. ככה מתאמנים, וככה גם שומרים על הגוף. כל הכבוד.'] }),
+
+  // bench_nudge (benchRun reaches 3): agent or the friends, with a link to #/coach-talk
+  E({ id: 'bench_nudge', who: 'friends', trigger: 'bench_nudge', cooldown: 8, link: TALK_LINK,   // canonical: {n} = benchRun (queueEvent vars)
+    messages: [
+      { who: 'friend1', t: '{{אחי|אחותי}}, {n} משחקים על הספסל. {{תלך|תלכי}} לדבר איתו.' },
+      { who: 'friend2', t: 'נו באמת, {{אתה יושב|את יושבת}} שם עם האפודה כבר {n} משחקים. מגיע לך יותר' },
+      { who: 'friend3', t: 'רק אל {{תצעק|תצעקי}} עליו. {{תבקש|תבקשי}} יפה. ואם זה לא עובד, נחשוב על תוכנית ב׳' },
+    ] }),
+  E({ id: 'bench_nudge_agent', who: 'agent', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK,
+    messages: ['שלושה משחקים על הספסל זה לא בשבילך. לפני שאני מתחיל להתקשר לקבוצות, {{לך|לכי}} לדבר עם {coach}. עדיף שזה יבוא ממך.'] }),
+  E({ id: 'bench_nudge_b', who: 'friends', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK,
+    messages: [
+      { who: 'friend2', t: 'שלושה משחקים שאני רואה אותך רק בחימום. נמאס לי לקנות כרטיס בשביל זה' },
+      { who: 'friend1', t: '{{אחי, תדפוק|אחותי, תדפקי}} לו על הדלת. מה הוא יעשה, יאכל אותך?' },
+      { who: 'friend3', t: '{{תגיד|תגידי}} לו שהשכונה כולה מחכה. זה תמיד עובד' },
+    ] }),
+  E({ id: 'bench_nudge_agent_b', who: 'agent', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK,
+    messages: ['אני לא אוהב את מה שאני רואה. שלושה משחקים בלי הרכב, והשווי שלך לא מחכה. {{תדפוק|תדפקי}} על הדלת של {coach}. {{תבקש|תבקשי}} יפה, אבל {{תבהיר שאתה רציני|תבהירי שאת רצינית}}.'] }),
+  E({ id: 'bench_nudge_dad', who: 'dad', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK, weight: 0.6,
+    messages: ['שלושה משחקים שאני רואה רק את הגב שלך על הספסל. אני לא מתקשר אליו, הבטחתי לאמא. אבל {{אתה|את}} כן {{יכול|יכולה}} ללכת לדבר איתו.'] }),
+  E({ id: 'bench_nudge_youth', who: 'friends', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['youth'] }, link: TALK_LINK,
+    messages: [
+      { who: 'friend1', t: '{{אחי|אחותי}}, כבר כמה משחקים {{אתה|את}} על הספסל {{בנוער|בנערות}}. {{תלך|תלכי}} לדבר עם המאמן.' },
+      { who: 'friend2', t: 'בשכונה {{היית מבקיע|היית מבקיעה}} להם חמישה. {{תגיד|תגידי}} לו את זה. יפה' },
+    ] }),
+  E({ id: 'bench_nudge_youth_dad', who: 'dad', trigger: 'bench_nudge', cooldown: 8, cond: { stage: ['youth'] }, link: TALK_LINK,
+    messages: ['כבר כמה משחקים {{שאתה|שאת}} על הספסל. אני לא אומר כלום למאמן, אבל {{אתה|את}} {{יכול|יכולה}}. בכבוד, בגובה העיניים. ככה גדלים.'] }),
+
+  // minutes_nudge (optional: lowMin reaches 4, the player keeps getting cameos)
+  E({ id: 'minutes_nudge', who: 'friends', trigger: 'minutes_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK,
+    messages: [
+      { who: 'friend3', t: 'ארבעה משחקים {{שאתה נכנס|שאת נכנסת}} רק לדקות האחרונות. עד שאני מוצא את השלט, המשחק נגמר' },
+      { who: 'friend1', t: '{{תלך|תלכי}} לדבר עם המאמן, {{אחי|אחותי}}. מגיע לך יותר מעשר דקות' },
+    ] }),
+  E({ id: 'minutes_nudge_agent', who: 'agent', trigger: 'minutes_nudge', cooldown: 8, cond: { stage: ['pro'] }, link: TALK_LINK,
+    messages: ['ארבעה משחקים עם פחות מחצי שעה. קבוצות רואות את זה בסטטיסטיקה. לפני שזה פוגע בשווי שלך, {{לך|לכי}} לדבר עם {coach}.'] }),
+
+];
+
+// Canonical id -> every variant id (same trigger). The engine may rng.pick one
+// eligible variant, or simply raise(S, <canonical id>) and let runWeekEvents choose.
+export const EVENT_VARIANTS = {
+  physio_warn: ['physio_warn', 'physio_warn_b', 'physio_warn_c', 'physio_warn_d', 'physio_warn_vet'],
+  burnout: ['burnout', 'burnout_b', 'burnout_c', 'burnout_vet'],
+  rusty: ['rusty', 'rusty_b', 'rusty_c', 'rusty_d'],
+  rusty_return: ['rusty_return', 'rusty_return_b'],
+  coach_praise_work: ['coach_praise_work', 'coach_praise_work_b', 'coach_praise_work_c', 'coach_praise_work_d'],
+  bench_nudge: ['bench_nudge', 'bench_nudge_agent', 'bench_nudge_b', 'bench_nudge_agent_b', 'bench_nudge_dad', 'bench_nudge_youth', 'bench_nudge_youth_dad'],
+  minutes_nudge: ['minutes_nudge', 'minutes_nudge_agent'],
+};
+
 export const EVENTS = [
   ...YOUTH_EVENTS,
   ...YOUNG_PRO_EVENTS,
@@ -1842,4 +2019,5 @@ export const EVENTS = [
   ...TRIGGER_EVENTS_A,
   ...TRIGGER_EVENTS_B,
   ...TRIGGER_EVENTS_C,
+  ...T22_EVENTS,
 ];

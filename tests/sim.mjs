@@ -15,6 +15,7 @@ const SEASONS = QUICK ? 6 : arg('seasons', 25);
 const SEED = arg('seed', 1);
 const MGR_SEASONS = QUICK ? 3 : arg('mgr-seasons', 6);
 const VERBOSE = argv.includes('--verbose');
+const V22_ONLY = argv.includes('--v22-only');   // only the v2.2 training-load / coach-talk section
 const GARG = (() => { const i = argv.indexOf('--gender'); return i >= 0 && argv[i + 1] ? argv[i + 1] : 'both'; })();
 const GENDERS = GARG === 'm' ? ['m'] : GARG === 'f' ? ['f'] : ['m', 'f'];
 
@@ -161,6 +162,8 @@ function checkPlayer(S, tag) {
   const ovr = game.getHub().player.ovr;
   if (!(ovr >= 1 && ovr <= 99)) fail(tag + ' ovr', ovr);
   for (const k of ['energy', 'morale', 'trust', 'fans', 'mates']) if (!(p[k] >= 0 && p[k] <= 100)) fail(tag + ' ' + k, p[k]);
+  for (const k of ['load', 'sharp']) if (!(typeof p[k] === 'number' && p[k] >= 0 && p[k] <= 100)) fail(tag + ' ' + k + ' (v2.2)', p[k]);
+  if (!(p.benchRun >= 0 && p.lowMin >= 0) || !p.talk || ['light', 'normal', 'hard', 'extreme'].indexOf(S.trainInt) < 0) fail(tag + ' v2.2 fields', [p.benchRun, p.lowMin, S.trainInt]);
   for (const k of ['l', 'c', 'w']) if (!(p.rep[k] >= 0 && p.rep[k] <= 100)) fail(tag + ' rep.' + k, p.rep[k]);
   if (!(p.money >= 0)) fail(tag + ' money', p.money);
   for (const r of p.form) if (!(r >= 3 && r <= 10)) fail(tag + ' form rating', r);
@@ -200,6 +203,7 @@ const GETTERS = [
   ['getProfile', () => game.getProfile()], ['getCareer', () => game.getCareer()], ['getNational', () => game.getNational()],
   ['getAwards', () => game.getAwards()], ['getShop', () => game.getShop()], ['getRetirement', () => game.getRetirement()],
   ['getSaveMeta', () => game.getSaveMeta()], ['getManager', () => game.getManager()],
+  ['canTalkToCoach', () => game.canTalkToCoach()], ['getTrainingPreview', () => game.getTrainingPreview('balanced', 'hard')], ['getTrainingPreview:rest', () => game.getTrainingPreview('rest')],
 ];
 function purityCheck(tag) {
   checkCounts.purity++;
@@ -494,6 +498,18 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
     // training
     const hub = chk('getHub', game.getHub());
     const tr = pol.pick(hub.training.options.filter((o) => !o.disabled)).id;
+    // v2.2: intensity (mostly normal) and the coach talk when it opens
+    const ir = pol.next();
+    const it = ir < 0.5 ? 'normal' : ir < 0.7 ? 'light' : ir < 0.9 ? 'hard' : 'extreme';
+    const ct = hub.coachTalk;
+    if (ct && ct.ok && !(ct.benchRun >= ct.threshold || ct.lowMin >= 4)) fail('coach talk open without a bench run', ct);
+    if (ct && !ct.ok && game.talkToCoach('ask').ok) fail('talkToCoach went through while closed', ct.reasonHe);
+    if (ct && ct.ok && pol.chance(0.6)) {
+      const tk = chk('talkToCoach', game.talkToCoach(pol.pick(['ask', 'demand', 'threat'])));
+      take();
+      if (!tk.ok) fail('talkToCoach failed while open', tk);
+      else if (tk.success && !tk.promise) fail('successful talk without a promise', tk);
+    }
     // offers
     for (const o of game.getOffers()) {
       if (o.status !== 'open' || !o.canAccept) continue;
@@ -509,7 +525,7 @@ function runCareer(i, { roundTrip = false, collect = true, checks = true, gender
       take();
     }
     // play the week
-    let a = chk('advanceWeek', game.advanceWeek(tr));
+    let a = chk('advanceWeek', game.advanceWeek({ focus: tr, intensity: it }));
     take();
     if (!a.ok) { if (a.error === 'review_pending' || a.error === 'retired') continue; fail('advanceWeek failed', a); break; }
     while (a.status === 'match') {
@@ -771,7 +787,7 @@ function migrationV3Check() {
   const lr = game.loadState(game.migrateState(v2, 2));
   if (!lr.ok) { fail('migrated v2 state does not load', lr); return; }
   const S = game.serialize();
-  if (S.v !== 3 || S.mgr !== null) fail('v3 migration defaults', [S.v, S.mgr]);
+  if (S.v !== game.SCHEMA_VERSION || S.mgr !== null) fail('v3 migration defaults', [S.v, S.mgr]);
   if (game.getManager() !== null) fail('getManager on an active player career should be null');
   walkAll('migrated-v3');
   // a retired v2 career (no coaching state) gets its offers on the retirement screen
@@ -909,11 +925,271 @@ function coachingRoles() {
   }
 }
 
+
+// ---------------- v2.2 training load + coach talk (docs/SPEC-2.2-training-bench.md §9)
+const v22 = { policies: {}, talk: {}, promise: {}, checks: 0 };
+const POLICIES = {
+  normal: () => ({ focus: 'balanced', intensity: 'normal' }),
+  extreme: () => ({ focus: 'balanced', intensity: 'extreme' }),
+  rest: () => ({ focus: 'rest', intensity: 'light' }),
+  smart: (h) => ({ focus: 'balanced', intensity: h.player.load < 50 ? 'hard' : 'light' }),
+  light: () => ({ focus: 'balanced', intensity: 'light' }),
+  hard: () => ({ focus: 'balanced', intensity: 'hard' }),
+};
+// One career under a fixed training policy (offers / events answered the same way for every policy).
+function policyCareer(i, gender, name, seasons) {
+  CUR_G = gender;
+  const opts = careerOpts(i, gender);
+  game.newCareer({ ...opts, seed: hash32(SEED, i, gender, 'pol'), now: 0 });
+  game.getAndClearSignals();
+  const start = game.serialize().startSeason;
+  const st = { peak: 0, ovr25: null, inj: 0, trainInj: 0, burnouts: 0, sharp: 0, load: 0, weeks: 0, apps: 0 };
+  for (let guard = 0; guard < 60 * seasons + 100; guard++) {
+    const S = game.serialize();
+    if (S.retired || S.season >= start + seasons) break;
+    if (S.pending.review !== null) { game.ackSeasonReview(); continue; }
+    const hub = game.getHub();
+    for (const o of game.getOffers()) {
+      if (o.status !== 'open' || !o.canAccept) continue;
+      const curS = hub.club && S.world.clubs[hub.club.id] ? S.world.clubs[hub.club.id].s : 0;
+      const ok = o.type === 'pro' || o.type === 'renewal' || hub.player.stage === 'free' || (o.type !== 'loan' && o.club.strength > curS + 2);
+      game.respondOffer(o.id, ok ? 'accept' : 'reject');
+    }
+    let a = game.advanceWeek(POLICIES[name](hub));
+    while (a.ok && a.status === 'match') { game.autoPlayMatch(); game.finishMatch(); a = game.resumeWeek(); }
+    if (!a.ok) { if (a.error === 'review_pending' || a.error === 'retired') continue; fail('policy advanceWeek failed', a); break; }
+    for (const it of game.getInbox()) {
+      if (!it.needsAnswer) continue;
+      const th = game.getThread(it.id);
+      const ch = (th.choices || []).filter((c) => !c.disabled);
+      if (!ch.length) continue;
+      // a fixed policy keeps its intensity: it answers the physio "I'm fine" (choice 1); smart takes the light week
+      const pick = name !== 'smart' && th.ev && /^physio_warn/.test(th.ev) ? (ch.find((c) => c.index === 1) || ch[0]) : ch[0];
+      game.answerEvent(it.id, pick.index);
+    }
+    const S2 = game.serialize();
+    const p = S2.player;
+    if (!(p.load >= 0 && p.load <= 100) || !(p.sharp >= 0 && p.sharp <= 100)) fail('load / sharp out of range', [name, p.load, p.sharp]);
+    if (S2.week <= 45 && S2.week >= 2) { st.sharp += p.sharp; st.load += p.load; st.weeks++; }
+    if (S2.season - p.born === 25 && st.ovr25 === null) st.ovr25 = game.getHub().player.ovr;
+  }
+  const S = game.serialize();
+  const sig = game.getAndClearSignals();
+  st.peak = S.player.peak;
+  st.trainInj = sig.filter((x) => x.name === 'injury_training').length;
+  st.burnouts = sig.filter((x) => x.name === 'burnout').length;
+  st.inj = S.hist.timeline.filter((e) => e.icon === 'injury').length;
+  st.sharp = st.weeks ? st.sharp / st.weeks : 0;
+  st.load = st.weeks ? st.load / st.weeks : 0;
+  for (const s2 of S.hist.seasons) for (const k of ['lg', 'cup', 'eu']) st.apps += s2.stats[k].apps;
+  if (sig.filter((x) => x.name === 'training').some((x) => !x.props.focus || ['light', 'normal', 'hard', 'extreme'].indexOf(x.props.intensity) < 0)) fail('training signal props', name);
+  return st;
+}
+function trainingPolicies() {
+  const seeds = QUICK ? [0, 1] : [0, 1, 2, 3];
+  const seas = QUICK ? 14 : 25;
+  const names = QUICK ? ['normal', 'extreme', 'rest', 'smart'] : Object.keys(POLICIES);
+  const agg = {};
+  for (const name of names) {
+    const rows = [];
+    for (const gender of GENDERS) for (const i of seeds) rows.push(policyCareer(i, gender, name, seas));
+    const mean = (k) => +(rows.reduce((s, r) => s + (r[k] || 0), 0) / rows.length).toFixed(2);
+    agg[name] = { n: rows.length, peak: mean('peak'), ovr25: mean('ovr25'), injuries: mean('inj'), trainInj: mean('trainInj'), burnouts: mean('burnouts'), sharp: mean('sharp'), load: mean('load'), apps: mean('apps'),
+      peaks: rows.map((r) => r.peak).join(' ') };
+  }
+  v22.policies = agg;
+  const A = agg;
+  const chkP = (cond, msg) => { if (!cond) (QUICK ? warn : fail)('v2.2 policy: ' + msg); };
+  chkP(A.extreme.injuries > A.normal.injuries, 'always-extreme should get more injuries than normal ' + JSON.stringify([A.extreme.injuries, A.normal.injuries]));
+  chkP(A.extreme.burnouts > A.normal.burnouts, 'always-extreme should burn out more than normal ' + JSON.stringify([A.extreme.burnouts, A.normal.burnouts]));
+  chkP(A.extreme.peak <= A.normal.peak + 0.25, 'always-extreme must not beat normal on peak OVR ' + JSON.stringify([A.extreme.peak, A.normal.peak]));
+  chkP(A.rest.sharp < 35, 'always-rest sharpness should be low ' + A.rest.sharp);
+  chkP(A.rest.peak < A.normal.peak - 5, 'always-rest should progress much less ' + JSON.stringify([A.rest.peak, A.normal.peak]));
+  for (const k of Object.keys(A)) if (k !== 'smart') chkP(A.smart.peak > A[k].peak, 'smart should have the highest mean peak OVR (vs ' + k + ') ' + JSON.stringify([A.smart.peak, A[k].peak]));
+}
+
+// coach talk: odds vs outcomes, the promise, no talk before the bench run
+function talkScenario(gender) {
+  // a pro career a few weeks into a season, idle (no week in progress)
+  CUR_G = gender;
+  for (let i = 0; i < 12; i++) {
+    game.newCareer({ ...careerOpts(i, gender), seed: hash32(SEED, 'talk', i, gender), now: 0 });
+    for (let k = 0; k < 40; k++) {
+      const S = game.serialize();
+      if (S.player.stage === 'pro' && S.player.club && S.week >= 3 && S.week <= 30 && !S.player.injury && !S.player.contract.loan) return true;
+      if (S.pending.review !== null) game.ackSeasonReview();
+      for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept && (o.type === 'pro' || o.type === 'renewal' || o.type === 'transfer')) game.respondOffer(o.id, 'accept');
+      game.fastForward({ until: 'weeks', weeks: 13 });
+    }
+  }
+  return false;
+}
+function coachTalkChecks() {
+  for (const gender of GENDERS) {
+    if (!talkScenario(gender)) { fail('coach talk: no pro scenario reached (' + gender + ')'); continue; }
+    // no talk before the bench run
+    game.devSetBench(0, 0);
+    const c0 = chk('canTalkToCoach', game.canTalkToCoach());
+    if (c0.ok) fail('coach talk allowed with benchRun 0', c0);
+    const t0 = game.talkToCoach('ask');
+    if (t0.ok) fail('talkToCoach succeeded without a bench run', t0);
+    game.devSetBench(2, 0);
+    if (game.canTalkToCoach().ok) fail('coach talk allowed with benchRun 2');
+    game.devSetBench(3, 0);
+    const c3 = chk('canTalkToCoach(3)', game.canTalkToCoach());
+    if (!c3.ok || !c3.approaches || c3.approaches.length !== 3) { fail('coach talk not offered at benchRun 3', c3); continue; }
+    if (!c3.openHe) fail('coach talk without an opening line', c3);
+    const base = JSON.parse(JSON.stringify(game.serialize()));
+    const N = QUICK ? 240 : 700;
+    for (const ap of ['ask', 'demand', 'threat']) {
+      let sumP = 0, wins = 0, promised = 0, kept = 0, lapsed = 0;
+      for (let k = 0; k < N; k++) {
+        const s = JSON.parse(JSON.stringify(base));
+        const r = rngFor(SEED, gender, ap, k);
+        s.rng = hash32(SEED, gender, ap, k, 'rng');
+        s.player.trust = r.int(20, 90); s.player.load = r.int(0, 95); s.player.form = [r.int(55, 80) / 10, r.int(55, 80) / 10];
+        if (!game.loadState(s).ok) { fail('talk scenario loadState'); break; }
+        const c = game.canTalkToCoach();
+        if (!c.ok) { fail('talk not available in scenario', c.reasonHe); break; }
+        const pr = c.approaches.find((x) => x.id === ap).chance;
+        const out = game.talkToCoach(ap);
+        if (!out.ok) { fail('talkToCoach failed', out); break; }
+        if (k < 40) chk('talkToCoach', out);
+        sumP += pr; if (out.success) wins++;
+        if (game.canTalkToCoach().ok) fail('a second talk right after the first one is allowed');
+        if (out.success && k % 3 === 0) {
+          if (!out.promise) { fail('successful talk without a promise', out); continue; }
+          // play the promised matches: the player should start
+          promised++;
+          for (let w = 0; w < 5; w++) {
+            if (!game.serialize().player.talk.promise) break;
+            let a = game.advanceWeek({ focus: 'balanced', intensity: 'light' });
+            while (a.ok && a.status === 'match') { game.autoPlayMatch(); game.finishMatch(); a = game.resumeWeek(); }
+            if (!a.ok) break;
+          }
+          const P = game.serialize().player;
+          if (P.talk.res === 'kept') kept++;
+          else if (P.talk.res !== 'broken') { promised--; lapsed++; }   // lapsed (injury / call-up weeks): not judged
+        }
+      }
+      const exp = sumP / N, got = wins / N;
+      v22.talk[gender + ':' + ap] = { expected: +exp.toFixed(3), observed: +got.toFixed(3), n: N };
+      if (Math.abs(exp - got) > 0.05) fail('coach talk ' + ap + ' success rate vs formula', [gender, exp, got]);
+      v22.promise[gender + ':' + ap] = { promised, kept, lapsed, rate: promised ? +(kept / promised).toFixed(3) : null };
+    }
+    let pAll = 0, kAll = 0;
+    for (const ap of ['ask', 'demand', 'threat']) { const x = v22.promise[gender + ':' + ap]; pAll += x.promised; kAll += x.kept; }
+    if (pAll < 20) fail('too few promises to judge', [gender, pAll]);
+    else if (kAll / pAll <= 0.9) fail('a promise should lead to a start > 90%', [gender, kAll, pAll]);
+    v22.checks++;
+  }
+}
+
+// the v2.2 hub / preview VMs and the intensity rules
+function trainingApiChecks() {
+  for (const gender of GENDERS) {
+    CUR_G = gender;
+    game.newCareer({ ...careerOpts(4, gender), seed: hash32(SEED, 'api', gender), now: 0 });
+    const h = chk('getHub(v22)', game.getHub());
+    for (const k of ['load', 'loadBand', 'sharp', 'sharpHe']) if (h.player[k] === undefined) fail('hub.player.' + k + ' missing');
+    if (['fresh', 'tired', 'heavy', 'burnt'].indexOf(h.player.loadBand) < 0) fail('bad loadBand', h.player.loadBand);
+    if (!h.training || !h.training.intensity || !h.training.preview || !h.coachTalk) fail('hub training / coachTalk missing', h.training);
+    const pv = {};
+    for (const it of ['light', 'normal', 'hard', 'extreme']) {
+      pv[it] = chk('getTrainingPreview', game.getTrainingPreview('balanced', it));
+      for (const k of ['energyDelta', 'loadDelta', 'growthMult', 'sharpDelta', 'injuryRiskHe', 'warnHe']) if (pv[it][k] === undefined) fail('preview.' + k + ' missing', it);
+    }
+    if (!(pv.hard.energyDelta < pv.normal.energyDelta && pv.hard.loadDelta > pv.normal.loadDelta && pv.hard.growthMult > pv.normal.growthMult)) fail('hard preview should cost more and grow more', [pv.hard, pv.normal]);
+    // a 15-year-old cannot train at extreme
+    const ex = game.setTraining('balanced', 'extreme');
+    if (ex.ok) fail('extreme intensity allowed under 16');
+    if (!pv.extreme.locked) fail('extreme preview should be locked under 16');
+    const rs = chk('getTrainingPreview(rest)', game.getTrainingPreview('rest'));
+    if (rs.growthMult !== 0 || rs.loadDelta >= 0) fail('rest preview', rs);
+    const ok = game.setTraining('balanced', 'hard');
+    if (!ok.ok || !ok.preview || game.getHub().training.intensity !== 'hard') fail('setTraining(focus, intensity)', ok);
+    // hard costs energy: one week at hard from a full tank ends lower than one at light
+    const snap = JSON.stringify(game.serialize());
+    const runW = (it) => { const s = JSON.parse(snap); s.player.energy = 100; game.loadState(s); let a = game.advanceWeek({ focus: 'balanced', intensity: it }); while (a.ok && a.status === 'match') { game.autoPlayMatch(); game.finishMatch(); a = game.resumeWeek(); } return a; };
+    const aH = runW('hard'), aL = runW('light');
+    if (!(aH.summary.energy < aL.summary.energy)) fail('hard week should leave less energy than light', [aH.summary.energy, aL.summary.energy]);
+    if (!(aH.summary.load > aL.summary.load)) fail('hard week should leave more load than light', [aH.summary.load, aL.summary.load]);
+    if (!aH.summary.loadLineHe || aH.summary.energyBefore === undefined) fail('week summary load line missing', aH.summary);
+    chk('summary(v22)', aH.summary);
+    // string focus keeps working (back compat) and keeps the stored intensity
+    game.loadState(JSON.parse(snap));
+    const a2 = game.advanceWeek('shooting');
+    if (!a2.ok) fail('advanceWeek(string) after v2.2', a2);
+    if (game.serialize().trainInt !== 'hard') fail('stored intensity lost by advanceWeek(string)', game.serialize().trainInt);
+  }
+}
+
+// v3 -> v4 migration (incl. a save taken in the middle of a live match)
+function migrationV4Check() {
+  checkCounts.migrate++;
+  CUR_G = 'm';
+  const strip = (s) => { s.v = 3; delete s.trainInt; const p = s.player; for (const k of ['load', 'sharp', 'benchRun', 'lowMin', 'talk', 'lh', 'ld']) delete p[k]; if (s.wsum) for (const k of ['tf', 'ti', 'e0', 'l0', 'nm', 'ntCalled', 'ntPlayed', 'tk']) delete s.wsum[k]; return s; };
+  game.newCareer({ ...careerOpts(5, 'm'), seed: hash32(SEED, 'mig4'), now: 0 });
+  game.fastForward({ until: 'weeks', weeks: 5 });
+  const v3 = strip(JSON.parse(JSON.stringify(game.serialize())));
+  const lr = game.loadState(game.migrateState(v3, 3));
+  if (!lr.ok) { fail('migrated v3 state does not load', lr); return; }
+  const S = game.serialize();
+  const p = S.player;
+  if (S.v !== 4 || S.trainInt !== 'normal' || p.load !== 20 || p.sharp !== 60 || p.benchRun !== 0 || p.lowMin !== 0 || !p.talk || p.talk.lastWeekAbs !== -99 || p.talk.promise !== null) fail('v4 migration defaults', [S.v, S.trainInt, p.load, p.sharp, p.benchRun, p.lowMin, p.talk]);
+  walkAll('migrated-v4');
+  const f1 = game.fastForward({ until: 'weeks', weeks: 3 });
+  if (!f1.ok) fail('migrated v4 career does not advance', f1);
+  // mid-match v3 save
+  for (let k = 0; k < 60 && !game.serialize().live; k++) {
+    const r = game.fastForward({ until: 'next_match' });
+    if (r.stopped === 'review') game.ackSeasonReview();
+    for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept) game.respondOffer(o.id, 'accept');
+  }
+  if (!game.serialize().live) { warn('v4 migration: no live match reached'); return; }
+  const m = game.startMatch();
+  if (m.moment) game.chooseMoment(0);
+  const v3m = strip(JSON.parse(JSON.stringify(game.serialize())));
+  const lr2 = game.loadState(game.migrateState(v3m, 3));
+  if (!lr2.ok) { fail('migrated mid-match v3 state does not load', lr2); return; }
+  chk('getMatch(v4)', game.getMatch());
+  chk('autoPlayMatch(v4)', game.autoPlayMatch());
+  chk('finishMatch(v4)', game.finishMatch());
+  const rw = chk('resumeWeek(v4)', game.resumeWeek());
+  if (!rw.ok) fail('resumeWeek after a v3 mid-match migration', rw);
+  else if (rw.status === 'done' && typeof rw.summary.load !== 'number') fail('migrated mid-match week summary without load', rw.summary);
+}
+
+// determinism with the v2.2 systems (intensity choices + coach talks): two runs and a save/load round trip agree
+function v22Determinism() {
+  for (const gender of GENDERS) {
+    const run = (rt) => {
+      CUR_G = gender;
+      game.newCareer({ ...careerOpts(6, gender), seed: hash32(SEED, 'det22', gender), now: 0 });
+      for (let w = 0; w < (QUICK ? 120 : 220); w++) {
+        const S = game.serialize();
+        if (S.retired) break;
+        if (S.pending.review !== null) { game.ackSeasonReview(); continue; }
+        for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept && (o.type === 'pro' || o.type === 'renewal')) game.respondOffer(o.id, 'accept');
+        const c = game.canTalkToCoach();
+        if (c.ok) chk('talkToCoach(det)', game.talkToCoach(['ask', 'demand', 'threat'][w % 3]));
+        const its = ['light', 'normal', 'hard', 'extreme'];
+        let a = game.advanceWeek({ focus: w % 9 === 0 ? 'rest' : 'balanced', intensity: its[(w * 7) % 4] });
+        while (a.ok && a.status === 'match') { game.autoPlayMatch(); game.finishMatch(); a = game.resumeWeek(); }
+        if (rt && w % 10 === 5) game.loadState(JSON.parse(JSON.stringify(game.serialize())));
+      }
+      return stateHash();
+    };
+    const a = run(false), b = run(false), c = run(true);
+    if (a !== b || a !== c) fail('v2.2 determinism (' + gender + ')', [a, b, c]);
+  }
+}
+
 // ---------------- main
 const T0 = Date.now();
 const results = [];
 let totalSeasons = 0, totalMs = 0;
-for (const gender of GENDERS) for (let i = 0; i < CAREERS; i++) {
+for (const gender of GENDERS) for (let i = 0; i < (V22_ONLY ? 0 : CAREERS); i++) {
   const r = runCareer(i, { gender });
   if (!r) continue;
   results.push(r);
@@ -926,7 +1202,7 @@ for (const gender of GENDERS) for (let i = 0; i < CAREERS; i++) {
 function plainHash(i, opts) { runCareer(i, opts); return stateHash(); }
 let detOk = true;
 const detHashes = {};
-for (const gender of GENDERS) {
+for (const gender of (V22_ONLY ? [] : GENDERS)) {
   const dOpts = { collect: false, checks: false, gender };
   const hA = plainHash(0, dOpts);
   const hB = plainHash(0, dOpts);
@@ -935,14 +1211,24 @@ for (const gender of GENDERS) {
   if (hA !== hB) { detOk = false; fail('determinism (' + gender + '): two plain runs differ', [hA, hB]); }
   if (hA !== hC) { detOk = false; fail('determinism (' + gender + '): save/load round trip differs', [hA, hC]); }
 }
-if (GENDERS.length === 2 && detHashes.m === detHashes.f) fail('boy and girl careers produced the same state');
-migrationCheck();
-migrationV3Check();
-managerDeterminism();
-coachingRoles();
+if (!V22_ONLY && GENDERS.length === 2 && detHashes.m === detHashes.f) fail('boy and girl careers produced the same state');
+if (!V22_ONLY) {
+  migrationCheck();
+  migrationV3Check();
+  managerDeterminism();
+  coachingRoles();
+}
+// v2.2
+const T22 = Date.now();
+trainingApiChecks();
+migrationV4Check();
+v22Determinism();
+coachTalkChecks();
+trainingPolicies();
+v22.sec = +((Date.now() - T22) / 1000).toFixed(1);
 
 // chunked vs unchunked fast-forward
-for (const gender of GENDERS) {
+for (const gender of (V22_ONLY ? [] : GENDERS)) {
   CUR_G = gender;
   const opts = careerOpts(1, gender);
   game.newCareer({ ...opts, seed: hash32(SEED, 99), now: 0 });
@@ -976,7 +1262,7 @@ if (mgrAgg.careers >= 4 && !QUICK) {
   if (mgrAgg.jobs <= mgrAgg.careers) fail('no manager ever changed jobs', mgrAgg);
 }
 if (mgrAgg.careers && mgrAgg.seasons < mgrAgg.careers * MGR_SEASONS * 0.8) fail('manager seasons simulated', [mgrAgg.seasons, mgrAgg.careers * MGR_SEASONS]);
-if (mgrAgg.careers === 0) fail('no coaching career was simulated');
+if (mgrAgg.careers === 0 && !V22_ONLY) fail('no coaching career was simulated');
 
 // ---------------- report
 const avgSeasonMs = totalSeasons ? totalMs / totalSeasons : 0;
@@ -993,6 +1279,7 @@ const midTransfer = results.some((r) => r.midTransfer);
 const maxSave = Math.max(0, ...results.map((r) => r.maxSize));
 
 // calibration warnings (§5.19)
+if (!V22_ONLY) {
 const TGT = { ST: [0.40, 0.55, 0.10, 0.20], W: [0.25, 0.40, 0.20, 0.30], CAM: [0.20, 0.35, 0.25, 0.35], CM: [0.08, 0.18, 0.10, 0.20], CDM: [0, 0.10, 0, 1], DEF: [0, 0.10, 0, 1] };
 for (const k of Object.keys(posRates)) {
   const t = TGT[k]; if (!t) continue;
@@ -1013,6 +1300,7 @@ if (!midTransfer && !QUICK) warn('no mid-season transfer happened in this run');
 if (maxSave > 600 * 1024) warn('max save size ' + Math.round(maxSave / 1024) + ' KB > 600 KB');
 if (avgSeasonMs > 1000) warn('avg season time ' + avgSeasonMs.toFixed(0) + ' ms > 1000 ms');
 if (avgSeasonMs > 3000) fail('performance: avg season time ' + avgSeasonMs.toFixed(0) + ' ms > 3000 ms');
+}
 
 const report = {
   careers: results.length, seasonsSimulated: totalSeasons, seed: SEED,
@@ -1024,6 +1312,7 @@ const report = {
   avgSeasonMs: Math.round(avgSeasonMs), totalSec: +((Date.now() - T0) / 1000).toFixed(1), midSeasonTransfer: midTransfer,
   genders: GENDERS, determinism: detOk ? 'ok' : 'FAIL', checksRun: checkCounts,
   manager: { ...mgrAgg, firstTier: mgrAgg.firstTier.map((x) => x.join(':')) },
+  v22,
 };
 console.log('REPORT ' + JSON.stringify(report, null, 1));
 if (warnings.length) { console.log('CALIBRATION WARNINGS:'); for (const w of warnings) console.log('  - ' + w); }

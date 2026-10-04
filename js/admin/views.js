@@ -6,7 +6,7 @@ import { REMOTE_DEFAULTS, deepMerge, safeUrl } from '../core/remote.js';
 import { SupaError } from '../core/supa.js';
 import * as api from './api.js';
 import { AuthLostError } from './api.js';
-import { lineChart, columnChart, rankList, splitBar } from './charts.js';
+import { lineChart, columnChart, rankList, splitBar, rateBars } from './charts.js';
 
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 /** European top-5 leagues (same ids for the men's and the women's competitions). */
@@ -99,14 +99,25 @@ let namesPromise = null;
 export function loadNames() {
   if (!namesPromise) {
     namesPromise = (async () => {
-      const out = { countries: {}, clubs: {}, positions: {}, leagues: {} };
+      const out = { countries: {}, clubs: {}, positions: {}, leagues: {}, crests: null };
       try { const m = await import('../data/countries.js'); out.countries = m.COUNTRY_BY_ID || {}; } catch { /* optional */ }
       try { const m = await import('../data/leagues.js'); out.clubs = m.CLUB_INDEX || {}; out.leagues = m.LEAGUE_BY_ID || {}; } catch { /* optional */ }
       try { const m = await import('../data/strings.js'); out.positions = m.POSITIONS || {}; } catch { /* optional */ }
+      try { out.crests = await import('../ui/crests.js'); } catch { /* optional: rows show a monogram instead */ }
       return {
         nation(id) { const c = out.countries[id]; return c ? (natCode(c, id) + ' ' + c.nameHe) : String(id); },
         club(id) { const c = out.clubs[id]; return c && c.club ? c.club.nameHe : String(id); },
+        /** data: URL of the club's crest (the game's own generator, js/ui/crests.js) or '' when unknown. */
+        crest(id, size = 64) {
+          const c = out.clubs[id];
+          if (!c || !c.club || !out.crests || typeof out.crests.crestDataURL !== 'function') return '';
+          try { return out.crests.crestDataURL({ id: c.club.id, nameHe: c.club.nameHe, shortHe: c.club.shortHe, colors: c.club.colors }, size); } catch { return ''; }
+        },
         pos(id) { const p = out.positions[id]; return p ? (p.he + ' (' + id + ')') : String(id); },
+        /** Hebrew name only (players tab: no Latin code). */
+        nationHe(id) { const c = out.countries[id]; return c ? c.nameHe : String(id); },
+        leagueHe(id) { const l = out.leagues[id]; return l ? (l.shortHe || l.nameHe) : (id === '?' ? 'לא ידוע' : String(id)); },
+        isTop5(id) { return TOP5_LEAGUES.includes(id); },
         league(id) {
           const l = out.leagues[id];
           if (!l) return id === '?' ? 'לא ידוע' : String(id);
@@ -163,6 +174,18 @@ export function schemaBanner(extra) {
       extra ? h('p', { text: extra }) : null));
 }
 
+/** Banner shown while supabase/update-2.2.sql has not been run (the 2.2 training / coach-talk block stays hidden). */
+export function schemaBanner22(extra) {
+  return h('div', { class: 'adm-banner', role: 'status', testid: 'adm-schema-banner-22' },
+    h('span', { class: 'ic', 'aria-hidden': 'true', text: '!' }),
+    h('div', {},
+      h('strong', { text: 'יש להריץ את update-2.2.sql' }),
+      h('p', {}, 'הנתונים של גרסה 2.2 (עוצמת אימון, שחיקות, פציעות באימון, שיחות עם המאמן ולשונית השחקנים) יופיעו אחרי הרצת הקובץ ',
+        h('code', { text: 'supabase/update-2.2.sql' }), ' בעורך ה-SQL של Supabase. ההסבר המלא נמצא בקובץ ',
+        h('code', { text: 'docs/ADMIN_SETUP.md' }), ', בסעיף "עדכון 2.2".'),
+      extra ? h('p', { text: extra }) : null));
+}
+
 // ---------- header ----------
 export function renderHeader(active, { onLogout } = {}) {
   const link = (id, hash, label) => h('a', { href: hash, testid: 'nav-' + id, class: active === id ? 'active' : '', 'aria-current': active === id ? 'page' : null, text: label });
@@ -173,9 +196,11 @@ export function renderHeader(active, { onLogout } = {}) {
         h('small', { text: api.currentEmail() + ' · גרסת משחק ' + APP_VERSION }))),
     h('nav', { class: 'adm-nav' },
       link('dash', '#/dash', 'לוח'),
+      link('players', '#/players', 'שחקנים'),
       link('feedback', '#/feedback', 'משובים'),
       link('tools', '#/tools', 'כלים'),
-      link('config', '#/config', 'הגדרות ופרסומות'),
+      h('a', { href: '#/config', testid: 'nav-config', class: active === 'config' ? 'active' : '', 'aria-current': active === 'config' ? 'page' : null },
+        'הגדרות', h('span', { class: 'adm-nav-long', text: ' ופרסומות' })),
     ),
     h('button', { class: 'adm-btn danger adm-logout', type: 'button', testid: 'btn-logout', text: 'התנתק', onclick: onLogout }),
   );
@@ -314,6 +339,118 @@ function drawV21(body, v2, names) {
   ));
 }
 
+// ---------- v2.2: training load + coach talks (supabase/update-2.2.sql admin_stats_v3) ----------
+export const INTENSITY_HE = { light: 'קל', normal: 'רגיל', hard: 'קשה', extreme: 'קיצוני' };
+// ordinal ramp (one hue, blue 550 -> 100): darker = easier, lighter = harder (more contrast on the dark card)
+// the game's own intensity colours (css/v22.css --int-*), a shade darker for the admin's light cards
+const INTENSITY_COLOR = { light: '#13A89A', normal: '#3987E5', hard: '#E8930C', extreme: '#E5484D' };
+// approaches as in the coach-talk screen: ask teal, demand amber, threat red
+const APPROACH_COLOR = { ask: '#13A89A', demand: '#E8930C', threat: '#E5484D' };
+const FOCUS_HE = {
+  balanced: 'מאוזן', shooting: 'בעיטות', technique: 'טכניקה', defense: 'הגנה', physical: 'כושר ומהירות',
+  goalkeeping: 'שוערים', rest: 'מנוחה', '?': 'לא ידוע',
+};
+export const APPROACH_HE = { ask: 'בקשה', demand: 'דרישה', threat: 'איום בעזיבה' };
+/** Base success chance of each approach in the game's formula (docs/SPEC-2.2-training-bench.md §4.2). */
+const APPROACH_BASE = { ask: 0.55, demand: 0.40, threat: 0.30 };
+const per100 = (a, b) => (b ? (Math.round((a / b) * 1000) / 10).toFixed(1) : '0');
+
+function intensityParts(o) {
+  const x = o || {};
+  return ['light', 'normal', 'hard', 'extreme'].map((k) => ({ name: INTENSITY_HE[k], value: n0(x[k]), color: INTENSITY_COLOR[k] }));
+}
+
+/** The v2.2 dashboard block. */
+function drawV22(body, v3) {
+  const tr = v3.training || {};
+  const bi = tr.by_intensity || {};
+  const bi7 = tr.by_intensity_7d || {};
+  const burn = v3.burnout || {};
+  const inj = v3.injury_training || {};
+  const talk = v3.coach_talk || {};
+  const ba = talk.by_approach || {};
+  const weeks = n0(tr.weeks);
+  const intWeeks = n0(bi.light) + n0(bi.normal) + n0(bi.hard) + n0(bi.extreme);
+  const hardWeeks = n0(bi.hard) + n0(bi.extreme);
+  const talks = n0(talk.total);
+  const perDay = Array.isArray(v3.per_day) ? v3.per_day : [];
+
+  body.appendChild(h('div', { class: 'adm-section-title gold' }, h('span', { text: 'אימונים ושיחות עם המאמן' }), h('span', { class: 'tag', text: '2.2' })));
+  body.appendChild(h('div', { class: 'adm-grid wide', testid: 'v22-kpis' },
+    kpi('kpi-train-weeks', 'שבועות אימון', weeks, n0(tr.weeks_7d) + ' ב-7 ימים · ' + n0(tr.devices) + ' שחקנים'),
+    kpi('kpi-train-hard', 'אימון קשה או קיצוני', intWeeks ? pct(hardWeeks, intWeeks) + '%' : '–', 'קיצוני: ' + (intWeeks ? pct(n0(bi.extreme), intWeeks) : 0) + '% מהשבועות'),
+    kpi('kpi-burnouts', 'שחיקות', n0(burn.total), per100(n0(burn.total), weeks) + ' לכל 100 שבועות אימון'),
+    kpi('kpi-injury-training', 'פציעות באימון', n0(inj.total), per100(n0(inj.total), weeks) + ' לכל 100 שבועות אימון'),
+    kpi('kpi-coach-talks', 'שיחות עם המאמן', talks, n0(talk.total_7d) + ' ב-7 ימים · ' + n0(talk.devices) + ' שחקנים'),
+    kpi('kpi-coach-success', 'שיחות שהצליחו', talks ? pct(n0(talk.success), talks) + '%' : '–', n0(talk.success) + ' מתוך ' + talks, { gold: true }),
+  ));
+
+  const restW = n0(bi.rest);
+  body.appendChild(h('div', { class: 'adm-cols' },
+    h('div', { class: 'adm-card', testid: 'v22-intensity' },
+      h('h3', { text: 'עוצמת האימון שנבחרה (שבועות)' }),
+      splitBar(intensityParts(bi), { testid: 'chart-intensity', empty: 'עוד אין שבועות אימון' }),
+      h('div', { style: 'height:14px' }),
+      h('div', { class: 'adm-muted', style: 'font-size:13px;margin-bottom:6px', text: 'ב-7 הימים האחרונים' }),
+      splitBar(intensityParts(bi7), { testid: 'chart-intensity-7d', empty: 'אין שבועות אימון ב-7 הימים האחרונים' }),
+      h('div', { class: 'adm-note-sm', testid: 'v22-rest',
+        text: 'שבועות מנוחה: ' + restW + (weeks ? ' (' + pct(restW, weeks) + '% מכל השבועות)' : '') + '. מנוחה לא נספרת בעוצמות.' })),
+    h('div', { class: 'adm-card', testid: 'v22-coach' },
+      h('h3', { text: 'שיחות עם המאמן לפי גישה' }),
+      rateBars(['ask', 'demand', 'threat'].map((k) => ({
+        name: APPROACH_HE[k], success: n0((ba[k] || {}).success), total: n0((ba[k] || {}).total),
+        color: APPROACH_COLOR[k], ref: APPROACH_BASE[k], refLabel: 'סיכוי בסיס בנוסחה ' + Math.round(APPROACH_BASE[k] * 100) + '%', testid: 'coach-rate-' + k,
+      })), { testid: 'chart-coach-approach', empty: 'עוד אין שיחות עם המאמן' }),
+      talks ? h('div', { class: 'adm-note-sm' }, h('span', { class: 'adm-ref-key', 'aria-hidden': 'true' }),
+        'הקו הלבן = סיכוי הבסיס של הגישה בנוסחה, לפני ההשפעה של הרמה, האמון, הכושר, העומס והחוזה.') : null,
+      talks ? h('div', { style: 'margin-top:12px' },
+        h('div', { class: 'adm-muted', style: 'font-size:13px;margin-bottom:6px', text: 'איזו גישה השחקנים בוחרים' }),
+        splitBar(['ask', 'demand', 'threat'].map((k, i) => ({
+          name: APPROACH_HE[k], value: n0((ba[k] || {}).total), color: APPROACH_COLOR[k] || ['#3987e5', '#d95926', '#199e70'][i],
+        })), { testid: 'chart-coach-share' })) : null),
+  ));
+
+  body.appendChild(h('div', { class: 'adm-cols' },
+    h('div', { class: 'adm-card', testid: 'v22-per-day' },
+      h('h3', { text: 'שחיקות ופציעות באימון לפי יום (30 ימים)' }),
+      lineChart([
+        { name: 'שחיקות', color: C_BOY, points: perDay.map((d) => ({ day: d.day, count: n0(d.burnout) })) },
+        { name: 'פציעות באימון', color: C_GIRL, points: perDay.map((d) => ({ day: d.day, count: n0(d.injury_training) })) },
+      ], { height: 170, testid: 'chart-burnout-days' })),
+    h('div', { class: 'adm-card', testid: 'v22-focus' },
+      h('h3', { text: 'פוקוס האימון (שבועות)' }),
+      rankList((Array.isArray(tr.by_focus) ? tr.by_focus : []).map((x) => ({ name: FOCUS_HE[x.key] || String(x.key), count: n0(x.count) })),
+        { empty: 'עוד אין שבועות אימון' })),
+  ));
+}
+
+/** v2.2: the plain-words summary at the top of the dashboard (numbers from admin_stats, nothing new on the server).
+ *  "עד היום נכנסו 28 אנשים · היום 17 · השבוע 20 · מחוברים עכשיו 0 · שוחקו 79 משחקים · 6 קריירות · דירוג 4.8 מתוך 12 משובים" */
+export function summaryCard(s) {
+  const big = (testid, v, cls = '') => h('b', { class: 'n' + (cls ? ' ' + cls : ''), testid, 'data-value': String(v), text: String(v) });
+  const item = (cls, ...parts) => h('span', { class: 'adm-sum-item' + (cls ? ' ' + cls : '') }, ...parts);
+  const rc = n0(s.rating_count);
+  const avg = rc ? (Math.round(n0(s.rating_avg) * 10) / 10).toFixed(1) : '0';
+  const card = h('section', { class: 'adm-card adm-summary', testid: 'summary-card', 'aria-label': 'סיכום במילים פשוטות' },
+    h('h2', { class: 'adm-sum-title', text: 'במילים פשוטות' }),
+    h('p', { class: 'adm-sum-line', testid: 'summary-text' },
+      item('lead', 'עד היום נכנסו ', big('sum-people', n0(s.total_devices)), ' אנשים'),
+      item('', 'היום נכנסו ', big('sum-today', n0(s.dau))),
+      item('', 'השבוע נכנסו ', big('sum-week', n0(s.wau))),
+      item('live', h('span', { class: 'dot', 'aria-hidden': 'true' }), 'מחוברים עכשיו ', big('sum-online', n0(s.online_now), 'green')),
+      item('', 'שוחקו ', big('sum-matches', n0(s.matches_played)), ' משחקים'),
+      item('', 'התחילו ', big('sum-careers', n0(s.careers_started)), ' קריירות'),
+      rc
+        ? item('gold', 'דירוג ממוצע ', big('sum-rating', avg, 'gold'), h('span', { 'aria-hidden': 'true', class: 'star', text: '★' }), ' (לפי ', big('sum-rating-count', rc, 'small'), ' משובים)')
+        : item('', 'עוד אין דירוגים', h('b', { class: 'n', testid: 'sum-rating', 'data-value': '0', hidden: true, text: '0' }))),
+    h('p', { class: 'adm-sum-note', testid: 'summary-note' },
+      h('b', { text: '"אנשים" = מכשירים: ' }),
+      'כל טלפון או מחשב שפתח את המשחק נספר פעם אחת (לפי מזהה אנונימי של המכשיר).'),
+    h('p', { class: 'adm-sum-note sub' },
+      '"היום" = 24 השעות האחרונות · "השבוע" = 7 הימים האחרונים · "מחוברים עכשיו" = פעילים ב-2 הדקות האחרונות'));
+  return card;
+}
+
 export function renderDash(root) {
   clear(root);
   const body = h('div', {}, h('div', { class: 'adm-loading', text: 'טוען נתונים...' }));
@@ -325,17 +462,21 @@ export function renderDash(root) {
     try {
       // the 2.1 stats never break the 2.0 dashboard: missing -> null (banner), other failure -> 'error'
       const v2p = api.getStatsV2(30).catch((e) => { if (e instanceof AuthLostError) throw e; return 'error'; });
-      const [s, names, v2] = await Promise.all([api.getStats(30), loadNames(), v2p]);
+      // same for 2.2: missing update-2.2.sql -> null (banner), other failure -> 'error'
+      const v3p = api.getStatsV3(30).catch((e) => { if (e instanceof AuthLostError) throw e; return 'error'; });
+      const [s, names, v2, v3] = await Promise.all([api.getStats(30), loadNames(), v2p, v3p]);
       if (!alive) return;
-      draw(s || {}, names, v2);
+      draw(s || {}, names, v2, v3);
     } catch (e) {
       if (alive) showError(body, e, load);
     }
   };
 
-  const draw = (s, names, v2) => {
+  const draw = (s, names, v2, v3) => {
     clear(body);
-    if (v2 === null) body.appendChild(schemaBanner());
+    body.appendChild(summaryCard(s));
+    if (v2 === null) body.appendChild(schemaBanner(v3 === null ? 'אחרי זה הרץ גם את supabase/update-2.2.sql (נתוני האימונים והשיחות עם המאמן של 2.2, סעיף "עדכון 2.2").' : ''));
+    else if (v3 === null) body.appendChild(schemaBanner22());
     const ads = s.ads || {};
     const imp = n0(ads.impressions_total);
     const clk = n0(ads.clicks_total);
@@ -348,11 +489,11 @@ export function renderDash(root) {
       h('button', { class: 'adm-btn small', type: 'button', text: 'רענן', onclick: () => { clear(body); body.appendChild(h('div', { class: 'adm-loading', text: 'טוען נתונים...' })); load(); } }),
     ));
 
-    body.appendChild(h('div', { class: 'adm-section-title', text: 'שחקנים' }));
+    body.appendChild(h('div', { class: 'adm-section-title', text: 'אנשים (מכשירים) - הפירוט המלא' }));
     const onlineTile = kpi('kpi-online', 'מחוברים עכשיו', n0(s.online_now), 'פעילים ב-2 הדקות האחרונות', { hero: true, dot: true });
     body.appendChild(h('div', { class: 'adm-grid wide' },
       onlineTile,
-      kpi('kpi-devices', 'סה"כ שחקנים (מכשירים)', n0(s.total_devices)),
+      kpi('kpi-devices', 'סה"כ אנשים (מכשירים)', n0(s.total_devices)),
       kpi('kpi-dau', 'פעילים היום (DAU)', n0(s.dau), '24 שעות אחרונות'),
       kpi('kpi-wau', 'פעילים השבוע (WAU)', n0(s.wau), '7 ימים'),
       kpi('kpi-mau', 'פעילים החודש (MAU)', n0(s.mau), '30 ימים'),
@@ -371,6 +512,8 @@ export function renderDash(root) {
 
     if (v2 && typeof v2 === 'object') drawV21(body, v2, names);
     else if (v2 === 'error') body.appendChild(h('p', { class: 'adm-warn', text: 'נתוני 2.1 לא נטענו כרגע. לחץ "רענן" כדי לנסות שוב.' }));
+    if (v3 && typeof v3 === 'object') drawV22(body, v3);
+    else if (v3 === 'error') body.appendChild(h('p', { class: 'adm-warn', testid: 'v22-error', text: 'נתוני 2.2 לא נטענו כרגע. לחץ "רענן" כדי לנסות שוב.' }));
 
     body.appendChild(h('div', { class: 'adm-section-title', text: 'דירוג ומשובים' }));
     body.appendChild(h('div', { class: 'adm-grid' },
@@ -445,8 +588,10 @@ export function renderDash(root) {
       if (!alive || document.visibilityState === 'hidden') return;
       try {
         const s2 = await api.getStats(30);
-        const el = root.querySelector('[data-testid="kpi-online"]');
-        if (el && s2) { el.textContent = String(n0(s2.online_now)); el.setAttribute('data-value', String(n0(s2.online_now))); }
+        for (const id of ['kpi-online', 'sum-online']) {
+          const el = root.querySelector(`[data-testid="${id}"]`);
+          if (el && s2) { el.textContent = String(n0(s2.online_now)); el.setAttribute('data-value', String(n0(s2.online_now))); }
+        }
       } catch { /* keep the old value */ }
     }, 60000);
   };
@@ -678,6 +823,242 @@ export function renderFeedback(root, { onUnreadChange } = {}) {
   return () => { alive = false; };
 }
 
+// ---------- #/players (v2.2: supabase/update-2.2.sql admin_players) ----------
+export const PLATFORM_HE = { android: 'אנדרואיד', ios: 'אייפון / אייפד', desktop: 'מחשב', other: 'אחר' };
+const STAGE_HE = {
+  youth: ['נוער', 'נערות'], pro: ['מקצוען', 'מקצוענית'], free: ['שחקן חופשי', 'שחקנית חופשית'],
+  manager: ['מאמן', 'מאמנת'], retired: ['פרש', 'פרשה'],
+};
+const WHY_HE = { start: 'התחלת קריירה', season: 'סוף עונה', retired: 'פרישה', manager: 'התחלת אימון', open: 'פתיחת המשחק' };
+/** 'נוער' / 'מקצוענית' ... (unknown stages are shown as-is). */
+export function stageHe(stage, gender) {
+  const s = STAGE_HE[stage];
+  return s ? s[gender === 'f' ? 1 : 0] : String(stage || '?');
+}
+/** 'עכשיו' / 'לפני 5 דק׳' / 'לפני 3 שע׳' / 'אתמול' / 'לפני 4 ימים' / 'לפני 2 שבועות' / '12.06.26' */
+export function fmtAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '–';
+  const sec = Math.max(0, Math.round((now - t) / 1000));
+  if (sec < 120) return 'עכשיו';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return 'לפני ' + min + ' דק׳';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr === 1 ? 'לפני שעה' : 'לפני ' + hr + ' שע׳';
+  const d = Math.floor(hr / 24);
+  if (d === 1) return 'אתמול';
+  if (d < 14) return 'לפני ' + d + ' ימים';
+  if (d < 60) return 'לפני ' + Math.floor(d / 7) + ' שבועות';
+  return fmtDate(iso).split(' · ')[0];
+}
+const fmtDay = (iso) => (iso ? fmtDate(iso).split(' · ')[0] : '–');
+/** 2031 -> '2031/32' (the game's season label) */
+const seasonLabel = (y) => (Number.isFinite(Number(y)) && Number(y) > 0 ? Number(y) + '/' + String((Number(y) + 1) % 100).padStart(2, '0') : '–');
+const numOr = (v, d = '–') => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? d : String(Number(v)));
+
+/** Club / role line of a career: the game's own label, except 'פרש' (shown as the stage already). */
+function clubLabel(r, names) {
+  if (r.stage === 'retired') {
+    if (!r.club) return r.gender === 'f' ? 'סיימה את הקריירה' : 'סיים את הקריירה';
+    return (r.club_he || names.club(r.club)) + ' (מועדון אחרון)';
+  }
+  return r.club_he || (r.club ? names.club(r.club) : 'ללא קבוצה');
+}
+/** League line for the players tab: Hebrew name only; top-5 leagues get a word, not an unexplained star. */
+function leagueLabel(r, names) {
+  if (!r.league) return '';
+  return names.leagueHe(r.league) + (names.isTop5(r.league) ? ' · ליגת טופ' : '');
+}
+const OVR_TIP = 'OVR = הדירוג הכללי של השחקן במשחק (0–99)';
+const ovrLabel = (r) => (r.stage === 'manager' ? 'OVR כשחקן' : 'OVR');
+/** Display name: the character name chosen in the game ('ללא שם' when empty). */
+function playerName(r) {
+  const nm = String((r && r.name) || '').trim() || 'ללא שם';
+  return nm;
+}
+
+const SORTS = [
+  { id: 'last_seen', he: 'נראו לאחרונה' },
+  { id: 'matches', he: 'הכי הרבה משחקים בקריירה' },
+  { id: 'ovr', he: 'OVR הכי גבוה' },
+];
+// career path shown in the details panel (from the latest snapshot's stage); 'מאמן' only for coaching careers
+const PATH = ['youth', 'pro', 'retired'];
+const PATH_MGR = ['youth', 'pro', 'retired', 'manager'];
+
+export function renderPlayers(root) {
+  clear(root);
+  const PAGE = 50;
+  const state = { offset: 0, search: '', sort: 'last_seen', total: 0, open: '' };
+  let alive = true;
+  let seq = 0;
+  let debounce = null;
+  const bannerSlot = h('div');
+  const search = h('input', { class: 'adm-input adm-search', type: 'search', testid: 'players-search', placeholder: 'חיפוש לפי שם השחקן או הכינוי', 'aria-label': 'חיפוש לפי שם', autocomplete: 'off', maxlength: '60', enterkeyhint: 'search' });
+  const countLbl = h('span', { class: 'adm-muted', testid: 'players-count', 'aria-live': 'polite' });
+  const chips = h('div', { class: 'adm-chips', role: 'group', 'aria-label': 'מיון', testid: 'players-sort' });
+  const list = h('div', { class: 'adm-pl', testid: 'players-list' }, h('div', { class: 'adm-loading', text: 'טוען שחקנים...' }));
+  const pager = h('div', { class: 'adm-pager', testid: 'players-pager' });
+
+  const drawChips = () => {
+    clear(chips);
+    for (const s of SORTS) {
+      chips.appendChild(h('button', {
+        class: 'adm-chip' + (state.sort === s.id ? ' on' : ''), type: 'button', testid: 'players-sort-' + s.id,
+        'aria-pressed': state.sort === s.id ? 'true' : 'false', text: s.he,
+        onclick: () => { if (state.sort === s.id) return; state.sort = s.id; state.offset = 0; drawChips(); load(); },
+      }));
+    }
+  };
+  drawChips();
+  search.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => { const v = search.value.trim(); if (v === state.search) return; state.search = v; state.offset = 0; load(); }, 300);
+  });
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); clearTimeout(debounce); state.search = search.value.trim(); state.offset = 0; load(); }
+  });
+
+  root.appendChild(bannerSlot);
+  root.appendChild(h('div', { class: 'adm-toolbar adm-pl-toolbar' },
+    h('label', { class: 'adm-pl-searchwrap' }, h('span', { class: 'ic', 'aria-hidden': 'true', text: '⌕' }), search),
+    chips,
+    h('span', { class: 'adm-spacer' }),
+    countLbl,
+    h('button', { class: 'adm-btn small', type: 'button', text: 'רענן', onclick: () => load() }),
+  ));
+  root.appendChild(h('p', { class: 'adm-note adm-pl-note', testid: 'players-note' },
+    'כל שורה היא קריירה אחת (באותו מכשיר יכולות להיות כמה). השם הוא השם שהשחקן כתב לדמות במשחק. "משחקים" = משחקים ששיחק בקריירה הזו. מופיעים רק מי ששיחקו בגרסה 2.2 ומעלה והשאירו את שיתוף הנתונים דלוק. לחץ על שורה לפרטים.'));
+  root.appendChild(h('div', { class: 'adm-pl-head', 'aria-hidden': 'true' },
+    h('span', { text: 'שחקן' }), h('span', { text: 'מועדון וליגה' }), h('span', { text: 'לאום' }), h('span', { class: 'c', title: OVR_TIP, text: 'OVR' }),
+    h('span', { class: 'c', text: 'גיל' }), h('span', { text: 'שלב' }), h('span', { class: 'c', title: 'משחקים ששיחק בקריירה הזו', text: 'משחקים' }), h('span', { class: 'c', text: 'עונות' }),
+    h('span', { text: 'מכשיר' }), h('span', { text: 'נראה לראשונה' }), h('span', { text: 'נראה לאחרונה' })));
+  root.appendChild(list);
+  root.appendChild(pager);
+
+  const crestNode = (r, names, size) => {
+    const url = r.club ? names.crest(r.club, size * 2) : '';
+    if (url) return h('img', { class: 'adm-crest', src: url, alt: '', width: String(size), height: String(size), loading: 'lazy', decoding: 'async' });
+    const ch = (playerName(r).trim()[0] || '?');
+    return h('span', { class: 'adm-crest mono' + (r.gender === 'f' ? ' f' : ''), style: 'width:' + size + 'px;height:' + size + 'px', 'aria-hidden': 'true', text: ch });
+  };
+
+  const details = (r, names) => {
+    const f = r.gender === 'f';
+    const kv = (k, v, testid) => h('div', { class: 'kv' }, h('dt', { text: k }), h('dd', { testid: testid || null, text: v }));
+    const steps = r.stage === 'manager' ? PATH_MGR : PATH;
+    const idx = steps.indexOf(r.stage === 'free' ? 'pro' : r.stage);
+    const path = h('ol', { class: 'adm-path', 'aria-label': 'מסלול הקריירה' },
+      steps.map((st, i) => h('li', { class: i < idx ? 'done' : i === idx ? 'now' : '' },
+        h('span', { class: 'b', 'aria-hidden': 'true' }), stageHe(st, r.gender))));
+    const nick = r.nick ? ' «' + r.nick + '»' : '';
+    return h('div', { class: 'adm-pl-details', testid: 'player-details' },
+      h('div', { class: 'adm-pl-dhead' },
+        crestNode(r, names, 48),
+        h('div', {},
+          h('div', { class: 'nm', text: playerName(r) + nick }),
+          h('div', { class: 'adm-muted', text: (f ? 'שחקנית' : 'שחקן') + ' · ' + (r.pos ? names.pos(r.pos) : '') + (r.nation ? ' · ' + names.nationHe(r.nation) : '') }))),
+      path,
+      h('dl', { class: 'adm-kvs' },
+        kv(r.stage === 'manager' ? 'תפקיד' : 'מועדון', clubLabel(r, names)),
+        kv('ליגה', r.league ? leagueLabel(r, names) : '–'),
+        kv(ovrLabel(r) + ' (דירוג כללי, 0–99)', numOr(r.ovr)),
+        kv('גיל במשחק', numOr(r.age)),
+        kv('עונה במשחק', seasonLabel(r.season) + (r.seasons ? ' (עונה ' + r.seasons + ' בקריירה)' : '')),
+        kv('משחקים בקריירה', numOr(r.apps) + (r.goals != null ? ' · שערים: ' + numOr(r.goals) : '')),
+        kv('משחקים ששוחקו במכשיר (כל הקריירות)', numOr(r.matches, '0')),
+        kv('מכשיר', (PLATFORM_HE[r.platform] || r.platform || 'לא ידוע') + (r.standalone ? ' · מותקן למסך הבית' : '') + (r.app_version ? ' · v' + r.app_version : '')),
+        kv('נראה לראשונה', r.first_seen ? fmtDate(r.first_seen) : '–'),
+        kv('נראה לאחרונה', r.last_seen ? fmtDate(r.last_seen) + ' (' + fmtAgo(r.last_seen) + ')' : '–'),
+        kv('עדכון אחרון של הנתונים', (r.snapshot_at ? fmtDate(r.snapshot_at) : '–') + (r.why ? ' · ' + (WHY_HE[r.why] || r.why) : ''))),
+      h('div', { class: 'adm-muted adm-pl-id' },
+        'מזהה מכשיר: ', h('bdi', { dir: 'ltr', text: String(r.device_id || '').slice(0, 8) + '…' }),
+        ' · מזהה קריירה: ', h('bdi', { dir: 'ltr', text: String(r.career_id || '') })));
+  };
+
+  const row = (r, names, i) => {
+    const key = String(r.device_id) + '|' + String(r.career_id);
+    const f = r.gender === 'f';
+    const btn = h('button', { class: 'adm-pl-row', type: 'button', testid: 'player-row-' + (state.offset + i), 'aria-expanded': 'false', 'data-key': key },
+      h('span', { class: 'pl-who' },
+        crestNode(r, names, 34),
+        h('span', { class: 'pl-names' },
+          h('span', { class: 'pl-name', testid: 'player-name', title: playerName(r) + (r.nick ? ' «' + r.nick + '»' : ''), text: playerName(r) }),
+          h('span', { class: 'pl-sub' },
+            h('span', { class: 'adm-g ' + (f ? 'f' : 'm'), text: f ? 'בת' : 'בן' }),
+            r.nick ? h('span', { class: 'pl-nick', text: '«' + r.nick + '»' }) : null,
+            r.pos ? h('span', { class: 'pl-pos', dir: 'ltr', text: r.pos }) : null))),
+      h('span', { class: 'pl-club' },
+        h('span', { class: 'c1', title: clubLabel(r, names), text: clubLabel(r, names) }),
+        h('span', { class: 'c2', title: leagueLabel(r, names), text: leagueLabel(r, names) })),
+      h('span', { class: 'pl-nat', text: r.nation ? names.nationHe(r.nation) : '–' }),
+      h('span', { class: 'pl-ovr' + (r.stage === 'manager' ? ' was' : ''), 'data-label': 'OVR', title: r.stage === 'manager' ? 'OVR כשחקן (לפני שהפך למאמן)' : OVR_TIP, text: numOr(r.ovr) }),
+      h('span', { class: 'pl-num pl-age', 'data-label': 'גיל', text: numOr(r.age) }),
+      h('span', { class: 'pl-stage' }, h('span', { class: 'adm-stage s-' + String(r.stage || 'x').replace(/[^a-z]/g, ''), text: stageHe(r.stage, r.gender) })),
+      h('span', { class: 'pl-num pl-matches', 'data-label': 'משחקים', title: 'משחקים ששיחק בקריירה הזו', text: numOr(r.apps, '0') }),
+      h('span', { class: 'pl-num pl-seasons', 'data-label': 'עונות', text: numOr(r.seasons) }),
+      h('span', { class: 'pl-plat', text: PLATFORM_HE[r.platform] || r.platform || '–' }),
+      h('span', { class: 'pl-first', 'data-label': 'מאז', text: fmtDay(r.first_seen) }),
+      h('span', { class: 'pl-last', testid: 'player-last-seen', 'data-label': 'נראה לאחרונה:', title: r.last_seen ? 'נראה לאחרונה: ' + fmtDate(r.last_seen) : '', text: fmtAgo(r.last_seen) }));
+    const wrap = h('article', { class: 'adm-pl-item', testid: 'player-item' }, btn);
+    let panel = null;
+    const toggle = (open) => {
+      if (open && !panel) { panel = details(r, names); wrap.appendChild(panel); }
+      if (panel) panel.hidden = !open;
+      wrap.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      state.open = open ? key : (state.open === key ? '' : state.open);
+    };
+    btn.addEventListener('click', () => toggle(btn.getAttribute('aria-expanded') !== 'true'));
+    if (state.open === key) toggle(true);
+    return wrap;
+  };
+
+  const load = async () => {
+    const my = ++seq;
+    clear(list);
+    list.appendChild(h('div', { class: 'adm-loading', text: 'טוען שחקנים...' }));
+    try {
+      const [res, names] = await Promise.all([
+        api.getPlayers({ limit: PAGE, offset: state.offset, search: state.search, sort: state.sort }),
+        loadNames()]);
+      if (!alive || my !== seq) return;
+      clear(bannerSlot);
+      clear(list);
+      clear(pager);
+      if (res === null) {
+        bannerSlot.appendChild(schemaBanner22('לשונית השחקנים תתמלא אחרי ההרצה. השחקנים שכבר שיחקו בגרסה 2.2 יופיעו מיד (הנתונים כבר נשמרים בשרת).'));
+        countLbl.textContent = '';
+        list.appendChild(h('div', { class: 'adm-empty', text: 'הרשימה תופיע אחרי הרצת update-2.2.sql.' }));
+        return;
+      }
+      const rows = Array.isArray(res.rows) ? res.rows : [];
+      state.total = n0(res.total);
+      const range = state.total > PAGE && rows.length ? 'מציג ' + (state.offset + 1) + '–' + (state.offset + rows.length) + ' מתוך ' : '';
+      countLbl.textContent = state.search
+        ? (range ? range + state.total + ' תוצאות' : state.total === 1 ? 'תוצאה אחת' : state.total + ' תוצאות')
+        : (range ? range + state.total + ' קריירות' : 'סה"כ ' + state.total + ' קריירות');
+      if (!rows.length) {
+        list.appendChild(h('div', { class: 'adm-empty', testid: 'players-empty',
+          text: state.search ? 'לא נמצא שחקן בשם "' + state.search + '"' : 'עוד אין שחקנים ברשימה. הם יופיעו כשיפתחו את המשחק בגרסה 2.2.' }));
+      }
+      rows.forEach((r, i) => list.appendChild(row(r, names, i)));
+      if (state.total > PAGE) {
+        const page = Math.floor(state.offset / PAGE) + 1;
+        const pages = Math.ceil(state.total / PAGE);
+        const go = (off) => { state.offset = off; load(); try { root.scrollIntoView({ block: 'start' }); } catch { /* ignore */ } };
+        pager.appendChild(h('button', { class: 'adm-btn small', type: 'button', testid: 'players-prev', text: 'הקודם', disabled: state.offset <= 0, onclick: () => go(Math.max(0, state.offset - PAGE)) }));
+        pager.appendChild(h('span', { class: 'adm-muted', testid: 'players-page', text: 'עמוד ' + page + ' מתוך ' + pages }));
+        pager.appendChild(h('button', { class: 'adm-btn small', type: 'button', testid: 'players-next', text: 'הבא', disabled: state.offset + PAGE >= state.total, onclick: () => go(state.offset + PAGE) }));
+      }
+    } catch (e) {
+      if (alive && my === seq) showError(list, e, load);
+    }
+  };
+  load();
+  return () => { alive = false; clearTimeout(debounce); };
+}
+
 // ---------- #/tools ----------
 const RESET_WORD = 'איפוס';
 
@@ -689,22 +1070,25 @@ export function renderTools(root) {
 
   const load = async () => {
     try {
-      const [s, v21] = await Promise.all([api.getStats(1), api.probeV21()]);
+      const [s, v21, v22] = await Promise.all([api.getStats(1), api.probeV21(), api.probeV22()]);
       if (!alive) return;
-      draw(s || {}, v21);
+      draw(s || {}, v21, v22);
     } catch (e) {
       if (alive) showError(body, e, load);
     }
   };
 
-  const draw = (s, v21) => {
+  const draw = (s, v21, v22) => {
     clear(body);
     if (v21 === false) body.appendChild(schemaBanner('ייצוא CSV עובד גם בלי העדכון. איפוס הנתונים דורש את העדכון.'));
+    else if (v22 === false) body.appendChild(schemaBanner22('הכלים בלשונית הזו עובדים גם בלי העדכון. הוא נדרש רק לנתוני 2.2 בלוח.'));
 
     const status = h('div', { class: 'adm-card', testid: 'tools-schema' },
       h('h3', { text: 'מצב השרת' }),
       h('p', { class: v21 ? 'adm-result' : 'adm-warn', testid: 'tools-schema-status',
         text: v21 ? 'update-2.1.sql מותקן ✓ (כל הכלים פעילים)' : v21 === false ? 'update-2.1.sql עוד לא הורץ' : 'לא ידוע (אין חיבור לשרת)' }),
+      h('p', { class: v22 ? 'adm-result' : 'adm-warn', testid: 'tools-schema-status-22',
+        text: v22 ? 'update-2.2.sql מותקן ✓ (נתוני האימונים, השיחות עם המאמן ולשונית השחקנים)' : v22 === false ? 'update-2.2.sql עוד לא הורץ' : 'update-2.2.sql: לא ידוע (אין חיבור לשרת)' }),
       h('p', { class: 'adm-muted', style: 'font-size:13px;margin:0', text: 'גרסת המשחק בקוד: ' + APP_VERSION }));
 
     const exportBtn = h('button', { class: 'adm-btn primary', type: 'button', testid: 'btn-tools-export-csv', text: '⬇ ייצוא כל המשובים ל-CSV' });

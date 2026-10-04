@@ -149,6 +149,7 @@ function closeAllModalsSafe(info) {
 route('/title', () => import('./title.js'), { tabs: false, header: false });
 route('/new', () => import('./create.js'), { tabs: false, title: 'קריירה חדשה', back: '#/title' });
 route('/hub', () => import('./hub.js'), { tab: 'hub', title: '{{הילד|הילדה}} מהשכונה', gear: true });
+route('/coach-talk', () => import('./coach-talk.js'), { tab: 'hub', title: 'שיחה עם המאמן', back: '#/hub' });
 route('/match', () => import('./match.js'), { tabs: false, header: false, banners: false });
 route('/season', () => import('./week.js'), { tab: 'hub', title: 'סיכום העונה' });
 route('/inbox', () => import('./inbox.js'), { tab: 'inbox', title: 'הודעות', back: '#/hub' });

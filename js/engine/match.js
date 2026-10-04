@@ -10,6 +10,7 @@ import { lambdas, simExtraTime, simPenalties } from './sim.js';
 import { cs, clubData, clubLeague, teamVM, nameFor, country, clubPrestige, lgNameHe, lgYouthHe } from './world.js';
 import { cupDef } from './cups.js';
 import { ovrOf, posGroup } from './player.js';
+import { effAdj, bandOf } from './load.js';
 import { weekLabelHe } from './calendar.js';
 import { MOMENTS, TUNE, generateMoments, optionChance, oddsBand, resolveOption, expectedValue, setupText, optionLabel, resultText, momentCtx } from './moments.js';
 
@@ -144,7 +145,7 @@ export function createLive(S, rng, fxd, side, sel) {
   const own = side === 'h' ? fxd.h : fxd.a;
   const opp = side === 'h' ? fxd.a : fxd.h;
   const p = S.player;
-  const ovr = ovrOf(p);
+  const ovr = ovrOf(p) + effAdj(p);   // v2.2: effective OVR (load band + sharpness); the shown OVR does not change
   const sOwnBase = sideStrength(S, fxd, own);
   const sOpp = sideStrength(S, fxd, opp);
   const role = sel.sel === 'starter' ? 'starter' : 'bench';
@@ -596,6 +597,7 @@ export function computeRating(S, rng, L) {
     else if (p.pos === 'CDM') rating += 0.15;
   }
   if (p.pos === 'GK') rating += TUNE.gkRatingAdj;
+  rating += bandOf(p).rt;   // v2.2: heavy -0.2, burnt -0.4
   if (p.pos === 'GK' && opp > 1) rating -= 0.2 * (opp - 1);
   rating += rng.normal(0, 0.2);
   return round1(clamp(rating, 3.0, 10.0));

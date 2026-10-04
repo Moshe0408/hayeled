@@ -9,6 +9,7 @@ import { money, rating, signed } from './format.js';
 import { gtext, g } from './gender.js';
 import { celebrate } from './scene/celebration.js';
 import { ico } from './icons.js';
+import { weekLoadLine, bandOf, bandHe } from './training.js';
 
 const STOP_HE = {
   until: '', offer: 'עצרנו: הגיעה הצעה חדשה', event: 'עצרנו: יש הודעה שמחכה לתשובה', review: 'העונה הסתיימה',
@@ -30,6 +31,19 @@ export function showWeekSummary(summary, extra = {}) {
         <span class="fx-team away"><span class="tname">${teamLabel(r.away)}</span>${badge(r.away, 's')}</span></div>
       <div class="ws-note">${r.extraHe ? `<span class="muted small">${esc(r.extraHe)}</span>` : ''}${r.noteHe ? `<span class="small">${esc(r.noteHe)}</span>` : ''}${ratingChip(r.rating)}</div>
     </div>`).join('');
+  const loadLine = weekLoadLine(s);
+  // v2.2: energy and load as "before ← after" tiles (one place for each number, no duplicate line)
+  const hasLoad = s.load !== undefined && s.load !== null;
+  const band = s.loadBand || bandOf(s.load);
+  const en = Math.round(Number(s.energy) || 0);
+  const enTone = en < 20 ? 'bad' : en < 40 ? 'warn' : 'ok';
+  const fromTo = (a, b) => (a !== undefined && a !== null && Math.round(a) !== Math.round(b)
+    ? `<span class="num ws-from">${esc(Math.round(a))}</span><span class="ws-arr" aria-hidden="true">←</span><b class="num">${esc(Math.round(b))}</b>`
+    : `<b class="num">${esc(Math.round(b))}</b>`);
+  // v2.2: the promise line gets its own note (the engine also lists it in linesHe)
+  const promiseHe = s.promiseHe || s.talkHe || '';
+  const promiseBad = s.promiseKept === false || ((s.promiseKept === undefined || s.promiseKept === null) && /הפר|לא עמד|לא קיים|קיבלת הזדמנות/.test(promiseHe));
+  const lines = (s.linesHe || []).filter((l) => !promiseHe || l !== promiseHe);
   const stopLine = extra.stopped && STOP_HE[extra.stopped] ? `<p class="note">${esc(STOP_HE[extra.stopped])}</p>` : '';
   const html = `
     <h2 class="modal-title">${extra.ffWeeks > 1 ? `קפצנו ${esc(extra.ffWeeks)} שבועות` : 'סיכום השבוע'}</h2>
@@ -40,11 +54,16 @@ export function showWeekSummary(summary, extra = {}) {
     ${results ? `<div class="ws-results">${results}</div>` : '<p class="muted">לא היו משחקים השבוע.</p>'}
     <div class="ws-stats">
       <div class="ws-stat"><small>דירוג</small><b class="num">${esc(s.ovrAfter)}</b>${ovrDelta ? `<span class="delta ${ovrDelta > 0 ? 'up' : 'down'}">${esc(signed(ovrDelta))}</span>` : ''}</div>
-      <div class="ws-stat"><small>אנרגיה</small><b class="num">${esc(Math.round(s.energy))}</b></div>
+      ${hasLoad ? '' : `<div class="ws-stat"><small>אנרגיה</small><b class="num">${esc(Math.round(s.energy))}</b></div>`}
       <div class="ws-stat"><small>מורל</small><b class="num">${esc(Math.round(s.morale))}</b></div>
     </div>
+    ${hasLoad ? `<div class="ws-load2" data-testid="week-load-line" aria-label="${esc(loadLine)}">
+      <div class="ws-stat ws-energy en-${enTone}"><small>${ico('battery')}אנרגיה</small><span class="ws-ft">${fromTo(s.energyBefore, s.energy)}</span></div>
+      <div class="ws-stat ws-load lb-${esc(band)}"><small>${ico('dumbbell')}עומס <i class="lb-band">${esc(s.loadBandHe ? gtext(s.loadBandHe) : bandHe(band))}</i></small><span class="ws-ft">${fromTo(s.loadBefore, s.load)}</span></div>
+    </div>` : ''}
+    ${promiseHe ? `<p class="note ${promiseBad ? 'warn' : 'good'}" data-testid="week-promise">${ico('promise', promiseBad ? 'warn' : 'gold')} ${esc(gtext(promiseHe))}</p>` : ''}
     ${s.trainingHe ? `<p class="small">${ico('dumbbell', 'teal')} ${esc(s.trainingHe)}</p>` : ''}
-    ${(s.linesHe || []).length ? `<ul class="ws-lines">${s.linesHe.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+    ${lines.length ? `<ul class="ws-lines">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
     ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">${ico('chat')} ${s.newMessages === 1 ? 'הודעה חדשה' : esc(s.newMessages) + ' הודעות חדשות'}</span>` : ''}${s.newOffers ? `<span class="chip gold">${ico('mail')} ${s.newOffers === 1 ? 'הצעה חדשה' : esc(s.newOffers) + ' הצעות חדשות'}</span>` : ''}</div>` : ''}
     <button type="button" class="btn btn-primary btn-lg" data-testid="btn-week-ok" data-close>המשך</button>`;
   const close = openModal(html, { testid: 'week-summary', sheet: true, onClose: (why) => { if (why !== 'nav') afterSummary(s); } });

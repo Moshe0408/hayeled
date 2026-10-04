@@ -2,6 +2,7 @@
 import { MOMENT_TEXT, RESULT_TEXT, RESULT_TEXT_BY_TYPE } from '../data/commentary.js';
 import { clamp, fill } from './util.js';
 import { formAvgOr } from './player.js';
+import { effAdj } from './load.js';
 
 // Calibration knobs (SPEC allows tuning starting values). Scales the base chance of options whose ok code is GOAL/ASSIST.
 export const TUNE = { goalBase: 0.52, assistBase: 1.1, penBase: 1.0, gkSave: 0.2, attBg: 0.09, defBg: 0.10, gkBg: 0.2, ratingBase: 6.3, gkRatingAdj: -0.55, skillMin: -0.2, skillMax: 0.12 };
@@ -156,6 +157,7 @@ export function optionChance(type, key, ctx) {
   const o = MOMENTS[type].opts[key];
   let skill = 0;
   for (const k in o.w) skill += o.w[k] * (ctx.a[k] || 0);
+  if (typeof ctx.adj === 'number') skill += ctx.adj;   // v2.2: load / sharpness (effective OVR)
   const base = effBase(o, type);
   // the skill edge scales with how realistic the option is: a 12% long shot must not become a 24% one
   // just because the opponent is weak (that made always-shoot an exploit, e.g. vs minnow national teams)
@@ -205,5 +207,5 @@ export function resultText(rng, type, code, vars) {
 }
 export function momentCtx(S, oppQ, home, big) {
   const p = S.player;
-  return { a: p.a, oppQ, form: formAvgOr(p), morale: p.morale, energy: p.energy, home, big };
+  return { a: p.a, oppQ, form: formAvgOr(p), morale: p.morale, energy: p.energy, home, big, adj: effAdj(p) };
 }

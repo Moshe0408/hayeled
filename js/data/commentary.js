@@ -1283,3 +1283,36 @@ export const CELEBRATION_TEXT = {
   win: { textHe: ['ניצחון!', 'שלוש נקודות!'], subHe: ['{score}'] },
   trophy: { textHe: ['{{אלופים|אלופות}}!!!', 'הגביע שלנו!'], subHe: ['{player} {{מניף|מניפה}} את הגביע'] },
 };
+
+// v2.2 (optional, docs/SPEC-2.2-training-bench.md §3.4): watch-mode log lines about
+// the player's load and sharpness. Placeholders: {minute} {player} {team} {opp}.
+//  heavy  - player's load band is heavy/burnt (pick at most one per match)
+//  rusty  - sharp < 35
+//  sharp  - sharp >= 70 and load fresh
+//  subTired - the coach takes the player off because of load
+export const LOAD_COMMENTARY = {
+  heavy: [
+    'דקה {minute}: {player} {{מתכופף|מתכופפת}} עם הידיים על הברכיים. הרגליים כבדות',
+    'דקה {minute}: ספרינט אחורה, ו{player} {{מגיע|מגיעה}} צעד מאוחר מדי. העייפות מורגשת',
+    'דקה {minute}: {player} {{מבקש|מבקשת}} מים מהספסל. זה לא נראה כמו היום הכי רענן',
+    'דקה {minute}: {player} {{מוותר|מוותרת}} על הריצה לעומק. הגוף כבר לא מגיב כמו פעם',
+  ],
+  rusty: [
+    'דקה {minute}: מגע ראשון כבד של {player}. רואים שחסרים {{לו|לה}} משחקים',
+    'דקה {minute}: {player} {{מאחר|מאחרת}} רגע להחלטה, והכדור כבר אצל {opp}',
+    'דקה {minute}: מסירה של {player} בורחת לחוץ. הקצב עוד לא שם',
+    'דקה {minute}: {player} עוד {{מחפש|מחפשת}} את הקצב של המשחק',
+  ],
+  sharp: [
+    'דקה {minute}: {player} עדיין {{רץ|רצה}} כאילו זו הדקה הראשונה',
+    'דקה {minute}: {player} {{חד|חדה}} היום. כל מגע ראשון במקום',
+    'דקה {minute}: לחץ גבוה של {player}, וההגנה של {opp} בלחץ',
+    'דקה {minute}: {player} {{מגיע ראשון|מגיעה ראשונה}} לכל כדור חוזר',
+  ],
+  subTired: [
+    'דקה {minute}: {player} {{יוצא|יוצאת}} מהמגרש. המאמן לא לוקח סיכון עם הרגליים העייפות',
+    'דקה {minute}: חילוף מתוכנן. {player} {{מוחלף|מוחלפת}}, העומס עשה את שלו',
+    'דקה {minute}: {player} {{מסמן|מסמנת}} לספסל שזהו. חילוף',
+    'דקה {minute}: {player} {{יורד|יורדת}} מהדשא, והצוות המקצועי כבר מחכה עם קרח',
+  ],
+};

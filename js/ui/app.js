@@ -85,11 +85,89 @@ export function buzz(pattern = 30) {
 /* Facade call wrapper                                                 */
 /* ------------------------------------------------------------------ */
 
+/* v2.2 career_snapshot: who is playing what, for the admin "שחקנים" tab (supabase/update-2.2.sql admin_players).
+   Built here from the facade (getSaveMeta + getProfile) and sent through telemetry.track, so it obeys the consent
+   toggle exactly like every other event. Sent on career start, season end, retirement, coaching start, and at most
+   once per telemetry session when an existing career is opened. Props (all short strings / numbers, < 1 KB):
+   {name, nick, gender, nation, pos, club, clubHe, league, ovr, age, season, seasons, apps, goals, stage, careerId, why}
+   stage: youth | pro | free | manager | retired */
+const SNAP_WHY = { career_started: 'start', season_completed: 'season', retired: 'retired', manager_started: 'manager' };
+/** Cut to n UTF-16 units without leaving half an emoji behind: a lone surrogate makes Postgres reject the whole
+ *  track_events batch (22P02). (telemetry.js has the same guard; it is lazy-loaded, so not imported here.) */
+const cut = (v, n) => {
+  let s = String(v == null ? '' : v).slice(0, n);
+  const last = s.charCodeAt(s.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) s = s.slice(0, -1);
+  return s;
+};
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+let snapOpenKey = '';
+
+/** The character's display name (first + last), max 40 chars, or '' without a career. */
+function snapName(meta) { return cut(String((meta && meta.name) || '').replace(/\s+/g, ' ').trim(), 40); }
+
+/** Snapshot props of the loaded career (null without one). Exported for tests. */
+export function careerSnapshot(why = '') {
+  if (!game.hasCareer()) return null;
+  const m = game.getSaveMeta();
+  let prof = null;
+  try { prof = game.getProfile(); } catch { prof = null; }
+  // coaching career under way (a job now, or between jobs); 'offers' = retired, has not picked a job yet
+  const coaching = !!(m.manager && (m.manager.st === 'active' || m.manager.st === 'unemployed'));
+  const stage = coaching ? 'manager' : (m.retired || m.stage === 'retired') ? 'retired' : cut(m.stage || '?', 12);
+  // a retired player keeps the club the career ended at (the admin row shows "<club> (מועדון אחרון)")
+  const last = stage === 'retired' && !m.clubId && m.lastClub;
+  const clubId = m.clubId || (last ? m.lastClub : null);
+  const league = m.clubId ? m.league : last ? m.lastLeague : null;
+  return {
+    name: snapName(m), nick: cut(m.nick, 16), gender: m.gender === 'f' ? 'f' : 'm', nation: cut(m.nation, 8), pos: cut(m.pos, 4),
+    club: clubId ? cut(clubId, 32) : null, clubHe: cut(last ? (m.lastClubHe || '') : m.clubHe, 60), league: league ? cut(league, 12) : null,
+    ovr: num(m.ovr), age: num(m.age), season: num(m.season), seasons: num(m.seasons),
+    apps: prof && prof.career ? num(prof.career.apps) : null, goals: prof && prof.career ? num(prof.career.goals) : null,
+    stage, careerId: cut(m.careerId, 40), why: cut(why, 12),
+  };
+}
+
+/** Queue a career_snapshot event (no-op without a career / consent / backend). Never throws. */
+export function trackCareerSnapshot(why) {
+  try {
+    const p = careerSnapshot(why);
+    if (p) svc.telemetry.track('career_snapshot', p);
+  } catch { /* never break gameplay */ }
+}
+
+/** Once per telemetry session per career: called after a saved career is opened. */
+export function snapshotOnOpen() {
+  try {
+    if (!game.hasCareer()) return;
+    let sid = '';
+    try { sid = String(svc.telemetry.getSessionId() || ''); } catch { sid = ''; }
+    const key = sid + '|' + game.getSaveMeta().careerId;
+    if (key === snapOpenKey) return;
+    snapOpenKey = key;
+    trackCareerSnapshot('open');
+  } catch { /* ignore */ }
+}
+
 /** Forward pending engine signals to telemetry. Never throws. */
 export function forwardSignals() {
   try {
     const sig = game.getAndClearSignals();
-    if (sig && sig.length) svc.telemetry.trackSignals(sig);
+    if (!sig || !sig.length) return;
+    let why = '';
+    for (const s of sig) {
+      if (!s || typeof s.name !== 'string') continue;
+      if (s.name === 'career_started') {
+        // v2.2: the character name the player chose rides along with the (anonymous) career start
+        try { const m = game.getSaveMeta(); s.props = { ...(s.props || {}), name: snapName(m), nick: cut(m.nick, 16) }; } catch { /* keep props */ }
+      }
+      if (SNAP_WHY[s.name]) why = SNAP_WHY[s.name];
+    }
+    svc.telemetry.trackSignals(sig);
+    if (why) {
+      trackCareerSnapshot(why);
+      if (why === 'start') { try { snapOpenKey = String(svc.telemetry.getSessionId() || '') + '|' + game.getSaveMeta().careerId; } catch { /* ignore */ } }
+    }
   } catch { /* no career / telemetry missing */ }
 }
 

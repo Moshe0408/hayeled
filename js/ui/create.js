@@ -8,6 +8,7 @@ import { badge, stars, attrRow, ovrCircle, playerCard, avatarFor, nationTeam, sh
 import { avatarSVG, avatarLooks } from './ext.js';
 import { gBy, gtext } from './gender.js';
 import { mountTilt } from './fx.js';
+import { BACKEND_ENABLED } from '../config.js';
 
 // Pitch layout (percent from left / top). Attack is up. LB on the left of the pitch, RB on the right.
 const PITCH = {
@@ -113,6 +114,7 @@ export function render(root, params = {}) {
       <label class="field"><span>שם משפחה</span><input id="f-last" data-testid="inp-last" maxlength="20" autocomplete="off" value="${esc(st.last)}" placeholder="${esc(ph.last)}"></label>
       <label class="field"><span>כינוי (לא חובה)</span><input id="f-nick" data-testid="inp-nick" maxlength="16" autocomplete="off" value="${esc(st.nick)}" placeholder="${esc(ph.nick)}"></label>
       <div class="chips">${(opts.nicknames || []).map((n) => { const v = T(n); return `<button type="button" class="chip chip-btn${st.nick === v ? ' on' : ''}" data-act="nick" data-v="${esc(v)}">${esc(v)}</button>`; }).join('')}</div>
+      ${BACKEND_ENABLED ? `<p class="muted small" data-testid="name-privacy-note">${esc('אפשר להמציא שם. השם של הדמות נשלח עם נתוני השימוש האנונימיים (אפשר לכבות בהגדרות).')}</p>` : ''}
     </div>`;
   }
 

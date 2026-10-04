@@ -1,5 +1,6 @@
 // Narrative engine: triggers, eligibility, rendering, inbox, effects (SPEC §4.1, §5.16).
 import { EVENTS } from '../data/events.js';
+import * as EVX from '../data/events.js';
 import { PERSONAS } from '../data/strings.js';
 import { PARTNER_NAMES, PARTNER_NAMES_M } from '../data/names.js';
 import { LEAGUE_BY_ID } from '../data/leagues.js';
@@ -21,6 +22,29 @@ export function raise(S, trig) {
   if (S.ev.trig.indexOf(trig) < 0) S.ev.trig.push(trig);
 }
 
+// v2.2 events the engine fires by id only (never from the random pool or a trigger list). The content file
+// js/data/events.js provides them; these built-in Hebrew versions are used when an id is missing there.
+const V22_C = (label, reply, effects) => ({ label, reply, effects: effects || {}, followUp: null });
+const V22_EVENTS = [
+  { id: 'physio_warn', who: 'doctor', messages: ['הרגליים שלך צועקות. העומס אצלך גבוה מדי. שבוע קל?'],
+    choices: [V22_C('{{אתה צודק|את צודקת}}, אימון קל', 'אני {{מוריד|מורידה}} הילוך השבוע.', { trainInt: 'light' }), V22_C('אני בסדר', 'אני {{מרגיש|מרגישה}} טוב, ממשיכים.', { morale: 2 })], defaultChoice: 1 },
+  { id: 'burnout', who: 'doctor', messages: ['הגוף מתחיל לגבות מחיר. חודש שלם של עומס שחוק, והמהירות והכוח שלך ירדו. בלי מנוחה זה ימשיך לרדת.'], choices: [] },
+  { id: 'rusty', who: 'coach', messages: ['נראה שהחלדת. החדות שלך ירדה, {{תתאמן|תתאמני}}.'], choices: [] },
+  { id: 'rusty_return', who: 'coach', messages: ['אחרי הפציעה צריך לחזור לקצב. שבוע רגיל של אימונים, והחדות תחזור.'], choices: [] },
+  { id: 'coach_praise_work', who: 'coach', messages: ['אני רואה איך {{אתה עובד|את עובדת}} באימונים. ככה בונים {{שחקן|שחקנית}}.'], choices: [] },
+  { id: 'bench_nudge', who: 'agent', messages: ['{{אחי|אחותי}}, {n} משחקים על הספסל. {{תלך|תלכי}} לדבר איתו.'], choices: [] },
+  { id: 'minutes_nudge', who: 'agent', messages: ['{n} משחקים עם כמה דקות בסוף. {{תלך|תלכי}} לדבר עם {coach}.'], choices: [] },
+];
+export const V22_IDS = V22_EVENTS.map((e) => e.id);
+const V22_ROUTE = { bench_nudge: '#/coach-talk', minutes_nudge: '#/coach-talk' };
+// content: canonical id -> variant ids (same private trigger); optional
+function variantsOf(id) { const V = EVX.EVENT_VARIANTS; const l = V && Array.isArray(V[id]) ? V[id] : null; return l && l.length ? l : [id]; }
+function engineOnly(id) {
+  if (V22_IDS.indexOf(id) >= 0) return true;
+  const V = EVX.EVENT_VARIANTS;
+  if (V) for (const k of Object.keys(V)) if (Array.isArray(V[k]) && V[k].indexOf(id) >= 0) return true;
+  return false;
+}
 let _byTrig = null, _byId = null;
 function index() {
   if (_byTrig) return;
@@ -28,9 +52,37 @@ function index() {
   _byId = {};
   for (const e of (EVENTS || [])) {
     _byId[e.id] = e;
+    if (engineOnly(e.id)) continue;   // v2.2: fired by the engine only (queueEvent)
     const k = e.trigger || '__pool';
     (_byTrig[k] = _byTrig[k] || []).push(e);
   }
+  for (const e of V22_EVENTS) if (!_byId[e.id]) _byId[e.id] = Object.assign({ trigger: null, weight: 1, cooldown: 0, once: false, cond: {}, defaultChoice: 0 }, e);
+}
+/**
+ * Queue an engine event for this week's narrative step. id = canonical id; with an rng, one eligible content
+ * variant (EVENT_VARIANTS[id]: cond + cooldown + weight) is picked, else the canonical / built-in one.
+ * vars fill extra {placeholders} ({n}). Returns the queued id or null.
+ */
+export function queueEvent(S, id, vars, rng) {
+  index();
+  let pick = _byId[id] ? id : null;
+  const vs = variantsOf(id).filter((x) => _byId[x]);
+  if (rng && vs.length > 1) {
+    const aw = curAw(S);
+    const ok = vs.map((x) => _byId[x]).filter((e) => {
+      const cd = S.ev.cd[e.id];
+      if (cd !== undefined && aw - cd < (e.cooldown || 0)) return false;
+      const c = Object.assign({}, e.cond || {}); delete c.chance;
+      return condOk(S, rng, c, null);
+    });
+    if (ok.length) pick = rng.weighted(ok, (x) => (x.weight === undefined ? 1 : x.weight)).id;
+  }
+  if (!pick && vs.length) pick = vs[0];
+  if (!pick) return null;
+  if (!S.ev.q) S.ev.q = [];
+  if (S.ev.q.indexOf(pick) < 0) S.ev.q.push(pick);
+  if (vars) { if (!S.ev.qv) S.ev.qv = {}; S.ev.qv[pick] = vars; }
+  return pick;
 }
 export function eventDef(id) { index(); return _byId[id] || null; }
 
@@ -51,6 +103,12 @@ export function coachName(S, club, store) {
   const n = nameForG('m', club, 'coach');   // coaches keep the male persona ('המאמן') in both worlds
   if (store) S.names.coach[club] = n;
   return n;
+}
+
+/** v2.2: the academy has its own coach (the youth stage talks to him, not to the first-team coach). Deterministic. */
+export function youthCoachName(S, club) {
+  if (!club) return null;
+  return nameForG('m', club, 'youth_coach');
 }
 
 // Placeholder values (always non-empty)
@@ -74,7 +132,7 @@ export function placeholderVars(S, extra = {}) {
   const v = {
     first: p.first, last: p.last, nick: p.nick || p.first, name: p.first + ' ' + p.last,
     club: cd ? cd.nameHe : 'הקבוצה', clubShort: cd ? (cd.shortHe || cd.nameHe) : 'הקבוצה', city: cd ? (cd.city || 'העיר') : 'העיר',
-    league: leagueHe, coach: (club && coachName(S, club, false)) || 'המאמן', agent: S.names.agent || 'הסוכן', journalist: S.names.journalist || 'העיתונאי',
+    league: leagueHe, coach: (club && (p.stage === 'youth' ? youthCoachName(S, club) : coachName(S, club, false))) || 'המאמן', agent: S.names.agent || 'הסוכן', journalist: S.names.journalist || 'העיתונאי',
     partner: S.names.partner || (isF(S) ? 'בן הזוג' : 'בת הזוג'), friend1: S.names.friends[0] || 'שמוליק', friend2: S.names.friends[1] || 'מוטי', friend3: S.names.friends[2] || 'דודו',
     opp: extra.opp || 'היריבה', rival, nation: nat ? nat.nameHe : 'הנבחרת', age: String(ageOf(S)),
     money: fmtMoney(p.money), wage: p.contract ? fmtMoney(p.contract.wage) + ' לשבוע' : 'אין חוזה', value: fmtMoney(valueOf(S)),
@@ -175,10 +233,13 @@ export function fireEvent(S, rng, e, ctx) {
   const aw = curAw(S);
   if (e.who === 'coach' && S.player.club) coachName(S, S.player.club, true);
   const v = placeholderVars(S, { opp: ctx && ctx.opp, k: rng.int(0, 4) });
+  if (S.ev.qv && S.ev.qv[e.id]) { const xv = S.ev.qv[e.id]; for (const k of Object.keys(xv)) v[k] = String(xv[k]); delete S.ev.qv[e.id]; }
   const lines = (e.messages || []).map((m) => (typeof m === 'string' ? { who: e.who, t: render(m, v, S) } : { who: m.who || e.who, t: render(m.t || '', v, S) }));
   const ch = e.choices || [];
   const choices = ch.length ? ch.map((c) => ({ label: render(c.label || '', v, S), disabled: cantAfford(S, c) })) : null;
   const it = { id: nextId(S, 'inbox'), aw, from: e.who, ev: e.id, lines, choices, ans: null, exp: choices ? aw + 2 : null, imp: !!(e.trigger && ch.length > 0), read: false };
+  const route = (e.link && e.link.route) || e.route || V22_ROUTE[e.id] || (e.trigger && V22_ROUTE[e.trigger]);
+  if (route) { it.route = route; it.link = { route, labelHe: (e.link && e.link.labelHe) || 'לדבר עם המאמן' }; }
   S.ev.cd[e.id] = aw;
   if (e.once && S.ev.once.indexOf(e.id) < 0) S.ev.once.push(e.id);
   return pushInbox(S, it);
@@ -268,6 +329,11 @@ export function applyEffects(S, eff) {
     S.names.partner = isF(S) ? (r.pick(PARTNER_NAMES_M || []) || 'איתי') : (r.pick(PARTNER_NAMES || []) || 'נועה');
   }
   if (typeof eff.treq === 'boolean' && p.club && p.stage === 'pro') p.treq = eff.treq;
+  // v2.2: training load
+  // one week only (the next week played); the stored choice S.trainInt is never overwritten by a message
+  if (typeof eff.trainInt === 'string' && ['light', 'normal', 'hard', 'extreme'].indexOf(eff.trainInt) >= 0) { S.trainNext = eff.trainInt; out.push('אימון ' + ({ light: 'קל', normal: 'רגיל', hard: 'קשה', extreme: 'קיצוני' })[eff.trainInt] + ' בשבוע הבא'); }
+  if (typeof eff.load === 'number' && eff.load !== 0) { p.load = clamp((typeof p.load === 'number' ? p.load : 20) + eff.load, 0, 100); out.push(sgn(eff.load) + ' עומס'); }
+  if (typeof eff.sharp === 'number' && eff.sharp !== 0) { p.sharp = clamp((typeof p.sharp === 'number' ? p.sharp : 60) + eff.sharp, 0, 100); out.push(sgn(eff.sharp) + ' חדות'); }
   if (typeof eff.agentPush === 'number' && eff.agentPush > 0) p.agentPush = Math.max(p.agentPush, Math.round(eff.agentPush));
   if (eff.next) { if (S.ev.q.indexOf(eff.next) < 0) S.ev.q.push(eff.next); }
   return out;
@@ -322,7 +388,7 @@ export function inboxRows(S) {
     const it = S.inbox[i];
     const last = it.lines[it.lines.length - 1];
     out.push({ id: it.id, from: it.from, fromHe: whoHe(S, it.from), avatar: personaAvatar(it.from), previewHe: last ? gtext(last.t) : '',
-      dateHe: awLabel(it.aw), unread: !it.read, needsAnswer: !!(it.choices && it.ans === null) });
+      dateHe: awLabel(it.aw), unread: !it.read, needsAnswer: !!(it.choices && it.ans === null), route: it.route || null });
   }
   return out;
 }
@@ -337,6 +403,6 @@ export function threadVM(S, it) {
       const dis = !!(def && cantAfford(S, def));
       return { index: i, he: c.label, disabled: dis };
     }) : null,
-    answered: it.ans, dateHe: awLabel(it.aw),
+    answered: it.ans, dateHe: awLabel(it.aw), route: it.route || null, link: it.link ? { route: it.link.route, labelHe: gtext(it.link.labelHe) } : null, routeHe: it.link ? gtext(it.link.labelHe) : null, ev: it.ev || null,
   };
 }

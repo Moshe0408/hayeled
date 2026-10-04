@@ -23,12 +23,17 @@ import {
 import { createPlayer, ovrOf, ageOf, formAvg, formAvgOr, potStars, updatePotSeen, developWeek, potentialDrift, valueOf, fairWage, injuryChanceMatch, rollInjury, injuryHe, clampStatus, POS_W, OUT_ATTRS, GK_ATTRS, posGroup } from './player.js';
 import { clubSelection, youthSelection, nationalSelection, seniorScore, youthThreshold } from './selection.js';
 import { createLive, startLive, chooseLive, autoPlayLive, endLive, matchVM, computeRating, momentStats, resOf, compHe, roundHe, fxKey, teamVariant, lineOf, extraHe, sideStrength, cleanSheetEligible, tourHe, tourKindHe, euroHe, logVM, compNameHe as _compNameHe } from './match.js';
-import { generateOffers, renewalCheck, makeProOffer, proEligible, respond, expireOffers, requestTransfer as reqT, cancelTransferRequest as cancelT, offerVM, contractVM, endLoan, contractExpiry, releaseYouth, applyPrecontract, effSeason, teamStrOf, setAbroadFlag } from './transfers.js';
+import { generateOffers, renewalCheck, makeProOffer, proEligible, respond, expireOffers, requestTransfer as reqT, cancelTransferRequest as cancelT, offerVM, contractVM, endLoan, contractExpiry, releaseYouth, applyPrecontract, effSeason, teamStrOf, setAbroadFlag, resetBenchTalk } from './transfers.js';
 import { createStars, evolveStars, buildBenchmarks, seasonEndAwards, ballonDor, giveTrophy, giveAward, awardsVM, awardHe, trophyHe } from './awards.js';
-import { raise, sysMsg, runWeekEvents, autoAnswerExpired, answerItem, inboxRows, threadVM, awLabel, coachName } from './narrative.js';
+import { raise, sysMsg, runWeekEvents, autoAnswerExpired, answerItem, inboxRows, threadVM, awLabel, coachName, queueEvent } from './narrative.js';
 import { addTimeline, openSpell, closeSpell, creditSpell, recordMatch, pruneMatches, archiveSeason, careerTotals, legacyScore, legacyTierHe, careerVM, hofEntry, trophiesVM, awardsListVM, sumLines, ALL_LINES, CLUB_LINES, lineAvg } from './history.js';
 import { buy, sell, shopVM, moraleBonus, weeklyUpkeep } from './shop.js';
 import * as MG from './manager.js';
+import { INT_IDS, TUNE22, ensureLoad, effIntensity, weekStartLoad, matchLoad, trainingWeekEnd, trainingPreview, loadVM, loadWeekEnd, bandOf, intHe, tidyLoad } from './load.js';
+import { APPROACHES, canTalk, doTalk, talkOdds, onTeamSelection, onTeamMatch, talkWeekEnd, nationalNote, promiseVM } from './talk.js';
+import { migrateV4 } from './state.js';
+import * as STR22 from '../data/strings.js';
+import { fill as fillT } from './util.js';
 
 export const SCHEMA_VERSION = SV;
 /** R3: engine money is in euros; every label is in shekels (fixed rate EUR_ILS). */
@@ -274,6 +279,7 @@ function decidePlayer(S, slot) {
       const str = natLvl === 'senior' ? nstr(S, p.nation) : nstr(S, p.nation);
       const sel = nationalSelection(S, rng, natLvl, str);
       W.sel[fxKey(fx)] = sel.sel;
+      if (natLvl === 'senior' && sel.sel !== 'injured') W.ntCalled = true;   // an injured call-up is not "a call-up without minutes"
       fx.lvl = natLvl === 'senior' ? (fx.lvl || null) : natLvl;
       if (sel.plays) {
         S.live = createLive(S, rng, fx, fx.h === p.nation ? 'h' : 'a', sel);
@@ -315,6 +321,11 @@ function decidePlayer(S, slot) {
       youthOk = sel.sel === 'out' && ageOf(S) <= 18;
     }
     if (!sel.youthTeam) W.sel[fxKey(cfx)] = sel.sel;
+    // v2.2 bench run / promise. A young pro left out of the first-team squad plays for the U19 side that week:
+    // not a bench week (the run is frozen, it does not grow).
+    const sentDown = p.stage === 'pro' && sel.sel === 'out' && youthOk && inYouthSetup(S);
+    if (p.stage === 'pro' && !sel.youthTeam && !sentDown) onTeamSelection(S, sel);
+    if (sel.rested || ((sel.sel === 'bench' || sel.sel === 'out') && !sentDown && (p.load >= 80 || p.energy < 35))) W.rested = true;
     if (sel.sel === 'starter') W.started = true;
     if (sel.plays) {
       S.live = createLive(S, rng, cfx, cfx.h === p.club ? 'h' : 'a', sel);
@@ -328,6 +339,7 @@ function decidePlayer(S, slot) {
     if (yfx) {
       const sel = youthSelection(S, rng, S.comp.yl.str[p.club]);
       W.sel[fxKey(yfx)] = sel.sel;
+      if (p.stage === 'youth') onTeamSelection(S, sel);
       if (sel.plays) {
         S.live = createLive(S, rng, yfx, yfx.h === p.club ? 'h' : 'a', sel);
         return true;
@@ -496,17 +508,40 @@ function weekFixturesOfClub(S, week) {
   return out;
 }
 
+// advanceWeek(training): a focus id, or { focus, intensity } (v2.2). Returns { focus, intensity } (undefined = keep).
+function parseTraining(training) {
+  if (training && typeof training === 'object') return { focus: training.focus, intensity: training.intensity };
+  return { focus: training, intensity: undefined };
+}
+function validIntensity(S, id) {
+  if (INT_IDS.indexOf(id) < 0) return null;
+  if (id === 'extreme' && ageOf(S) < TUNE22.minExtremeAge) return 'hard';
+  return id;
+}
+
 function weekStart(S, training) {
   const p = S.player;
   const rng = R();
+  ensureLoad(S);
+  const tr = parseTraining(training);
   S.inWeek = true; S.wstep = 0;
-  if (training !== undefined && training !== null) S.training = validTraining(S, training);
+  if (tr.focus !== undefined && tr.focus !== null) S.training = validTraining(S, tr.focus);
   else S.training = validTraining(S, S.training);
+  if (tr.intensity !== undefined && tr.intensity !== null) { const vi = validIntensity(S, tr.intensity); if (vi) S.trainInt = vi; }
+  // v2.2: the physio's "light week" (physio_warn) overrides the stored intensity for this one week only
+  const oneWeek = S.trainNext && INT_IDS.indexOf(S.trainNext) >= 0 ? S.trainNext : null;
+  if (S.trainNext !== undefined) delete S.trainNext;
+  // v2.2: a new season starts a new bench run (summer weeks have no club matches)
+  if (S.week === 1) { p.benchRun = 0; p.lowMin = 0; }
   S.ev.trig = (S.ev.carry || []).slice();
   S.ev.carry = [];
   S.wsum = { ovrBefore: ovrOf(p), results: [], lines: [], injuryHe: null, callupHe: null, msgs: 0, offers: 0, hadMatchday: false,
-    dec: [0, 0], fixed: {}, sel: {}, min: 0, started: false, clubFx: false, derby: false, firstCall: false, newInj: 0, m0: S.ctr.m, trainHe: '', seasonEnded: false, retiredNow: false };
-  p.energy = clamp(p.energy + 20 + (S.training === 'rest' ? 15 : 0), 0, 100);
+    dec: [0, 0], fixed: {}, sel: {}, min: 0, started: false, clubFx: false, derby: false, firstCall: false, newInj: 0, m0: S.ctr.m, trainHe: '', seasonEnded: false, retiredNow: false,
+    tf: S.training, ti: effIntensity(S, S.training, oneWeek || S.trainInt), physio: !!oneWeek, e0: p.energy, l0: Math.round(p.load), s0: Math.round(p.sharp), nm: 0, ntCalled: false, ntPlayed: false, tk: null };
+  // v2.2: natural load decay, then the energy recovery scaled by the load (replaces the flat +20 / +15)
+  weekStartLoad(S, S.training);
+  // a failed "threat" while on loan: back to the parent club when the window opens
+  if (p.talk && p.talk.recall && p.contract && p.contract.loan && isWindowOpen(S.week) && S.week <= 44) recallLoan(S);
   if (p.injury) {
     p.injury.weeks--;
     if (p.injury.weeks <= 0) { p.injury = null; raise(S, 'injury_return'); sysMsg(S, 'doctor', 'חזרת לכשירות מלאה. בהצלחה על הדשא!'); }
@@ -567,9 +602,11 @@ function weekEnd(S, ff) {
   const p = S.player;
   const rng = R();
   const W = S.wsum;
-  const tr = S.training;
+  ensureLoad(S);
+  const tr = validTraining(S, W.tf || S.training);
+  const ti = effIntensity(S, tr, W.ti || S.trainInt);
   // development
-  const dev = developWeek(S, rng, tr);
+  const dev = developWeek(S, rng, tr, ti === 'rest' ? 'normal' : ti);
   const ch = Object.keys(dev.attrs).sort((a, b) => (Math.abs(dev.attrs[b]) - Math.abs(dev.attrs[a])) || (a < b ? -1 : 1));
   const trainName = (TRAINING && TRAINING[tr] && TRAINING[tr].he) || tr;
   if (ch.length) {
@@ -577,12 +614,13 @@ function weekEnd(S, ff) {
     const d = dev.attrs[k];
     W.trainHe = trainName + ': ' + sgnHe(d) + ' ' + ((ATTRS && ATTRS[k] && ATTRS[k].he) || k);
   } else W.trainHe = trainName;
-  p.energy = clamp(p.energy - (tr === 'rest' ? 0 : tr === 'balanced' ? 5 : 7), 0, 100);
-  if (!p.injury && tr !== 'rest' && S.week <= 44 && p.stage !== 'free' && p.stage !== 'retired' && rng.chance(0.002)) {
-    p.injury = rollInjury(S, rng);
-    if (p.injury.sev === 'major') p.injury.weeks = Math.min(p.injury.weeks, 12);
-    onInjury(S);
-  }
+  const injuredWeek = !!p.injury;   // injured all week: no training (developWeek and trainingWeekEnd skip it)
+  // v2.2: intensity table (energy, load, sharpness) + the training injury roll (replaces -5 / -7 and 0.2%)
+  const tw = trainingWeekEnd(S, rng, tr, ti);
+  if (injuredWeek && tr !== 'rest') W.trainHe = 'שיקום מפציעה: בלי אימונים השבוע';
+  else if (tr !== 'rest' && ti !== 'rest' && W.physio) W.trainHe += ' · ' + uiT('weekPhysio', 'אימון קל לפי הפיזיותרפיסט');
+  else if (tr !== 'rest' && ti !== 'rest' && ti !== 'normal') W.trainHe += ' · ' + uiT('weekIntensity', 'אימון {v}').replace('{v}', intHe(ti));
+  if (tw.injured) { onInjury(S, 'training'); emit('injury_training', {}); }
   // morale / trust / mates drift
   const firstAbroad = !!S.ev.flags.abroad && p.contract && p.contract.since === S.season;
   const T = 55 + moraleBonus(S) - (p.bench >= 3 ? 10 : 0) - (firstAbroad ? 5 : 0);
@@ -621,6 +659,15 @@ function weekEnd(S, ff) {
     const rk = lid ? leagueRankOf(S, lid, p.club) : null;
     if (rk) W.lines.push(clubName(p.club) + ' במקום ' + rk + ' ' + hePrefix('ב', lgNameHe(lid)));
   }
+  // v2.2: burnout / physio / rust / praise, promises, the bench nudge, the national-team note, the training signal
+  const lw = loadWeekEnd(S, rng, { focus: tr, intensity: ti, injured: tw.injured });
+  const promiseHe = talkWeekEnd(S, rng, { nudge: (S2, n, id) => { if (!promiseVM(S2)) queueEvent(S2, id || 'bench_nudge', { n }, rng); } });
+  if (promiseHe) W.lines.push(promiseHe);
+  if (W.rested) { const RL = (STR22.LOAD_TEXT && STR22.LOAD_TEXT.restedByCoach) || []; const l = RL.length ? RL[rngFor(S.id, curAw(S), 'rested').int(0, RL.length - 1)] : 'המאמן השאיר אותך בחוץ: {{אתה גמור|את גמורה}} פיזית'; W.lines.push(gtext(l)); }
+  if (S.week <= 2 && ti !== 'rest' && p.stage !== 'retired') { const pl = STR22.LOAD_TEXT && STR22.LOAD_TEXT.preseasonLine; W.lines.push(typeof pl === 'string' && pl ? pl : 'קדם־עונה: החדות עולה מהר'); }
+  nationalNote(S, !!W.ntCalled, !!W.ntPlayed);
+  tidyLoad(p);
+  const lvm = loadVM(S);
   if (S.week === 44) seasonEnd(S);
   if (!S.retired) runWeekEvents(S, rng, { opp: opponentHint(S), derby: W.derby });
   let retiredNow = false;
@@ -631,21 +678,38 @@ function weekEnd(S, ff) {
     dateHe, results: W.results, trainingHe: W.trainHe, ovrBefore: W.ovrBefore, ovrAfter: ovrOf(p), energy: p.energy, morale: p.morale,
     newMessages: Math.max(0, S.ctr.m - W.m0), newOffers: W.offers, injuryHe: W.injuryHe, callupHe: W.callupHe, linesHe: W.lines.slice(),
     hadMatchday: W.hadMatchday, seasonEnded: !!W.seasonEnded, retiredNow,
+    // v2.2: training load line "אנרגיה 72 ← 58 · עומס 41 ← 50 (עייף)"
+    energyBefore: typeof W.e0 === 'number' ? W.e0 : p.energy, loadBefore: typeof W.l0 === 'number' ? W.l0 : lvm.load, load: lvm.load, loadBand: lvm.loadBand, loadBandHe: lvm.loadHe,
+    sharp: lvm.sharp, sharpHe: lvm.sharpHe, intensity: ti === 'rest' ? null : ti, intensityHe: ti === 'rest' ? intHe('rest') : intHe(ti),
+    loadLineHe: weekLoadLine(W, p, lvm), sharpBefore: typeof W.s0 === 'number' ? W.s0 : lvm.sharp,
+    sharpLineHe: fillT(uiT('weekSharp', 'חדות {s0} ← {s1}'), { s0: typeof W.s0 === 'number' ? W.s0 : lvm.sharp, s1: lvm.sharp }),
+    promiseHe: promiseHe || null, promiseKept: promiseHe ? (W.pk === true ? true : W.pk === false ? false : null) : null, burnout: !!lw.burnout, trainingInjury: !!tw.injured,
   };
   if (ff) { ff.newInj = W.newInj; ff.firstCall = W.firstCall; }
   S.inWeek = false; S.wstep = 0; S.wsum = null;
   return summary;
 }
 
-function onInjury(S) {
+// "אנרגיה 72 ← 58 · עומס 41 ← 50 (עייף)" (TRAINING_UI.weekLine; RTL reading order)
+function uiT(k, def) { const T = STR22.TRAINING_UI; return T && typeof T[k] === 'string' && T[k] ? T[k] : def; }
+function weekLoadLine(W, p, lvm) {
+  return fillT(uiT('weekLine', 'אנרגיה {e0} ← {e1} · עומס {l0} ← {l1} ({band})'), { e0: typeof W.e0 === 'number' ? W.e0 : p.energy, e1: p.energy, l0: typeof W.l0 === 'number' ? W.l0 : lvm.load, l1: lvm.load, band: lvm.loadHe });
+}
+function onInjury(S, where) {
   const p = S.player;
   const W = S.wsum;
   p.morale -= 8;
   raise(S, 'injury');
   if (p.injury.weeks >= 6) raise(S, 'long_injury');
   const he = injuryHe(p.injury);
-  if (W) { W.injuryHe = he + ' · ' + p.injury.weeks + ' שבועות'; W.newInj = Math.max(W.newInj, p.injury.weeks); }
-  sysMsg(S, 'doctor', 'אבחון: ' + he + '. צפי חזרה: ' + p.injury.weeks + ' שבועות. {{תנוח ותקשיב|תנוחי ותקשיבי}} לפיזיותרפיסט.');
+  const tr = where === 'training';
+  if (W) { W.injuryHe = (tr ? 'באימון: ' : '') + he + ' · ' + p.injury.weeks + ' שבועות'; W.newInj = Math.max(W.newInj, p.injury.weeks); }
+  if (tr) {
+    const LT = STR22.LOAD_TEXT || {};
+    const list = (p.load >= 60 && Array.isArray(LT.trainInjuryHeavy) && LT.trainInjuryHeavy.length) ? LT.trainInjuryHeavy : (Array.isArray(LT.trainInjury) && LT.trainInjury.length ? LT.trainInjury : ['{{נפצעת|נפצעת}} באימון: {injury}']);
+    const line = list[rngFor(S.id, curAw(S), 'tinj').int(0, list.length - 1)];
+    sysMsg(S, 'physio', fillT(line, { injury: he }) + '. צפי חזרה: ' + p.injury.weeks + ' שבועות.');
+  } else sysMsg(S, 'doctor', 'אבחון: ' + he + '. צפי חזרה: ' + p.injury.weeks + ' שבועות. {{תנוח ותקשיב|תנוחי ותקשיבי}} לפיזיותרפיסט.');
   addTimeline(S, 'injury', 'פציעה: ' + he + ' (' + p.injury.weeks + ' שבועות)');
 }
 
@@ -780,12 +844,86 @@ function resumeInternal(S) {
   return runWeek(S);
 }
 
-export function setTraining(id) {
+/** setTraining(focus, intensity?) -> { ok, preview }. intensity: light|normal|hard|extreme (kept from week to week in S.trainInt). */
+export function setTraining(id, intensity) {
   const S = need();
-  if (TRAIN_IDS.indexOf(id) < 0 || (id === 'goalkeeping' && S.player.pos !== 'GK')) return { ok: false };
-  S.training = id;
+  ensureLoad(S);
+  const focus = id === undefined || id === null ? S.training : id;
+  if (TRAIN_IDS.indexOf(focus) < 0 || (focus === 'goalkeeping' && S.player.pos !== 'GK')) return { ok: false, error: 'bad_focus' };
+  if (intensity !== undefined && intensity !== null) {
+    if (INT_IDS.indexOf(intensity) < 0) return { ok: false, error: 'bad_intensity' };
+    if (intensity === 'extreme' && ageOf(S) < TUNE22.minExtremeAge) return G({ ok: false, error: 'locked', messageHe: 'אימון קיצוני נפתח מגיל ' + TUNE22.minExtremeAge, preview: trainingPreview(S, focus, intensity) });
+    S.trainInt = intensity;
+    if (S.trainNext !== undefined) delete S.trainNext;   // the player decided: the physio's one-week light override is off
+  }
+  S.training = focus;
   notify();
-  return { ok: true };
+  return G({ ok: true, preview: trainingPreview(S, S.training, S.trainInt) });
+}
+/** What a week of focus x intensity would do: { energyDelta, loadDelta, growthMult, sharpDelta, injuryRiskHe, warnHe, ... }. Pure. */
+export function getTrainingPreview(focus, intensity) {
+  const S = need();
+  ensureLoad(S);
+  const f = TRAIN_IDS.indexOf(focus) >= 0 ? focus : S.training;
+  return G(trainingPreview(S, f, INT_IDS.indexOf(intensity) >= 0 ? intensity : S.trainInt));
+}
+
+// ---------------------------------------------------------------- v2.2 coach talk (SPEC-2.2 §4)
+/** { ok, reasonHe, benchRun, lowMin, nextAbs, approaches: [{ id, he, chance, band }], openHe, coachHe, loan, tired, ... }. Pure. */
+export function canTalkToCoach() {
+  const S = need();
+  return G(canTalk(S));
+}
+/** approach: 'ask' | 'demand' | 'threat' -> { ok, success, replyHe, effects: [{ labelHe, delta, he }], promise } */
+export function talkToCoach(approach) {
+  const S = need();
+  if (APPROACHES.indexOf(approach) < 0) return { ok: false, error: 'bad_approach' };
+  const c = canTalk(S);
+  if (!c.ok) return G({ ok: false, error: 'not_now', messageHe: c.reasonHe, reasonHe: c.reasonHe });
+  const r = doTalk(S, R(), approach, { recall: recallLoan });
+  clampStatus(S.player);
+  emit('coach_talk', { approach, success: !!r.success });
+  notify();
+  return G(r);
+}
+// a failed threat while on loan: back to the parent club (in a transfer window)
+function recallLoan(S) {
+  const p = S.player;
+  if (!p.contract || !p.contract.loan || !p.parent) return false;
+  const par = p.parent;
+  closeSpell(S, S.season);
+  p.contract = par; p.parent = null; p.club = par.club;
+  openSpell(S, p.club, false, 0, effSeason(S));
+  if (S.comp) {
+    if (S.week >= 1 && S.week <= 44) S.comp.moved = true;
+    if (S.comp.yl && S.comp.yl.clubs.indexOf(p.club) < 0) S.comp.yl = null;
+  }
+  p.trust = 45; p.bench = 0;
+  resetBenchTalk(p);
+  setAbroadFlag(S);
+  sysMsg(S, 'club', 'ההשאלה הסתיימה מוקדם. {{חוזר|חוזרת}} ל' + clubName(p.club) + '.');
+  addTimeline(S, 'info', 'חזרה מההשאלה ל' + clubName(p.club));
+  return true;
+}
+/** Test tooling (sim / e2e): put the player on the bench run / load needed for a scenario. Never used by the UI. */
+export function devSetBench(benchRun, lowMin) {
+  const S = need();
+  ensureLoad(S);
+  const p = S.player;
+  if (typeof benchRun === 'number') p.benchRun = Math.max(0, Math.round(benchRun));
+  if (typeof lowMin === 'number') p.lowMin = Math.max(0, Math.round(lowMin));
+  p.talk.lastWeekAbs = -99;
+  notify();
+  return { ok: true, benchRun: p.benchRun, lowMin: p.lowMin };
+}
+export function devSetLoad(load, sharp) {
+  const S = need();
+  ensureLoad(S);
+  const p = S.player;
+  if (typeof load === 'number') p.load = clamp(load, 0, 100);
+  if (typeof sharp === 'number') p.sharp = clamp(sharp, 0, 100);
+  notify();
+  return { ok: true, load: p.load, sharp: p.sharp };
 }
 
 export function advanceWeek(training) {
@@ -912,13 +1050,18 @@ function finishInternal(S) {
     p.rep.l += (rating - 6.3) * 0.08 + ms.g * 0.05;
   }
   p.energy = clamp(p.energy - 18 * minutes / 90, 0, 100);
+  // v2.2: match load / sharpness, bench run and promise bookkeeping
+  const bandNow = bandOf(p);
+  matchLoad(S, minutes);
+  if ((p.stage === 'pro' && (fx.kind === 'league' || fx.kind === 'cup' || fx.kind === 'europe')) || (p.stage === 'youth' && fx.kind === 'youth')) onTeamMatch(S, minutes, starter, rating);
+  if (nl === 'senior' && W) W.ntPlayed = true;
   if (ms.cards > 0) {
     if (fx.kind === 'league') {
       for (let i = 0; i < ms.cards; i++) { p.yc++; if (p.yc % 5 === 0) { p.susp = 1; eff.push('צהוב חמישי: הרחקה למשחק'); } }
     }
   }
   let injuryHeTxt = null;
-  if (!p.injury && rng.chance(injuryChanceMatch(S, minutes))) {
+  if (!p.injury && rng.chance(injuryChanceMatch(S, minutes) * bandNow.inj)) {
     p.injury = rollInjury(S, rng);
     onInjury(S);
     injuryHeTxt = injuryHe(p.injury) + ' · ' + p.injury.weeks + ' שבועות';
@@ -1040,7 +1183,7 @@ export function fastForward(opts = {}) {
     if (until === 'weeks' && weeks >= nWeeks) return done('until');
     if (weeks >= maxW) return done('chunk');
     const m0 = S.ctr.m;
-    const r = advanceInternal(S, opts.training);
+    const r = advanceInternal(S, opts.intensity ? { focus: opts.training, intensity: opts.intensity } : opts.training);
     if (!r.ok) return done(r.error === 'retired' ? 'retired' : r.error === 'review_pending' ? 'review' : 'until');
     if (r.status === 'match' && until === 'next_match') return done('until');
     stopped = playOut(r, m0);
@@ -1357,6 +1500,8 @@ function alertsVM(S) {
   if (isWindowOpen(S.week) && p.stage === 'pro') add('window_open', '#/offers');
   if (p.stage === 'pro' && p.contract && !p.contract.loan && p.contract.until === S.season && S.week <= 44 && !p.next) add('contract_expiring', '#/profile');
   if (p.energy < 35 && !S.retired) add('energy_low', null);
+  // v2.2: training load (heavy / burnt) - what to do about it
+  if (!S.retired && !S.mgr && p.stage !== 'retired' && typeof p.load === 'number') { if (p.load >= 80) add('load_burnt', null); else if (p.load >= 60) add('load_high', null); }
   return out.filter((a) => a.textHe !== '' || a.type === 'info');
 }
 
@@ -1379,6 +1524,8 @@ function hubVM(S) {
   const next = thisWeek.length ? null : (sched.find((f) => f.week > S.week && !f.result) || null);
   const lm = S.lastMatch;
   const fa = formAvg(p);
+  ensureLoad(S);
+  const lv = loadVM(S);
   const trOpts = TRAIN_IDS.map((id) => ({ id, he: (TRAINING && TRAINING[id] && TRAINING[id].he) || id, desc: (TRAINING && TRAINING[id] && TRAINING[id].desc) || '', disabled: id === 'goalkeeping' && p.pos !== 'GK' }));
   const ann = [];
   const ts = summerTournaments(S.season + 1);
@@ -1395,9 +1542,20 @@ function hubVM(S) {
       ovr, potStars: potStars(p.potSeen), potRange: p.potSeen.slice(), energy: p.energy, morale: p.morale, formAvg: fa === null ? null : round1(fa), form: p.form.slice(),
       injury: p.injury ? { weeks: p.injury.weeks, he: injuryHe(p.injury) } : null, susp: p.susp, trust: p.trust, fans: p.fans, mates: p.mates,
       rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w }, money: p.money, value: valueOf(S), stage: p.stage, stageHe: femLabel((STAGES && STAGES[p.stage]) || p.stage), natLvl: p.natLvl,
+      // v2.2: load (0-100) + band fresh|tired|heavy|burnt, match sharpness, last 8 weekly loads, bench run
+      load: lv.load, loadBand: lv.loadBand, loadHe: lv.loadHe, sharp: lv.sharp, sharpBand: lv.sharpBand, sharpHe: lv.sharpHe, loadHist: lv.loadHist, benchRun: p.benchRun, lowMin: p.lowMin,
     },
     club, thisWeek, next,
-    training: { current: S.training, options: trOpts },
+    training: {
+      current: S.training, options: trOpts,
+      // v2.2: intensity row (hidden for the rest focus), the preview of the current choice and of every intensity
+      intensity: S.trainInt, showIntensity: S.training !== 'rest',
+      // v2.2: the physio's one-week light override (physio_warn); cleared by an explicit intensity choice
+      physioWeek: !!(S.trainNext && S.training !== 'rest'), physioHe: S.trainNext && S.training !== 'rest' ? gtext(uiT('physioNote', 'הפיזיותרפיסט הוריד לך את העוצמה לשבוע אחד: אימון קל. אפשר לבחור עוצמה אחרת')) : '',
+      intensities: INT_IDS.map((id) => { const pv = trainingPreview(S, S.training, id); return { id, he: intHe(id), locked: pv.locked, lockHe: pv.locked ? pv.warnHe : '', warn: id === 'extreme', preview: pv }; }),
+      preview: trainingPreview(S, S.training, S.trainNext || S.trainInt),
+    },
+    coachTalk: canTalk(S),
     alerts: alertsVM(S),
     unread: S.inbox.filter((i) => !i.read).length, needsAnswer: S.inbox.filter((i) => i.choices && i.ans === null).length,
     openOffers: S.offers.filter((o) => o.status === 'open').length,
@@ -1645,7 +1803,9 @@ export function getProfile() {
     potStars: potStars(p.potSeen), potRange: p.potSeen.slice(), attrs: attrsVM(S), gk: p.pos === 'GK', value: valueOf(S), money: p.money,
     wage: p.contract ? p.contract.wage : 0, stageHe: femLabel((STAGES && STAGES[p.stage]) || p.stage), clubHe: p.club ? clubName(p.club) : 'ללא קבוצה',
     contract: contractVM(S, p.contract),
-    status: { energy: p.energy, morale: p.morale, trust: p.trust, fans: p.fans, mates: p.mates, rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w } },
+    status: { energy: p.energy, morale: p.morale, trust: p.trust, fans: p.fans, mates: p.mates, rep: { l: p.rep.l, c: p.rep.c, w: p.rep.w },
+      load: loadVM(S).load, loadBand: loadVM(S).loadBand, loadHe: loadVM(S).loadHe, sharp: loadVM(S).sharp, sharpBand: loadVM(S).sharpBand, sharpHe: loadVM(S).sharpHe, loadHist: loadVM(S).loadHist },
+    coachTalk: canTalk(S),
     season: { apps: st.apps, goals: st.g, assists: st.a, avgRating: st.apps ? round1(st.rs / st.apps) : 0, motm: st.motm },
     career: { apps: t.apps, goals: t.goals, assists: t.assists, caps: t.caps, intlGoals: t.intlGoals, trophies: S.hist.trophies.length },
     owned: p.owned.map((id) => { const it = shopVM(S).cats.flatMap((c) => c.items).find((x) => x.id === id); return { id, he: it ? it.he : id }; }),
@@ -2109,13 +2269,18 @@ export function getSaveMeta() {
   const S = need();
   const p = S.player;
   const nat = country(p.nation);
+  const clubNow = p.club || (mgrActive(S) && S.mgr.job.kind === 'club' ? S.mgr.job.team : null);
+  const hc = S.hist && Array.isArray(S.hist.clubs) && S.hist.clubs.length ? S.hist.clubs[S.hist.clubs.length - 1] : null;
+  const lastClubId = p.club || (hc && hc.club) || null;
   return G({
-    careerId: S.id, name: p.first + ' ' + p.last, nick: p.nick || '', nation: p.nation, flag: nat ? nat.flag : '', pos: p.pos,
+    careerId: S.id, name: p.first + ' ' + p.last, nick: p.nick || '', league: clubNow ? (clubLeague(S, clubNow) || null) : null, nation: p.nation, flag: nat ? nat.flag : '', pos: p.pos,
     posHe: posHeOf(p), age: ageOf(S), ovr: ovrOf(p), clubId: p.club || (mgrActive(S) && S.mgr.job.kind === 'club' ? S.mgr.job.team : null),
     clubHe: p.club ? clubName(p.club) : mgrActive(S) ? MG.roleHe(S, S.mgr.job) + ' · ' + MG.teamNameHe(S, S.mgr.job.team) : (S.mgr && S.mgr.st === 'unemployed' ? '{{מאמן|מאמנת}} ללא קבוצה' : (S.retired ? '{{פרש|פרשה}}' : 'ללא קבוצה')),
     manager: S.mgr ? { st: S.mgr.st, active: S.mgr.st !== 'done', team: mgrActive(S) ? S.mgr.job.team : null, kind: mgrActive(S) ? S.mgr.job.kind : null } : null, season: S.season, week: S.week, dateHe: weekLabelHe(S.season, S.week),
     stage: p.stage, retired: !!S.retired, seasons: S.season - S.startSeason + 1,
     gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
+    // v2.2: the last club of the playing career (still known after retiring), for the admin career_snapshot
+    lastClub: lastClubId, lastClubHe: lastClubId ? clubName(lastClubId) : '', lastLeague: lastClubId ? (clubLeague(S, lastClubId) || null) : null,
   });
 }
 export function loadState(data) {
@@ -2131,6 +2296,7 @@ export function loadState(data) {
     for (const k of STATE_KEYS) if (!(k in data)) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.player || !data.world || !data.comp) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.ev.carry) data.ev.carry = [];
+    migrateV4(data);   // v2.2 fields (no-op on a v4 save)
     C.S = data;
     C.rng = createRng(data.rng >>> 0);
     C.sig = [];

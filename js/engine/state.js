@@ -2,7 +2,7 @@
 import { fmtMoney } from './util.js';
 // The only module-level mutable state of the engine lives in C: the current career (S + its rng) and the signal list.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const C = {
   S: null,      // current State
@@ -35,7 +35,7 @@ export const STATE_KEYS = ['v', 'id', 'createdAt', 'seed', 'rng', 'startSeason',
 export function createEmptyState() {
   return {
     v: SCHEMA_VERSION, id: '', createdAt: 0, seed: 0, rng: 0, startSeason: 2026, season: 2026, week: 1, wstep: 0, inWeek: false, wsum: null,
-    training: 'balanced', econ: 1, player: null, world: { clubs: {}, champs: {} }, comp: null,
+    training: 'balanced', trainInt: 'normal', econ: 1, player: null, world: { clubs: {}, champs: {} }, comp: null,
     nt: { str: {}, q: null, tour: null, ytour: null, called: {}, hist: [], fr: [] },
     inbox: [], offers: [], live: null, lastMatch: null, pending: { review: null, retire: null },
     hist: { seasons: [], matches: [], timeline: [], trophies: [], awards: [], bdo: [], clubs: [], firsts: { debut: null, goal: null, ntDebut: null, ntGoal: null, euDebut: null } },
@@ -68,6 +68,23 @@ function shekelTexts(o, depth) {
   for (const k of Object.keys(o)) { const v = o[k]; if (typeof v === 'string') o[k] = euroToShekelText(v); else if (v && typeof v === 'object') shekelTexts(v, d + 1); }
 }
 
+/** v3 -> v4 defaults (idempotent; also used when a save is loaded mid-match). */
+export function migrateV4(data) {
+  if (!data || typeof data !== 'object') return data;
+  if (['light', 'normal', 'hard', 'extreme'].indexOf(data.trainInt) < 0) data.trainInt = 'normal';
+  const p = data.player;
+  if (p && typeof p === 'object') {
+    if (typeof p.load !== 'number') p.load = 20;
+    if (typeof p.sharp !== 'number') p.sharp = 60;
+    if (typeof p.benchRun !== 'number') p.benchRun = 0;
+    if (typeof p.lowMin !== 'number') p.lowMin = 0;
+    if (!p.talk || typeof p.talk !== 'object') p.talk = { lastWeekAbs: -99, promise: null, mood: 0 };
+    if (!Array.isArray(p.lh)) p.lh = [];
+    if (!p.ld || typeof p.ld !== 'object') p.ld = { burn: 0, lastBurn: -99, burns: 0, hard: 0, ntNo: 0 };
+  }
+  return data;
+}
+
 export function migrateState(data, fromV) {
   if (typeof fromV !== 'number' || !Number.isFinite(fromV)) fromV = data && data.v;
   if (fromV > SCHEMA_VERSION) throw new Error('schema_too_new');
@@ -96,6 +113,8 @@ export function migrateState(data, fromV) {
       // R3: v2 saves hold already-rendered euro amounts in persisted texts (inbox, timeline...): show them in shekels
       shekelTexts(data);
     }
+    // v3 -> v4 (2.2): training load, match sharpness, bench run and coach talks (docs/SPEC-2.2-training-bench.md §7)
+    if (!(fromV >= 4)) migrateV4(data);
     data.v = SCHEMA_VERSION;
   }
   return data;
