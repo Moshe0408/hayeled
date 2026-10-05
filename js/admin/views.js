@@ -7,6 +7,7 @@ import { SupaError } from '../core/supa.js';
 import * as api from './api.js';
 import { AuthLostError } from './api.js';
 import { lineChart, columnChart, rankList, splitBar, rateBars } from './charts.js';
+import { mountFunnel, schemaBanner23 } from './views23.js';
 
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 /** European top-5 leagues (same ids for the men's and the women's competitions). */
@@ -144,7 +145,7 @@ export function renderMessage(root, { title, text, code, retry } = {}) {
 }
 
 /** Map an error to a friendly Hebrew message (or rethrow auth loss: the router handles it). */
-function showError(root, e, retry) {
+export function showError(root, e, retry) {
   if (e instanceof AuthLostError) return;
   if (e instanceof SupaError && e.status === 0) {
     renderMessage(root, { title: 'אין חיבור לשרת', text: 'בדוק את החיבור לאינטרנט. אם הפרויקט ב-Supabase הושהה (אחרי 7 ימים בלי פעילות), היכנס ללוח הבקרה של Supabase כדי להעיר אותו.', retry });
@@ -157,7 +158,7 @@ function showError(root, e, retry) {
   renderMessage(root, { title: 'שגיאה', text: (e && e.message) || String(e), code: e && e.code ? String(e.code) : '', retry });
 }
 
-function errText(e) {
+export function errText(e) {
   if (e instanceof SupaError && e.status === 0) return 'אין חיבור לשרת';
   return (e && e.message) || String(e);
 }
@@ -197,6 +198,7 @@ export function renderHeader(active, { onLogout } = {}) {
     h('nav', { class: 'adm-nav' },
       link('dash', '#/dash', 'לוח'),
       link('players', '#/players', 'שחקנים'),
+      link('board', '#/board', 'טבלה'),
       link('feedback', '#/feedback', 'משובים'),
       link('tools', '#/tools', 'כלים'),
       h('a', { href: '#/config', testid: 'nav-config', class: active === 'config' ? 'active' : '', 'aria-current': active === 'config' ? 'page' : null },
@@ -242,7 +244,7 @@ export function renderLogin(root, { onSuccess, initialError = '' } = {}) {
 }
 
 // ---------- #/dash ----------
-function kpi(testid, label, value, sub, { hero = false, dot = false, gold = false } = {}) {
+export function kpi(testid, label, value, sub, { hero = false, dot = false, gold = false } = {}) {
   return h('div', { class: 'adm-card adm-kpi' + (hero ? ' hero' : '') + (gold ? ' gold' : '') },
     h('div', { class: 'label' }, dot ? h('span', { class: 'dot', 'aria-hidden': 'true' }) : null, label),
     h('div', { class: 'value', testid: testid || null, 'data-value': String(value), text: String(value) }),
@@ -457,6 +459,7 @@ export function renderDash(root) {
   root.appendChild(body);
   let timer = null;
   let alive = true;
+  let funnelCleanup = null;
 
   const load = async () => {
     try {
@@ -475,8 +478,14 @@ export function renderDash(root) {
   const draw = (s, names, v2, v3) => {
     clear(body);
     body.appendChild(summaryCard(s));
-    if (v2 === null) body.appendChild(schemaBanner(v3 === null ? 'אחרי זה הרץ גם את supabase/update-2.2.sql (נתוני האימונים והשיחות עם המאמן של 2.2, סעיף "עדכון 2.2").' : ''));
-    else if (v3 === null) body.appendChild(schemaBanner22());
+    const later23 = ' בסוף הרץ גם את supabase/update-2.3.sql (המשפך, החזרה למשחק וטבלת המובילים, סעיף "עדכון 2.3").';
+    if (v2 === null) body.appendChild(schemaBanner((v3 === null ? 'אחרי זה הרץ גם את supabase/update-2.2.sql (נתוני האימונים והשיחות עם המאמן של 2.2, סעיף "עדכון 2.2").' : '') + later23));
+    else if (v3 === null) body.appendChild(schemaBanner22(later23.trim()));
+    // v2.3: the funnel / retention block loads on its own (missing update-2.3.sql -> its own banner)
+    const funnelSlot = h('div', { class: 'adm-v23', testid: 'v23-slot' });
+    body.appendChild(funnelSlot);
+    if (funnelCleanup) { try { funnelCleanup(); } catch { /* ignore */ } }
+    funnelCleanup = mountFunnel(funnelSlot, { showBanner: v2 !== null && v3 !== null });
     const ads = s.ads || {};
     const imp = n0(ads.impressions_total);
     const clk = n0(ads.clicks_total);
@@ -597,7 +606,7 @@ export function renderDash(root) {
   };
 
   load();
-  return () => { alive = false; clearInterval(timer); };
+  return () => { alive = false; clearInterval(timer); if (funnelCleanup) { try { funnelCleanup(); } catch { /* ignore */ } } };
 }
 
 // ---------- CSV export (feedback) ----------
@@ -643,7 +652,7 @@ async function exportFeedbackCsv(btn, filters = {}) {
 }
 
 /** Two-tap confirm button: the first tap arms it (red, new label) for 4 s, the second tap runs action(). */
-function armedButton(attrs, { label, armedLabel, action }) {
+export function armedButton(attrs, { label, armedLabel, action }) {
   const btn = h('button', { ...attrs, type: 'button', text: label });
   let armed = false;
   let timer = null;
@@ -1070,18 +1079,19 @@ export function renderTools(root) {
 
   const load = async () => {
     try {
-      const [s, v21, v22] = await Promise.all([api.getStats(1), api.probeV21(), api.probeV22()]);
+      const [s, v21, v22, v23] = await Promise.all([api.getStats(1), api.probeV21(), api.probeV22(), api.probeV23()]);
       if (!alive) return;
-      draw(s || {}, v21, v22);
+      draw(s || {}, v21, v22, v23);
     } catch (e) {
       if (alive) showError(body, e, load);
     }
   };
 
-  const draw = (s, v21, v22) => {
+  const draw = (s, v21, v22, v23) => {
     clear(body);
     if (v21 === false) body.appendChild(schemaBanner('ייצוא CSV עובד גם בלי העדכון. איפוס הנתונים דורש את העדכון.'));
     else if (v22 === false) body.appendChild(schemaBanner22('הכלים בלשונית הזו עובדים גם בלי העדכון. הוא נדרש רק לנתוני 2.2 בלוח.'));
+    else if (v23 === false) body.appendChild(schemaBanner23('הכלים בלשונית הזו עובדים גם בלי העדכון. הוא נדרש למשפך ולטבלת המובילים.'));
 
     const status = h('div', { class: 'adm-card', testid: 'tools-schema' },
       h('h3', { text: 'מצב השרת' }),
@@ -1089,6 +1099,8 @@ export function renderTools(root) {
         text: v21 ? 'update-2.1.sql מותקן ✓ (כל הכלים פעילים)' : v21 === false ? 'update-2.1.sql עוד לא הורץ' : 'לא ידוע (אין חיבור לשרת)' }),
       h('p', { class: v22 ? 'adm-result' : 'adm-warn', testid: 'tools-schema-status-22',
         text: v22 ? 'update-2.2.sql מותקן ✓ (נתוני האימונים, השיחות עם המאמן ולשונית השחקנים)' : v22 === false ? 'update-2.2.sql עוד לא הורץ' : 'update-2.2.sql: לא ידוע (אין חיבור לשרת)' }),
+      h('p', { class: v23 ? 'adm-result' : 'adm-warn', testid: 'tools-schema-status-23',
+        text: v23 ? 'update-2.3.sql מותקן ✓ (המשפך, החזרה למשחק וטבלת המובילים)' : v23 === false ? 'update-2.3.sql עוד לא הורץ' : 'update-2.3.sql: לא ידוע (אין חיבור לשרת)' }),
       h('p', { class: 'adm-muted', style: 'font-size:13px;margin:0', text: 'גרסת המשחק בקוד: ' + APP_VERSION }));
 
     const exportBtn = h('button', { class: 'adm-btn primary', type: 'button', testid: 'btn-tools-export-csv', text: '⬇ ייצוא כל המשובים ל-CSV' });
@@ -1155,7 +1167,8 @@ export function renderTools(root) {
         h('li', { text: 'יימחקו: ' + n0(s.total_devices) + ' מכשירים, כל הכניסות, כל האירועים ו-' + n0(s.feedback_total) + ' משובים.' }),
         h('li', { text: 'יישארו: הגדרות הפרסומות, ההודעה לשחקנים, הגדרות הגרסה והמשוב, ורשימת המנהלים.' }),
         h('li', {}, 'נמחקות רק 4 הטבלאות של המשחק: ', h('bdi', { dir: 'ltr', text: 'devices, sessions, events, feedback' }), '. שום דבר אחר בפרויקט לא נפגע.'),
-        h('li', { text: 'הקריירות של השחקנים שמורות במכשירים שלהם ולא נפגעות.' })),
+        h('li', { text: 'הקריירות של השחקנים שמורות במכשירים שלהם ולא נפגעות.' }),
+        h('li', { text: 'טבלת המובילים (2.3) לא נמחקת. שורות לא רצויות מסתירים בלשונית "טבלה".' })),
       h('div', { class: 'adm-row' }, openBtn),
       panel, result);
 

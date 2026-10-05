@@ -3,6 +3,8 @@ import * as game from '../engine/game.js';
 import { esc, $, fromHTML } from './dom.js';
 import { gtext } from './gender.js';
 import { ico } from './icons.js';
+import { starsState } from './cosmetics.js';
+import * as daily from '../core/daily.js';
 
 /* ------------------------------------------------------------------ */
 /* Shared context (filled by main.js)                                  */
@@ -149,11 +151,22 @@ export function snapshotOnOpen() {
   } catch { /* ignore */ }
 }
 
+/** v2.3: achievement / objective / career-path unlocks become in-game toasts (js/ui/achievements.js paces them).
+ *  The engine's toast queue (game.takeToasts) carries names and stars; older engines: the signals. */
+function pumpToasts(sig) {
+  try {
+    let items = null;
+    if (typeof game.takeToasts === 'function') { if (game.hasCareer()) items = game.takeToasts(); }
+    else items = (sig || []).filter((s) => s && (s.name === 'achievement' || s.name === 'objective_done')).map((s) => ({ k: s.name === 'achievement' ? 'achievement' : 'objective', ...(s.props || {}) }));
+    if (items && items.length) import('./achievements.js').then((m) => m.queueToasts(items)).catch(() => {});
+  } catch { /* ignore */ }
+}
+
 /** Forward pending engine signals to telemetry. Never throws. */
 export function forwardSignals() {
   try {
     const sig = game.getAndClearSignals();
-    if (!sig || !sig.length) return;
+    if (!sig || !sig.length) { pumpToasts([]); return; }
     let why = '';
     for (const s of sig) {
       if (!s || typeof s.name !== 'string') continue;
@@ -164,6 +177,8 @@ export function forwardSignals() {
       if (SNAP_WHY[s.name]) why = SNAP_WHY[s.name];
     }
     svc.telemetry.trackSignals(sig);
+    // v2.3: achievement / objective unlocks become in-game toasts (js/ui/achievements.js queues and paces them)
+    pumpToasts(sig);
     if (why) {
       trackCareerSnapshot(why);
       if (why === 'start') { try { snapOpenKey = String(svc.telemetry.getSessionId() || '') + '|' + game.getSaveMeta().careerId; } catch { /* ignore */ } }
@@ -270,10 +285,17 @@ export function setHeader(opts = {}) {
   els.topbar.hidden = show === false;
   els.topbar.classList.toggle('tb-wide', !!(bell && gear));
   els.topbar.innerHTML = `<i class="tb-lights" aria-hidden="true"></i>
-    <span class="tb-side tb-start">${back ? `<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">${SVG_BACK}</button>` : ''}</span>
+    <span class="tb-side tb-start">${back ? `<button type="button" class="icon-btn" data-act="back" aria-label="חזרה">${SVG_BACK}</button>` : bell ? starsPill() : ''}</span>
     <h1 class="topbar-title">${esc(gtext(title || ''))}</h1>
     <span class="tb-side tb-end">${bell ? `<button type="button" class="icon-btn tb-bell" data-act="inbox" aria-label="הודעות" data-testid="btn-inbox">${SVG_BELL}<b class="tab-badge num" data-testid="inbox-badge" hidden>0</b></button>` : ''}${gear ? `<button type="button" class="icon-btn" data-act="gear" aria-label="הגדרות" data-testid="btn-gear">${SVG_GEAR}</button>` : ''}</span>`;
   if (bell) refreshChrome();
+}
+
+/** v2.3 (F6): stars balance in the header (tab roots); taps open the rewards section of the shop. */
+let lastStars = null;
+function starsPill() {
+  const n = starsState().balance;
+  return `<a class="tb-stars" href="#/shop?cat=rewards" data-testid="hdr-stars" aria-label="${n} כוכבים"><i aria-hidden="true">⭐</i><b class="num">${n}</b></a>`;
 }
 
 export function resetHeader(meta = {}) {
@@ -303,12 +325,36 @@ function queueChromeRefresh() {
 
 /** Update the unread badge on the header bell. */
 export function refreshChrome() {
-  const badgeEl = els.topbar && els.topbar.querySelector('[data-testid="inbox-badge"]');
-  if (!badgeEl) return;
   let n = 0;
   try { if (game.hasCareer()) n = game.getHub().unread || 0; } catch { n = 0; }
+  updateAppBadge(n);
+  const st = els.topbar && els.topbar.querySelector('[data-testid="hdr-stars"]');
+  if (st) {
+    const v = starsState().balance;
+    const b = st.querySelector('b');
+    if (b && b.textContent !== String(v)) { b.textContent = String(v); st.setAttribute('aria-label', v + ' כוכבים'); }
+    if (lastStars !== null && v > lastStars) { st.classList.remove('gain'); void st.offsetWidth; st.classList.add('gain'); }
+    lastStars = v;
+  }
+  const badgeEl = els.topbar && els.topbar.querySelector('[data-testid="inbox-badge"]');
+  if (!badgeEl) return;
   badgeEl.hidden = !n;
   badgeEl.textContent = n > 99 ? '99+' : String(n);
+}
+
+/** v2.3 (F8): the installed app icon shows unread messages + a waiting daily reward (navigator.setAppBadge). */
+let badgeN = -1;
+export function updateAppBadge(unread) {
+  try {
+    if (typeof navigator === 'undefined' || !('setAppBadge' in navigator)) return;
+    let n = Number(unread);
+    if (!Number.isFinite(n)) { n = 0; try { if (game.hasCareer()) n = Number(game.getHub().unread) || 0; } catch { n = 0; } }
+    if (daily.available()) n += 1;
+    if (n === badgeN) return;
+    badgeN = n;
+    if (n > 0) navigator.setAppBadge(n).catch(() => {});
+    else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+  } catch { /* unsupported */ }
 }
 
 /* ------------------------------------------------------------------ */
@@ -357,7 +403,7 @@ const openModals = [];
  * close.el = the panel element.
  */
 export function openModal(content, opts = {}) {
-  const { sheet = false, testid = '', dismissible = true, onClose, cls = '', label = '' } = opts;
+  const { sheet = false, testid = '', dismissible = true, onClose, cls = '', label = '', guardMs = 0 } = opts;
   const root = els.modals || document.body;
   const wrap = document.createElement('div');
   wrap.className = 'modal-wrap' + (sheet ? ' is-sheet' : '');
@@ -386,6 +432,11 @@ export function openModal(content, opts = {}) {
   };
   close.el = panel;
   close.dismissible = dismissible;
+  // v2.3: a modal that pops up over a screen the player was tapping ignores taps for a moment (no accidental button)
+  if (guardMs > 0) {
+    const t0 = performance.now();
+    panel.addEventListener('click', (e) => { if (performance.now() - t0 < guardMs) { e.stopPropagation(); e.preventDefault(); } }, true);
+  }
   wrap.addEventListener('click', (e) => {
     if (e.target === wrap && dismissible) close();
     const c = e.target.closest('[data-close]');

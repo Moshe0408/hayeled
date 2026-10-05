@@ -220,6 +220,48 @@ export async function probeV22() {
   return v22;
 }
 
+// ---------- v2.3 (supabase/update-2.3.sql) ----------
+let v23 = null;   // null = unknown, true = update-2.3.sql installed, false = not yet
+
+/** Last known state of the 2.3 server update: null (unknown) | true | false. */
+export function v23Status() {
+  return v23;
+}
+
+async function callV23(name, args) {
+  try {
+    const r = await call(name, args);
+    v23 = true;
+    return r;
+  } catch (e) {
+    if (isMissingFunction(e)) { v23 = false; return null; }
+    throw e;
+  }
+}
+
+/** Funnel + D1/D7 retention + 2.3 engagement for devices first seen in the last `days` days,
+ *  or null when update-2.3.sql is not installed yet (other errors are thrown). */
+export function getFunnel(days = 30) {
+  return callV23('admin_funnel', { p_days: days, p_tz: 'Asia/Jerusalem' });
+}
+
+/** Leaderboard moderation list. filter: 'all' | 'visible' | 'hidden' | 'flagged'. -> {total, counts, rows} | null */
+export function getLeaderboardAdmin({ limit = 50, offset = 0, search = '', filter = 'all' } = {}) {
+  return callV23('admin_leaderboard', { p_limit: limit, p_offset: offset, p_search: String(search || '').trim() || null, p_filter: filter });
+}
+
+/** Hide (hidden = true) or show again one leaderboard row. -> {ok, id, hidden} */
+export async function setLeaderboardHidden(id, hidden = true) {
+  const r = await callV23('admin_leaderboard_hide', { p_id: Number(id), p_hidden: !!hidden });
+  return r || { ok: false, error: 'not_installed' };
+}
+
+/** Ask the server whether the 2.3 functions exist. */
+export async function probeV23() {
+  try { await getFunnel(1); } catch { /* unknown stays as it was on network errors */ }
+  return v23;
+}
+
 /** All feedback rows for the CSV export (pages of 200, capped at 10,000 rows). */
 export async function fetchAllFeedback({ unreadOnly = false, rating = null } = {}) {
   const out = [];

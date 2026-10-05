@@ -47,15 +47,35 @@ export function potStars(range) {
 export function scoutWidth(age) { return age <= 16 ? 6 : age <= 18 ? 4 : age <= 21 ? 3 : 1; }
 export function updatePotSeen(S) {
   const p = S.player;
+  if (S.meta && S.meta.bst && S.meta.bst.scout) { p.potSeen = [p.pot, p.pot]; return; }   // v2.3: the chief scout reveals the potential exactly
   const age = ageOf(S);
   const w = scoutWidth(age);
   const c = p.pot + rngFor(S.id, S.season, 'scout').int(-2, 2);
-  const lo = clamp(Math.round(c - w), 30, 99), hi = clamp(Math.round(c + w), 30, 99);
+  let lo = clamp(Math.round(c - w), 30, 99), hi = clamp(Math.round(c + w), 30, 99);
+  // v2.3 review: a fast-start youth star was promised a 'כוכב על' potential (82-94): the scouts' range stays inside it
+  if (S.meta && S.meta.fast && p.pot >= START23.potMin && p.pot <= START23.potMax) { lo = clamp(lo, START23.potMin, START23.potMax); hi = clamp(hi, lo, START23.potMax); }
   p.potSeen = [lo, Math.max(lo, hi)];
 }
 
+/** v2.3: shift the position-weighted attributes so that ovrOf(p) === target (attributes stay in 1..99). */
+export function setOvrTo(p, target) {
+  const w = POS_W[p.pos];
+  const shift = target - ovrRaw(p);
+  for (const k in w) p.a[k] = round1(clamp(p.a[k] + shift, 1, 99));
+  let guard = 0;
+  while (ovrOf(p) !== target && guard++ < 40) {
+    const d = ovrOf(p) < target ? 0.5 : -0.5;
+    for (const k in w) p.a[k] = round1(clamp(p.a[k] + d, 1, 99));
+  }
+  return ovrOf(p);
+}
+// v2.3 (F2): every new career starts as a youth star: OVR 60, potential 82-94, age 16
+export const START23 = { ovr: 60, potMin: 82, potMax: 94, age: 16 };
+
 export function createPlayer(rng, o, season, econ = 1) {
-  const t = rng.int(45, 55);
+  const st = o.start || null;
+  const t0 = rng.int(45, 55);
+  const t = st && typeof st.ovr === 'number' ? st.ovr : t0;
   const pos = o.pos;
   const w = POS_W[pos];
   const a = {};
@@ -77,10 +97,11 @@ export function createPlayer(rng, o, season, econ = 1) {
     const d = ovrOf(tmp) < t ? 0.5 : -0.5;
     for (const k in w) a[k] = round1(clamp(a[k] + d, 1, 99));
   }
-  const pot = clamp(Math.round(t + 24 + rng.normal(0, 7)), t + 10, 94);
+  let pot = clamp(Math.round(t + 24 + rng.normal(0, 7)), t + 10, 94);
+  if (st) pot = clamp(rng.int(st.potMin || 82, st.potMax || 94), Math.max(t + 10, st.potMin || 82), st.potMax || 94);
   return {
     first: o.first, last: o.last, nick: o.nick || '', nation: o.nation, pos, foot: o.foot === 'L' ? 'L' : 'R',
-    born: season - 15, a, pot, potSeen: [pot - 6, pot + 6], peak: t,
+    born: season - (st && st.age ? st.age : 15), a, pot, potSeen: [pot - 6, pot + 6], peak: t,
     energy: 90, morale: 60, form: [], injury: null, susp: 0, yc: 0,
     trust: 50, fans: 30, mates: 55, rep: { l: 5, c: 0, w: 0 }, money: Math.round(1500 * econ),
     gender: o.gender === 'f' ? 'f' : 'm', look: o.look || null, num: typeof o.num === 'number' ? o.num : defaultShirt(pos),

@@ -48,6 +48,7 @@ const HELP = {
     title: 'החלטות במשחק',
     items: [
       'ברירת המחדל: <b>צופים במשחק כמו בשידור</b>, עם חילופים, שערים וחגיגות. אפשר להאיץ פי 4 או לדלג לסיום.',
+      'בשידור יש גם <b>הרגעים הגדולים</b>: 1-2 פעמים במשחק, בהזדמנות הגדולה שלך, השידור עוצר ו{{אתה בוחר|את בוחרת}} מה לעשות (עם הסיכוי של כל אפשרות). אפשר לכבות במתג.',
       'כשהמתג דלוק, המשחק <b>עוצר ברגעי מפתח</b> (מצב אחד על אחד, בעיטה חופשית, פנדל) ו{{אתה בוחר|את בוחרת}} מה לעשות.',
       'הבחירות משפיעות על הציון, על אמון המאמן ועל התוצאה. אפשר להחליף מצב בכל רגע, גם באמצע עונה.',
     ],
@@ -147,7 +148,8 @@ export async function render(root, params = {}) {
         <h2>המשחק</h2>
         <div class="set-list">
           ${toggleRow('sound', 'toggle-sound', sound, 'ic-violet', ICO.sound, 'צליל', 'קולות קהל ותופים')}
-          ${toggleRow('decisions', 'toggle-decisions', !!st.decisions, 'ic-gold', ICO.decisions, 'החלטות במשחק', st.decisions ? 'עוצרים ברגעי מפתח ובוחרים' : 'צופים במשחק כמו בשידור', 'decisions')}
+          ${toggleRow('decisions', 'toggle-decisions', !!st.decisions, 'ic-gold', ICO.decisions, 'החלטות במשחק', st.decisions ? 'עוצרים בכל רגע מפתח ובוחרים' : 'צופים במשחק כמו בשידור', 'decisions')}
+          ${st.decisions ? '' : toggleRow('km', 'toggle-key-moments', st.keyMoments !== false, 'ic-gold', ICO.decisions, 'הרגעים הגדולים', st.keyMoments !== false ? 'בשידור: 1-2 בחירות בהזדמנויות הגדולות שלך' : 'צפייה בלבד, בלי בחירות', '')}
           ${linkRow('replay-intro', 'btn-replay-intro', 'ic-blue', ICO.intro, 'צפה בפתיחה', 'הפתיחה של 8 שניות')}
           ${toggleRow('rm', 'toggle-reduce-motion', !!st.reduceMotion, 'ic-slate', ICO.motion, 'הפחתת אנימציות', '')}
           ${toggleRow('hap', 'toggle-haptics', !!st.haptics, 'ic-slate', ICO.haptics, 'רטט', 'ברגעים חשובים במשחק')}
@@ -319,6 +321,7 @@ export async function render(root, params = {}) {
     if (act === 'tm') { try { svc.telemetry.setConsent(!!el.checked); } catch { /* ignore */ } toast(el.checked ? 'תודה! זה עוזר לנו לשפר' : 'שיתוף הנתונים כובה'); }
     else if (act === 'ads-consent') { saveSettings({ adsConsent: !!el.checked }); if (ctx.hooks.reinitAds) ctx.hooks.reinitAds(); }
     else if (act === 'rm') saveSettings({ reduceMotion: !!el.checked });
+    else if (act === 'km') { saveSettings({ keyMoments: !!el.checked }); toast(el.checked ? 'בהזדמנויות הגדולות שלך, ההחלטה שלך' : 'צפייה בלבד'); draw(); }
     else if (act === 'decisions') { saveSettings({ decisions: !!el.checked }); toast(el.checked ? 'רגעי המפתח הודלקו' : 'מצב צפייה: המשחקים ירוצו כמו בשידור'); draw(); }
     else if (act === 'sound') { try { setSound(!!el.checked); } catch { /* ignore */ } }
     else if (act === 'hap') saveSettings({ haptics: !!el.checked });

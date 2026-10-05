@@ -1991,6 +1991,184 @@ const T22_EVENTS = [
 
 ];
 
+// ---------------------------------------------------------------------------
+// v2.3 "אין רגע דל" trigger events. Every one has a NEW trigger the engine
+// raises (raise(S, '<trigger>')); none is in the random pool.
+//   promoted_v5        schema v5 migration lifted the player to OVR 60 (once)
+//   strong_start       a new career, week 1 (the youth star is in the first-team squad)
+//   first_match_done   right after the debut / tutorial match
+//   stakes_scout_hit   a scout stake was met (STAKES.kinds.scout_*)
+//   stakes_scout_miss  a scout stake was missed
+//   stakes_promise_hit coach_promise stake met (the player starts next match)
+//   stakes_watch_hit   ynt_watch / nt_watch stake met
+//   quiet_week         a week without a fixture (with QUIET_WEEK drills)
+//   streak_7           the daily streak reached 7 days
+//   achievement_gold   a gold achievement unlocked
+//   objective_season   the season objective was completed
+// ---------------------------------------------------------------------------
+const V23_EVENTS = [
+  // promoted_v5 (migration): the coach lifts the player to the first team
+  E({ id: 'v23_promoted', who: 'coach', trigger: 'promoted_v5', once: true,
+    messages: [
+      'קפיצת מדרגה! {first}, אני עוקב {{אחריך|אחרייך}} כבר חודשים, וראיתי מספיק.',
+      'מהיום {{אתה מתאמן|את מתאמנת}} עם {{הבוגרים|הבוגרות}} של {club}. אל {{תאכזב|תאכזבי}} אותי.',
+    ],
+    choices: [
+      C('לא אאכזב, המאמן', 'לא אאכזב. אני {{מוכן|מוכנה}}', { trust: 4, morale: 5 }, 'את זה רציתי לשמוע. אימון ראשון מחר בשמונה. לא בשמונה וחמש.'),
+      C('סוף סוף!', 'סוף סוף! חיכיתי לזה כל החיים', { morale: 6 }, '{{תשמור|תשמרי}} את ההתלהבות למגרש. שם היא שווה משהו.'),
+    ] }),
+  E({ id: 'v23_promoted_friends', who: 'friends', trigger: 'promoted_v5', once: true,
+    messages: [
+      { who: 'friend1', t: 'שמעתם?! {nick} {{עלה לבוגרים|עלתה לבוגרות}}!!!' },
+      { who: 'friend2', t: 'אמרתי לכם. מהיום הראשון במגרש מתחת לבניין אמרתי' },
+      { who: 'friend3', t: '{{אחי|אחותי}}, רק אל {{תשכח|תשכחי}} אותנו {{כשתהיה מפורסם|כשתהיי מפורסמת}}' },
+    ],
+    choices: [
+      C('אף פעם לא אשכח', 'אתם הסיבה שאני פה. אף פעם', { morale: 4 }, 'נו, עכשיו אני בוכה. כרטיסים למשחק הבא?'),
+      C('כרטיסים עליי', 'כרטיסים למשחק הבא עליי', { morale: 3, money: -300 }, 'השורה הראשונה שלנו! מכינים שלט'),
+    ] }),
+
+  // strong_start: a new career, week 1
+  E({ id: 'v23_strong_start_coach', who: 'coach', trigger: 'strong_start', once: true,
+    messages: [
+      '{first}, {{ברוך הבא|ברוכה הבאה}} לסגל הבוגר של {club}.',
+      'בגיל {age} זה לא קורה לאף אחד. {{אתה פה|את פה}} כי ראיתי משהו מיוחד. השבוע {{אתה|את}} בסגל למשחק.',
+    ],
+    choices: [
+      C('אני {{מוכן|מוכנה}}', 'אני {{מוכן|מוכנה}}. רק תן לי דקות', { trust: 3, morale: 3 }, 'דקות {{תקבל|תקבלי}}. מה {{שתעשה|שתעשי}} איתן, זה כבר {{עליך|עלייך}}.'),
+      C('קצת {{לחוץ|לחוצה}}, אני מודה', 'האמת? קצת {{לחוץ|לחוצה}}', { morale: 2, mates: 2 }, 'טוב. מי שלא לחוץ לפני בכורה, לא מבין איפה הוא נמצא.'),
+    ] }),
+  E({ id: 'v23_strong_start_mom', who: 'mom', trigger: 'strong_start', once: true,
+    messages: ['{first}!!! אבא סיפר לי. {{הבוגרים|הבוגרות}}? בגיל {age}? אני כבר מכינה שניצלים לכל הקבוצה. ואל {{תגיד|תגידי}} לא.'],
+    choices: [
+      C('אמא, את הכי', 'אמא, את הכי. אבל רק לקבוצה, לא לכל השכונה', { morale: 4, mates: 2 }, 'רק לקבוצה. ולמאמן. ולשומר בכניסה.'),
+      C('אמא, די, זה מביך', 'אמא, די, זה מביך', { morale: 1 }, 'מביך? עוד שנה {{אתה תבקש|את תבקשי}} ממני שניצלים לחדר ההלבשה.'),
+    ] }),
+  E({ id: 'v23_strong_start_friends', who: 'friends', trigger: 'strong_start', once: true,
+    messages: [
+      { who: 'friend1', t: 'רגע, {nick} בסגל של {club}? {{הבוגרים|הבוגרות}}?' },
+      { who: 'friend2', t: 'אני כבר {{מדפיס|מדפיסה}} חולצה עם השם' },
+      { who: 'friend3', t: 'אם {{אתה מבקיע|את מבקיעה}} בבכורה, אני {{רץ|רצה}} סביב הבניין בפיג׳מה' },
+    ],
+    choices: [
+      C('{{תתכונן|תתכונני}}, {friend3}', '{friend3}, {{תתחיל|תתחילי}} להתאמן על הריצה', { morale: 4 }, 'על מה הסתבכתי...'),
+      C('קודם שאשחק בכלל', 'רגע, קודם שאעלה בכלל למגרש', { morale: 2 }, '{{צנוע. הוא עוד יהיה ענק|צנועה. היא עוד תהיה ענקית}}'),
+    ] }),
+
+  // first_match_done: after the debut
+  E({ id: 'v23_first_match_friends', who: 'friends', trigger: 'first_match_done', once: true,
+    messages: [
+      { who: 'friend1', t: 'בכורה ושער!!! {nick}!!! אני לא {{נושם|נושמת}}' },
+      { who: 'friend2', t: 'הסרטון של השער כבר בכל הקבוצות בוואטסאפ' },
+      { who: 'friend3', t: 'טוב. הבטחתי. אני {{יוצא|יוצאת}} לרוץ סביב הבניין בפיג׳מה' },
+    ],
+    choices: [
+      C('שמישהו יצלם!', 'רק שמישהו יצלם את {friend3}', { morale: 5 }, 'שידור חי בסטורי. כל השכונה במרפסות'),
+      C('זה רק ההתחלה', 'זה רק ההתחלה. תחזיקו חזק', { morale: 4, fans: 1 }, 'שומעים? "רק ההתחלה". {{מישהו פה כבר כוכב|מישהי פה כבר כוכבת}}'),
+    ] }),
+  E({ id: 'v23_first_match_dad', who: 'dad', trigger: 'first_match_done', once: true,
+    messages: ['ישבתי ביציע עם התרמוס. כשהכדור נכנס, שפכתי את כל הקפה על השכן. הוא לא כעס. הוא בכה איתי.', 'אני גאה בך, {first}. ממש גאה.'],
+    choices: [
+      C('בזכותך, אבא', 'בזכותך, אבא. כל הבקרים במגרש מתחת לבניין', { morale: 6 }, 'שטויות. בזכות הרגליים שלך. ואולי קצת בזכותי.'),
+      C('תקנה לשכן קפה', 'אבא, תקנה לשכן קפה חדש', { morale: 4 }, 'קניתי לו שניים. הוא כבר ביקש כרטיס למשחק הבא.'),
+    ] }),
+  E({ id: 'v23_first_match_social', who: 'social', trigger: 'first_match_done', once: true,
+    messages: ['הסרטון של {{הילד בן|הילדה בת}} ה-{age} {{שהבקיע|שהבקיעה}} בבכורה עבר 200 אלף צפיות. מישהו כבר כתב: "תזכרו את השם הזה".'],
+    choices: [
+      C('לשתף בסטורי', '{{משתף|משתפת}} בסטורי: "רק ההתחלה"', { fans: 3, morale: 2 }, 'הסטורי שלך קיבל 50 אלף לבבות בשעה'),
+      C('לא להסתכל בטלפון', 'הטלפון בצד. מחר אימון', { trust: 3 }, 'המאמן שמע {{שאתה לא בטלפון|שאת לא בטלפון}}. הוא אוהב את זה'),
+    ] }),
+
+  // stakes resolved
+  E({ id: 'v23_scout_hit_agent', who: 'agent', trigger: 'stakes_scout_hit', cooldown: 8,
+    messages: ['{first}, הסקאוט שישב ביציע התקשר אליי עוד לפני שריקת הסיום. אני לא אומר כלום עדיין, אבל {{תשאיר|תשאירי}} את הטלפון פתוח.'],
+    choices: [
+      C('מה הם אמרו?', 'מה בדיוק הם אמרו?', { morale: 3 }, 'הם אמרו "{{תמשיך|תמשיכי}} לשלוח לנו סרטונים". בשפה של סקאוטים, זה כמעט חוזה.'),
+      C('אני רק {{מתמקד|מתמקדת}} במגרש', 'אני {{מתמקד|מתמקדת}} במגרש. אתה תדבר איתם', { trust: 2 }, '{{בדיוק ככה. אתה משחק, אני מדבר.|בדיוק ככה. את משחקת, אני מדבר.}}'),
+    ] }),
+  E({ id: 'v23_scout_hit_journalist', who: 'journalist', trigger: 'stakes_scout_hit', cooldown: 10,
+    messages: ['שמועה חמה: הסקאוט שהיה במשחק שלך כתב דו״ח חיובי מאוד. יש לך תגובה לכתבה?'],
+    choices: [
+      C('אין תגובה', 'אין תגובה. אני {{מרוכז|מרוכזת}} ב{club}', { trust: 2, fans: 1 }, 'תגובה של {{מקצוען|מקצוענית}}. אני כותב "לא {{הכחיש|הכחישה}}".'),
+      C('נחמד לשמוע', 'נחמד לשמוע. {{כל שחקן חולם|כל שחקנית חולמת}} על זה', { morale: 3, trust: -1 }, 'זה כבר כותרת. תודה!'),
+    ] }),
+  E({ id: 'v23_scout_miss_agent', who: 'agent', trigger: 'stakes_scout_miss', cooldown: 10,
+    messages: ['הסקאוט יצא לפני הסוף. אל {{תיקח|תיקחי}} ללב. הם תמיד חוזרים לראות פעמיים. בפעם הבאה, {{תן|תני}} להם סיבה להישאר.'] }),
+  E({ id: 'v23_promise_hit_coach', who: 'coach', trigger: 'stakes_promise_hit', cooldown: 6,
+    messages: ['אמרתי לך: {{תבקיע|תבקיעי}}, {{ותפתח|ותפתחי}}. הבקעת. במשחק הבא {{אתה|את}} בהרכב, מהדקה הראשונה.'],
+    choices: [
+      C('לא אוותר על המקום', 'קיבלתי. ולא אוותר עליו', { trust: 3, morale: 3 }, 'את זה נראה על הדשא.'),
+      C('תודה, המאמן', 'תודה על האמון, המאמן', { trust: 2, morale: 2 }, 'אל {{תודה|תודי}} לי. {{תודה|תודי}} לרגל שלך.'),
+    ] }),
+  E({ id: 'v23_watch_hit_national', who: 'national_coach', trigger: 'stakes_watch_hit', cooldown: 12,
+    messages: ['ראיתי אותך במשחק. לא אגיד יותר מזה כרגע, אבל {{אתה|את}} ברשימה שלי. {{תמשיך|תמשיכי}} ככה.'],
+    choices: [
+      C('זה חלום בשבילי', 'לשחק בנבחרת זה החלום שלי', { morale: 5 }, 'חלומות זה טוב. הופעות טובות זה יותר טוב.'),
+      C('אני אמשיך', 'אני אמשיך לעבוד', { trust: 2, morale: 3 }, 'זו התשובה הנכונה.'),
+    ] }),
+
+  // quiet_week: a week with no fixture
+  E({ id: 'v23_quiet_friends_match', who: 'friends', trigger: 'quiet_week', cooldown: 6,
+    messages: [
+      { who: 'friend1', t: 'אין לך משחק השבוע? מצוין. שישי בשש, המגרש מתחת לבניין. כמו פעם' },
+      { who: 'friend2', t: 'ואל {{תבוא|תבואי}} עם הנעליים היקרות. פה משחקים בסנדלים' },
+    ],
+    choices: [
+      C('אני שם!', 'אני שם. ואני {{לוקח|לוקחת}} את {friend2} לקבוצה שלי', { morale: 5, mates: 1, energy: -3 }, 'אין דבר כזה! {{אתה|את}} לבד מול כולנו'),
+      C('המאמן אמר לנוח', 'המאמן ביקש לנוח השבוע', { energy: 5, morale: -1 }, 'בסדר, {{מקצוען|מקצוענית}}. אבל בשבוע הבא אין תירוצים'),
+    ] }),
+  E({ id: 'v23_quiet_brother', who: 'brother', trigger: 'quiet_week', cooldown: 8,
+    messages: ['{{אחי|אחותי}}, יש לי משחק בשבת בליגת הילדים. כל הקבוצה לא מאמינה לי שאני מכיר אותך. {{תבוא|תבואי}}? בבקשה?'],
+    choices: [
+      C('{{ברור שאני בא|ברור שאני באה}}', 'ברור. ואני {{מביא|מביאה}} כדור חתום לכל הקבוצה', { morale: 5, fans: 2 }, 'הם צרחו! המאמן שלי ביקש תמונה איתך!'),
+      C('לא {{יכול|יכולה}} השבוע', 'השבוע אני לא {{יכול|יכולה}}, אבל בשבוע הבא כן', { morale: -1 }, 'אוף... טוב. אבל {{אתה מבטיח|את מבטיחה}}!'),
+    ] }),
+  E({ id: 'v23_quiet_coach_extra', who: 'coach', trigger: 'quiet_week', cooldown: 8,
+    messages: ['אין משחק השבוע, אז יש לי הצעה: אימון אישי איתי, שישי בבוקר. רק {{אתה|את}} והכדור.'],
+    choices: [
+      C('אני שם בשבע', 'אני שם בשבע. לפני כולם', { trust: 4, energy: -4 }, 'שבע ורבע אני כבר כועס.'),
+      C('אפשר לנוח הפעם?', 'אפשר לנוח הפעם? הגוף צריך', { energy: 6, trust: -1 }, 'בסדר. גם מנוחה היא אימון. אבל אני זוכר.'),
+    ] }),
+  E({ id: 'v23_quiet_mom_dinner', who: 'mom', trigger: 'quiet_week', cooldown: 8,
+    messages: ['אין משחק השבוע? אז שישי ארוחה אצלנו. סבתא באה, הדודים באים, וכולם רוצים לשמוע על {{הבוגרים|הבוגרות}}.'],
+    choices: [
+      C('אני {{מביא|מביאה}} קינוח', 'אני {{מביא|מביאה}} קינוח', { morale: 5 }, 'קינוח? {{אתה|את}} הקינוח. {{תביא|תביאי}} רק את עצמך.'),
+      C('רק בלי שאלות על חוזים', 'רק אם הדוד לא שואל על החוזה', { morale: 3 }, 'אני לא מבטיחה כלום לגבי הדוד.'),
+    ] }),
+  E({ id: 'v23_quiet_social_challenge', who: 'social', trigger: 'quiet_week', cooldown: 10,
+    messages: ['אתגר הקורה מתפוצץ ברשת. כולם מתייגים אותך: "{{אתה|את}} לא {{מסוגל|מסוגלת}}".'],
+    choices: [
+      C('לקבל את האתגר', '{{מצלם|מצלמת}} ניסיון אחד בלבד', { fans: 3, morale: 2 }, 'פגעת בקורה בניסיון הראשון. מיליון צפיות'),
+      C('לא בשבילי', 'לא בשבילי. {{מתאמן|מתאמנת}}', { trust: 1 }, 'התגובות: "{{מקצוען אמיתי|מקצוענית אמיתית}}"'),
+    ] }),
+
+  // streak_7 (daily)
+  E({ id: 'v23_streak7_friends', who: 'friends', trigger: 'streak_7', cooldown: 20,
+    messages: [
+      { who: 'friend1', t: 'שבוע שלם {{אתה|את}} פה כל יום? {{אתה יותר רציני|את יותר רצינית}} ממני בעבודה' },
+      { who: 'friend2', t: 'ככה בונים קריירה. יום אחרי יום' },
+    ] }),
+
+  // achievement_gold
+  E({ id: 'v23_gold_dad', who: 'dad', trigger: 'achievement_gold', cooldown: 15,
+    messages: ['ראיתי את זה בחדשות. גזרתי את הכתבה ושמתי במגירה, ליד התמונה שלך מגיל שש עם הכדור הראשון.'],
+    choices: [
+      C('אתה עדיין שומר אותה?', 'אתה עדיין שומר את התמונה ההיא?', { morale: 4 }, 'אני שומר הכול. גם את הנעליים מגיל שש.'),
+    ] }),
+  E({ id: 'v23_gold_grandma', who: 'grandma', trigger: 'achievement_gold', cooldown: 25,
+    messages: ['{first} שלי, השכנה מהקומה השנייה אמרה {{שאתה מפורסם|שאת מפורסמת}}. אמרתי לה שידעתי את זה כבר בגן. {{תבוא|תבואי}} לאכול?'],
+    choices: [
+      C('בשבת אצלך', 'בשבת אני אצלך, סבתא', { morale: 5 }, 'אני מכינה את הקובה {{שאתה אוהב|שאת אוהבת}}.'),
+    ] }),
+
+  // objective_season
+  E({ id: 'v23_season_objective_coach', who: 'coach', trigger: 'objective_season', cooldown: 30,
+    messages: ['הצבנו מטרה לעונה, ועמדת בה. זה מה שמבדיל {{בין שחקן טוב לשחקן גדול|בין שחקנית טובה לשחקנית גדולה}}.'],
+    choices: [
+      C('מה המטרה הבאה?', 'אז מה המטרה הבאה?', { trust: 3, morale: 3 }, 'אני אוהב את השאלה הזאת. נדבר בקדם העונה.'),
+    ] }),
+];
+
 // Canonical id -> every variant id (same trigger). The engine may rng.pick one
 // eligible variant, or simply raise(S, <canonical id>) and let runWeekEvents choose.
 export const EVENT_VARIANTS = {
@@ -2020,4 +2198,5 @@ export const EVENTS = [
   ...TRIGGER_EVENTS_B,
   ...TRIGGER_EVENTS_C,
   ...T22_EVENTS,
+  ...V23_EVENTS,
 ];

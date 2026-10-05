@@ -1,11 +1,12 @@
-// js/admin/admin.js - admin dashboard entry + hash router (#/login, #/dash, #/players, #/feedback, #/tools, #/config).
+// js/admin/admin.js - admin dashboard entry + hash router (#/login, #/dash, #/players, #/board, #/feedback, #/tools, #/config).
 // Never initialises telemetry (the owner's visits must not count as players).
 import { BACKEND_ENABLED } from '../config.js';
 import * as api from './api.js';
 import { renderLogin, renderDash, renderPlayers, renderFeedback, renderTools, renderConfig, renderMessage, renderHeader, clear, h, toast } from './views.js';
+import { renderBoard } from './views23.js';
 
 const root = document.getElementById('adm-app');
-const ROUTES = ['login', 'dash', 'players', 'feedback', 'tools', 'config'];
+const ROUTES = ['login', 'dash', 'players', 'board', 'feedback', 'tools', 'config'];
 let cleanup = null;
 let pendingLoginError = '';
 
@@ -57,6 +58,7 @@ function render() {
   root.appendChild(main);
   if (r === 'dash') cleanup = renderDash(main);
   else if (r === 'players') cleanup = renderPlayers(main);
+  else if (r === 'board') cleanup = renderBoard(main);
   else if (r === 'feedback') cleanup = renderFeedback(main);
   else if (r === 'tools') cleanup = renderTools(main);
   else if (r === 'config') cleanup = renderConfig(main);

@@ -341,3 +341,54 @@ table.adm-table td.n { font-family: var(--font-num); direction: ltr; text-align:
 .adm-pl-id bdi { font-family: var(--font-num); }
 @media (min-width: 980px) { .pl-last::before { content: none; } .adm-pl-head { padding-inline-end: 30px; } }
 @media (prefers-reduced-motion: reduce) { .adm-pl-row::after { transition: none; } }
+
+/* ---------- v2.3: funnel, retention, engagement, leaderboard moderation (js/admin/views23.js) ---------- */
+.adm-v23 { margin-bottom: 4px; }
+.adm-funnel-bar { margin: -2px 0 10px; gap: 10px; flex-wrap: wrap; }
+.adm-funnel-card h3, .adm-v23 .adm-card h3 { margin-top: 0; }
+.adm-funnel-text { margin: 0 0 10px; font-size: 15.5px; line-height: 1.55; color: #D6E3F8; }
+.adm-funnel-text.sub { font-size: 14px; color: var(--muted); }
+.adm-funnel { list-style: none; margin: 4px 0 0; padding: 0; }
+.adm-funnel-step { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 4px 0; cursor: default; }
+.adm-funnel-step .name { font-weight: 700; font-size: 14px; }
+.adm-funnel-step .num { font-family: var(--font-num); direction: ltr; unicode-bidi: isolate; color: var(--text); font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.adm-funnel-step .track { grid-column: 1 / -1; height: 14px; border-radius: 4px; background: rgba(140,170,220,.07); overflow: hidden; }
+.adm-funnel-step .bar { display: block; height: 100%; border-radius: 4px; }
+.adm-funnel-drop { display: flex; align-items: center; gap: 6px; padding: 1px 0 1px; font-size: 12px; color: var(--ink-3); }
+.adm-funnel-drop .arrow { font-family: var(--font-num); }
+.adm-funnel-drop.worst { color: var(--amber); }
+.adm-funnel-drop .flag { font-size: 11px; font-weight: 800; color: #2a1800; background: var(--amber); padding: 1px 7px; border-radius: 6px; }
+.adm-ret-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; margin-bottom: 10px; }
+.adm-ret-grid .adm-kpi { padding: 10px 10px; }
+.adm-ret-grid .adm-kpi .value { font-size: 26px; }
+.adm-v23 td.muted { color: var(--ink-3); }
+.adm-lb-link { text-decoration: none; color: inherit; display: block; }
+.adm-lb-link .sub.strong { color: var(--teal-ink); font-weight: 700; margin-top: 4px; }
+
+.adm-lb { display: flex; flex-direction: column; gap: 8px; }
+.adm-lb-row { display: grid; grid-template-columns: 64px minmax(0, 1.4fr) minmax(0, 1.6fr) auto; grid-template-areas: "rk who stats acts" "rk meta meta acts";
+  align-items: center; gap: 4px 12px; padding: 10px 12px; border-radius: 14px; background: var(--panel); box-shadow: var(--sh-2); }
+.adm-lb-row .rk { grid-area: rk; font: 900 18px/1 var(--font-num); color: var(--gold-hi); text-align: center; }
+.adm-lb-row .rk.off { font: 700 12px/1.2 var(--font); color: var(--ink-3); }
+.adm-lb-row .who { grid-area: who; min-width: 0; }
+.adm-lb-row .nm { font-weight: 800; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-lb-row .sub { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); }
+.adm-lb-row .sub .club { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.adm-lb-row .flag { margin-top: 3px; font-size: 12px; color: var(--amber); }
+.adm-lb-row .flag .raw { color: var(--text); }
+.adm-lb-row .stats { grid-area: stats; display: flex; gap: 6px 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.adm-lb-row .stats b { font-family: var(--font-num); color: var(--text); font-size: 15px; }
+.adm-lb-row .stats .gold b { color: var(--gold-hi); }
+.adm-lb-row .meta { grid-area: meta; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.adm-lb-row .acts { grid-area: acts; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.adm-lb-row .acts .when { font-size: 11.5px; max-width: 160px; text-align: end; }
+.adm-lb-row.hidden-row { opacity: .62; box-shadow: 0 0 0 1px rgba(255,84,104,.35) inset; }
+.adm-lb-row.flagged:not(.hidden-row) { box-shadow: 0 0 0 1px rgba(255,181,71,.35) inset, var(--sh-2); }
+@media (max-width: 719px) {
+  .adm-lb-row { grid-template-columns: 52px minmax(0, 1fr); grid-template-areas: "rk who" "rk stats" "meta meta" "acts acts"; }
+  .adm-lb-row .acts { flex-direction: row; justify-content: flex-start; align-items: center; flex-wrap: wrap; }
+  .adm-lb-row .acts .when { text-align: start; max-width: none; }
+  .adm-ret-grid .adm-kpi .value { font-size: 22px; }
+  .adm-funnel-text { font-size: 14.5px; }
+}
+.adm-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

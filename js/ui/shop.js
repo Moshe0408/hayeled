@@ -10,6 +10,8 @@ import { gtext } from './gender.js';
 import { STORE_CATS, storeCat, catIcon, catGlow, itemArt } from './shop-art.js';
 import { SHOP_ITEMS } from '../data/strings.js';
 import { ico } from './icons.js';
+import { rewardsHTML, rewardsClick } from './rewards.js';
+import { starsState } from './cosmetics.js';
 
 const SELL_RATE = 0.6;
 const DATA = (() => { const m = {}; try { for (const it of SHOP_ITEMS || []) m[it.id] = it; } catch { /* ignore */ } return m; })();
@@ -51,21 +53,31 @@ export function collectionHTML(items, { limit = 0, emptyText = '' } = {}) {
   return `<div class="coll" data-testid="collection">${shown.map((x) => `<div class="coll-item" style="--glow:${catGlow(x.cat)}" data-testid="coll-${esc(x.id)}">${itemArt(x.id, x.cat)}<b>${esc(gtext(x.he))}</b></div>`).join('')}</div>`;
 }
 
+/** v2.3 review: the stars buy something right now -> say so at the top of the shop (one tap to the rewards). */
+function starsHint() {
+  let c = null;
+  try { c = game.getCosmetics(); } catch { c = null; }
+  if (!c || !Array.isArray(c.items)) return '';
+  const it = c.items.filter((x) => x && x.slot !== 'boost' && !x.owned && x.canBuy && x.price > 0).sort((a, b) => b.price - a.price)[0];
+  if (!it) return '';
+  return `<button type="button" class="stars-hint" data-act="cat" data-cat="rewards" data-testid="shop-stars-hint">${ico('star', 'gold')}<span class="grow"><b>${esc('יש לך ' + c.balance + '⭐')}</b><small>${esc(gtext('מספיק ל' + it.he + ' ועוד. לפרסים'))}</small></span><span class="chev" aria-hidden="true">‹</span></button>`;
+}
 export function render(root, params = {}) {
-  let cat = STORE_CATS.some((c) => c.key === params.cat) || params.cat === 'mine' ? params.cat : null;
+  let cat = STORE_CATS.some((c) => c.key === params.cat) || params.cat === 'mine' || params.cat === 'rewards' ? params.cat : null;
+  const rw = { slot: params.slot || null };
 
   function draw() {
     const vm = call(() => game.getShop(), { quiet: true });
     if (!vm) { root.innerHTML = empty('החנות סגורה כרגע', '🛍️'); return; }
     const items = storeModel(vm);
     const cats = STORE_CATS.filter((c) => items.some((x) => x.cat === c.key));
-    if (!cat || (cat !== 'mine' && !cats.some((c) => c.key === cat))) cat = cats.length ? cats[0].key : 'mine';
+    if (!cat || (cat !== 'mine' && cat !== 'rewards' && !cats.some((c) => c.key === cat))) cat = cats.length ? cats[0].key : 'mine';
     const owned = items.filter((x) => x.owned);
     const list = cat === 'mine' ? owned : items.filter((x) => x.cat === cat).sort((a, b) => a.price - b.price);
     const curCat = STORE_CATS.find((c) => c.key === cat);
     const ownedValue = owned.reduce((s, x) => s + (x.price || 0), 0);
 
-    root.innerHTML = `<div class="store">
+    root.innerHTML = `<div class="store${cat === 'rewards' ? ' is-rw' : ''}">
       <section class="store-wallet" data-testid="shop-wallet">
         <div class="sw-top"><div><span class="sw-label">היתרה שלך</span><b class="sw-bal num" data-testid="shop-balance">${esc(money(vm.money))}</b></div><i class="sw-chip" aria-hidden="true"></i></div>
         <div class="sw-stats">
@@ -78,14 +90,16 @@ export function render(root, params = {}) {
       </section>
 
       <nav class="store-cats" aria-label="קטגוריות">
+        <button type="button" class="scat scat-rw${cat === 'rewards' ? ' on' : ''}" data-act="cat" data-cat="rewards" data-testid="shop-cat-rewards" aria-pressed="${cat === 'rewards'}">${ico('star')}<span>פרסים</span><b class="scat-n num">${esc(starsState().balance)}⭐</b></button>
         ${cats.map((c) => `<button type="button" class="scat${cat === c.key ? ' on' : ''}" data-act="cat" data-cat="${c.key}" data-testid="shop-cat-${c.key}" aria-pressed="${cat === c.key}">${catIcon(c.key)}<span>${esc(c.he)}</span></button>`).join('')}
         <button type="button" class="scat${cat === 'mine' ? ' on' : ''}" data-act="cat" data-cat="mine" data-testid="shop-cat-mine" aria-pressed="${cat === 'mine'}">${catIcon('owned')}<span>האוסף שלי</span><b class="scat-n num">${owned.length}</b></button>
       </nav>
 
-      <div class="store-head"><h2>${esc(cat === 'mine' ? 'האוסף שלי' : curCat ? curCat.he : '')}</h2>
+      ${cat !== 'rewards' ? starsHint() : ''}
+      ${cat === 'rewards' ? rewardsHTML(rw) : `<div class="store-head"><h2>${esc(cat === 'mine' ? 'האוסף שלי' : curCat ? curCat.he : '')}</h2>
         <small>${cat === 'mine' ? (owned.length ? 'שווי ' + esc(money(ownedValue)) : '') : list.length + ' פריטים'}</small></div>
 
-      ${cat === 'mine' && !owned.length ? `<section class="card">${collectionHTML(items)}</section>` : `<div class="store-grid">${list.map((it) => itemCard(it, vm)).join('')}</div>`}
+      ${cat === 'mine' && !owned.length ? `<section class="card">${collectionHTML(items)}</section>` : `<div class="store-grid">${list.map((it) => itemCard(it, vm)).join('')}</div>`}`}
 
       <p class="store-note">${esc(gtext('המחירים בשקלים. פריטים נמכרים ב-60% מהמחיר, ומתנות למשפחה לא נמכרות.'))}</p>
     </div>`;
@@ -148,6 +162,7 @@ export function render(root, params = {}) {
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled || !root.contains(b)) return;
     const act = b.dataset.act;
+    if (rewardsClick(b, rw, draw)) return;
     if (act === 'cat') {
       cat = b.dataset.cat;
       draw();

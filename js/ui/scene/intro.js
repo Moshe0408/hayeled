@@ -1566,6 +1566,8 @@ function start(opts, resolve) {
   S.builder = stadiumBuilderGen(S);
 
   const st = { t: 0, playing: !opts.debug, last: performance.now(), dts: [], ts: [], drawn: 0, perf: {} };
+  // v2.3 review: a returning player (or a challenge link) starts near the logo: about 3 s (2 s) instead of 8
+  if (!opts.debug && Number(opts.startAt) > 0) { st.t = clamp(Number(opts.startAt), 0, DUR - 1); if (st.t >= 4.2 && S.builder) { while (!S.builder.next().done); S.builder = null; } }
   const draw = () => {
     try {
       g.setTransform(S.dpr, 0, 0, S.dpr, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';

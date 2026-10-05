@@ -1,5 +1,5 @@
 // tests/e2e.mjs: end-to-end browser test (SPEC §10.2). Integrate agent.
-// Usage: node tests/e2e.mjs [--only a|b|c|d|e] [--headful]
+// Usage: node tests/e2e.mjs [--only a|b|c|d|e|f] [--headful]
 // Env:   PUPPETEER_CORE_PATH  absolute path of a puppeteer-core package dir (default: tests/node_modules/puppeteer-core)
 //        CHROME_PATH          browser executable (default: installed Chrome, then Edge)
 //        SHOTS_DIR            screenshot directory (default: tests/out)
@@ -11,6 +11,10 @@
 // Group D covers v2.1: the coaching career after retirement (boy and girl), manager screens, HoF "שחקן + מאמן".
 // Group E covers v2.2: training intensity (preview + energy), the coach talk after a bench run (promise -> starts),
 // feminine Hebrew in a girl's coach talk. B13 checks the v2.2 telemetry signals and the admin 2.2 cards (mock).
+// Group F covers v2.3: the 2-step fast start + scripted debut that always scores (boy, girl), objectives / path /
+// achievements / stars / rewards shop, stakes, share card (PNG blob via a Web Share stub), "המשך עד האירוע הבא",
+// the daily reward + streak on a mocked clock, the v4 -> v5 migration of a real v2.2 save (tests/fixtures), the
+// leaderboard + challenge link and the funnel telemetry / admin funnel + moderation (mock).
 // Every page skips the 8 s intro ('hy.intro.skip'='1') except scenario C1.
 
 import { createRequire } from 'node:module';
@@ -119,8 +123,14 @@ async function scenario(name, fn) {
   } catch (e) {
     results.push({ name, ok: false, err: String(e && e.message || e) });
     console.log(`FAIL ${name}: ${e && e.message || e}`);
+    // a screenshot of every open page at the moment of the failure (debugging aid)
+    let k = 0;
+    for (const pg of openPages) {
+      try { if (pg.isClosed()) { openPages.delete(pg); continue; } fs.mkdirSync(SHOTS, { recursive: true }); await pg.screenshot({ path: path.join(SHOTS, 'FAIL-' + name.split(' ')[0] + '-' + (k++) + '.png') }); } catch { /* ignore */ }
+    }
   }
 }
+const openPages = new Set();
 
 const isFont = (u) => /fonts\.(googleapis|gstatic)\.com/.test(u) || /\/favicon\.ico$/.test(u);
 const isMock = (u) => u.startsWith(MOCK);
@@ -145,7 +155,7 @@ function watch(page, label) {
   page.on('request', (r) => {
     allRequests.push(r.url());
     // js/config.js ships the real project: a test must never reach it
-    if (/.supabase.co/.test(r.url())) problems.push(`[${label}] request to the REAL Supabase: ${r.url()}`);
+    if (/\.supabase\.co\b/.test(r.url())) problems.push(`[${label}] request to the REAL Supabase: ${r.url()}`);
   });
   page.on('requestfailed', (r) => {
     const u = r.url();
@@ -165,6 +175,7 @@ function watch(page, label) {
 
 async function newPage(ctx, label, { intro = false, reduced = false } = {}) {
   const page = await ctx.newPage();
+  openPages.add(page);
   // pin the motion preference: the host OS setting must not decide between the full and the quiet intro / celebrations
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }]);
   await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -191,9 +202,22 @@ async function click(page, sel, timeout = 10000) {
   // The match screen re-renders cards on its own timer (outcome card -> next moment), so an element can
   // be replaced between "found" and "clicked". Re-query and retry instead of failing the scenario.
   for (let attempt = 0; ; attempt++) {
+    // v2.3 review: a one-time nudge card (pro contract / affordable reward / board opt-in) that popped up over the screen
+    // is dismissed with its 'later' button first, unless the target is inside it (it ignores taps for 400 ms)
+    if (!/nudge|lb-optin/.test(sel)) {
+      for (let w = 0; w < 6; w++) {
+        const has = await page.evaluate(() => !!document.querySelector('.modal-wrap:not(.closing) [data-nudge-later]'));
+        if (!has) break;
+        await sleep(450);
+        await page.evaluate(() => { const b = document.querySelector('.modal-wrap:not(.closing) [data-nudge-later]'); if (b) b.click(); });
+        await sleep(300);
+      }
+    }
     const el = await page.waitForSelector(sel, { visible: true, timeout });
     // a full-screen celebration (C9) swallows the first tap like on a phone: tap it away first
     await page.evaluate(() => { for (const c of document.querySelectorAll('[data-testid="celebration"]')) c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+    // ...and wait until it has faded out (a toast's small trophy celebration can start right as the test taps)
+    for (let w = 0; w < 15 && (await page.evaluate(() => !!document.querySelector('[data-testid="celebration"]'))); w++) { await page.evaluate(() => { for (const c of document.querySelectorAll('[data-testid="celebration"]')) c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }); await sleep(120); }
     // the fixed bottom tab bar covers the last line of a screen: centre the target first (a player scrolls too)
     await el.evaluate((e) => { if (!e.closest('.tabbar, nav.tabs, [data-testid="tabbar"]')) e.scrollIntoView({ block: 'center', inline: 'nearest' }); }).catch(() => {});
     try { await el.click(); return; } catch (e) {
@@ -252,6 +276,9 @@ async function uiState(page, timeout = 20000) {
         return r.width > 0 && r.height > 0;
       };
       const h = location.hash;
+      // v2.3 review: one-time nudges (pro-contract offer, reward you can afford, board opt-in) - "later" like a busy player
+      const nl = document.querySelector('.modal-wrap:not(.closing) [data-nudge-later]');
+      if (nl) { nl.click(); return 'busy'; }
       if (document.querySelector('[data-testid="ff-overlay"]')) return 'busy';
       if (q('ad-interstitial')) return 'interstitial';
       if (q('week-summary')) return 'week';
@@ -292,7 +319,8 @@ async function recordCelebrations(page) {
  */
 let shotMatch = 0;
 let momentsClicked = 0;
-async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
+async function playMatch(page, mode, tag = '', { watchMs = 25000, onPre = null, onCoach = null, onLegend = null, onSummary = null } = {}) {
+  let preDone = false, sumDone = false;
   let finished = 0;
   let k = 0;
   let replayT0 = 0;
@@ -308,9 +336,17 @@ async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
         finish: !!q('btn-finish-match'), cont: !!q('btn-match-continue'), auto: !!ab && !ab.disabled,
         replay: !!q('btn-skip-end'), x4: !!sp4 && sp4.getAttribute('aria-pressed') === 'true',
         celeb: !!document.querySelector('[data-testid="celebration"]'),
+        legend: !!q('btn-legend-continue'), cm: !!q('btn-cm-next'), km: !!q('km-opt-0'),
       };
     });
     if (!st.h.startsWith('#/match')) return finished;
+    // v2.3: the debut tutorial (coach-marks during the replay, the 'ככה מתחילים אגדה' card after it)
+    if (st.cm && onCoach) { await onCoach(); continue; }
+    if (st.cm) { await page.evaluate(() => { const b = document.querySelector('[data-testid="btn-cm-skip"]') || document.querySelector('[data-testid="btn-cm-next"]'); if (b) b.click(); }); await sleep(300); continue; }
+    if (st.legend && onLegend) { const f = onLegend; onLegend = null; await f(); continue; }
+    // v2.3 review: the legend card follows the debut summary (that 'המשך' already counted the match); it ignores taps for 450 ms
+    if (st.legend) { await sleep(500); await click(page, T('btn-legend-continue')); await sleep(500); continue; }
+    if (st.cont && onSummary && !sumDone) { sumDone = true; await onSummary(); continue; }
     if (st.cont) {
       if (shotMatch < 2) { await shot(page, `match-summary${tag}`); }
       await click(page, T('btn-match-continue'));
@@ -325,6 +361,7 @@ async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
       await sleep(250);
       continue;
     }
+    if (st.pre && onPre && !preDone) { preDone = true; await onPre(); continue; }
     if (st.pre) {
       if (shotMatch === 0) { await shot(page, 'match-pre' + tag); }
       if (mode === 'auto') await click(page, T('btn-autoplay'));
@@ -332,6 +369,9 @@ async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
       await sleep(250);
       continue;
     }
+    // v2.3 review: a one-tap key moment in watch mode (tap the first option; it also auto-picks after 9 s)
+    // (a sure chance - the debut - is tapped like a player; any other is left to the auto choice, like the old watch mode)
+    if (st.km) { await page.evaluate(() => { const c = document.querySelector('[data-testid="key-moment"]'); const b = document.querySelector('[data-testid="km-opt-0"]'); if (c && c.dataset.sure === '1' && b) b.click(); else if (window.__hyMatchDebug) window.__hyMatchDebug.km(-1); }); await sleep(300); continue; }
     if (st.replay) {
       // watch mode replay: x4, then let it run (celebrations included) or skip to full time after watchMs
       if (!replayT0) replayT0 = Date.now();
@@ -359,10 +399,11 @@ async function playMatch(page, mode, tag = '', { watchMs = 25000 } = {}) {
         k++;
         momentsClicked++;
         await sleep(200);
-      } else await click(page, T('btn-autoplay'));
+      } else await page.evaluate(() => { const b = document.querySelector('[data-testid="btn-autoplay"]'); if (b && !b.disabled) b.click(); });
       continue;
     }
-    if (st.auto) { await click(page, T('btn-autoplay')); await sleep(200); continue; }
+    // the button can sit under the replay overlay for a moment: tap it through the DOM like the other in-match controls
+    if (st.auto) { await page.evaluate(() => { const b = document.querySelector('[data-testid="btn-autoplay"]'); if (b && !b.disabled) b.click(); }); await sleep(200); continue; }
     await sleep(150);
   }
   throw new Error('match did not finish');
@@ -389,7 +430,10 @@ async function advanceUI(page, mode = 'auto') {
 async function ffUI(page, until) {
   await closeTopModals(page);
   await click(page, T('btn-ff'));
-  await click(page, T('ff-' + until));
+  try { await click(page, T('ff-' + until)); } catch (e) {
+    const d = await page.evaluate(() => ({ h: location.hash, modals: [...document.querySelectorAll('.modal-wrap')].map((m) => m.className + ': ' + m.innerText.slice(0, 120)), ff: !!document.querySelector('[data-testid="btn-ff"]') }));
+    throw new Error(e.message + ' | ' + JSON.stringify(d));
+  }
   await sleep(300);
   await page.waitForFunction(() => !document.querySelector('[data-testid="ff-overlay"]'), { timeout: 180000 });
   return uiState(page);
@@ -419,6 +463,8 @@ async function ffToSeasonReview(page) {
 async function createCareerUI(page, { first = 'יוסי', last = 'אזולאי', shotsOn = true, gender = 'm', tag = '' } = {}) {
   await goto(page, '#/title');
   await click(page, T('btn-new-career'));
+  // v2.3: #/new is the two-step fast start; these scenarios use the full wizard behind 'התאמה מתקדמת'
+  await click(page, T('btn-advanced'));
   // step 1: boy / girl (C1)
   await click(page, T('gender-' + gender));
   if (shotsOn) await shot(page, 'new-0-gender' + tag);
@@ -1043,6 +1089,8 @@ async function groupC(browser) {
 
   await scenario('C3 girl career: watch matches until she scores -> "גוללללל!" celebration overlay', async () => {
     let meGoal = false;
+    // this scenario reads the whole resolved log at kick-off: classic watch mode (the key moments switched off in settings)
+    await page.evaluate(() => { window.__hy.ctx.settings.keyMoments = false; });
     for (let i = 0; i < 40 && !meGoal; i++) {
       await closeTopModals(page);
       if (!(await present(page, T('btn-advance')))) await goto(page, '#/hub');
@@ -1070,6 +1118,7 @@ async function groupC(browser) {
         await playMatch(page, 'auto', '-f');
       }
     }
+    await page.evaluate(() => { delete window.__hy.ctx.settings.keyMoments; });
     assert(meGoal, 'she did not score in 40 weeks');
     const celebs = await page.evaluate(() => window.__hyCelebs);
     assert(celebs.some((c) => /גול/.test(c.text)), 'no goal celebration recorded ' + JSON.stringify(celebs));
@@ -1931,6 +1980,8 @@ async function groupE(browser) {
     await waitBoot(page);
     await createCareerUI(page, { first: 'עומר', last: 'עומס', shotsOn: false, tag: '-e' });
     await closeTopModals(page);
+    // v2.3 review: the hub folds the training card into one row (tap to open)
+    if (!(await page.evaluate(() => { const d = document.querySelector('details.train-card'); return !d || d.open; }))) await click(page, T('hub-train-toggle'));
     await page.waitForSelector(T('intensity-row'), { visible: true });
     await click(page, T('training-shooting'));
     await click(page, T('intensity-normal'));
@@ -2058,12 +2109,573 @@ async function groupE(browser) {
     await setWidth(page, 360);
     await noOverflow(page, 'profile 360');
     await goto(page, '#/hub');
+    // v2.3 review: the hub folds the training card into one row (tap to open)
+    if (!(await page.evaluate(() => { const d = document.querySelector('details.train-card'); return !d || d.open; }))) await click(page, T('hub-train-toggle'));
     await page.waitForSelector(T('intensity-row'), { visible: true });
     await noOverflow(page, 'hub 360');
     await setWidth(page, 390);
   });
 
   await ctx.close();
+}
+
+/* ------------------------------------------------------------------ */
+/* Group F: v2.3 "אין רגע דל, כל משחק משחק"                             */
+/* ------------------------------------------------------------------ */
+
+// A controllable clock for the daily reward (F8): localStorage 'hy.test.now' = epoch ms of "now" at page load.
+async function mockClock(page) {
+  await page.evaluateOnNewDocument(() => {
+    let base = NaN;
+    try { base = Number(localStorage.getItem('hy.test.now')); } catch { /* opaque origin */ }
+    if (!Number.isFinite(base) || base <= 0) return;
+    const RD = Date, t0 = RD.now();
+    const now = () => base + (RD.now() - t0);
+    class FD extends RD {
+      constructor(...a) { if (a.length) super(...a); else super(now()); }
+      static now() { return now(); }
+    }
+    window.Date = FD;
+  });
+}
+// Web Share API stub that records what the game shares (F10): window.__hyShared = [{ text, url, files:[{ name, type, size }] }]
+async function stubShare(page) {
+  await page.evaluateOnNewDocument(() => {
+    window.__hyShared = [];
+    try {
+      Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d) => !!d });
+      Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => {
+        window.__hyShared.push({ text: d.text || '', url: d.url || '', files: (d.files || []).map((f) => ({ name: f.name, type: f.type, size: f.size })) });
+      } });
+    } catch { /* ignore */ }
+  });
+}
+const localNoon = (y, m, d) => new Date(y, m - 1, d, 12, 0, 0).getTime();
+
+/** #/title -> fast start (2 steps) -> the debut match screen. Returns { first }. */
+async function fastStartUI(page, { gender = 'm', first = '', random = false, tag = '' } = {}) {
+  await goto(page, '#/title');
+  await click(page, T('btn-new-career'));
+  await page.waitForSelector(T('gender-' + gender), { visible: true });
+  await shot(page, `v23-01-step1${tag}`, { full: false });
+  await click(page, T('gender-' + gender));
+  if (random) await click(page, T('btn-random'));
+  else { await page.waitForSelector(T('inp-first'), { visible: true }); await page.type(T('inp-first'), first); }
+  await sleep(250);
+  await shot(page, `v23-02-step1-filled${tag}`, { full: false });
+  const name = await page.$eval(T('inp-first'), (e) => e.value);
+  await click(page, T('btn-next'));
+  await page.waitForSelector(T('btn-start'), { visible: true });
+  await sleep(500);
+  await noMarkers(page, 'fast start step 2' + tag);
+  await noOverflow(page, 'fast start step 2' + tag);
+  const card = await page.evaluate(() => document.querySelector('.qs-2').innerText);
+  assert(/60/.test(card) && /16/.test(card), 'step 2 card is not OVR 60 / age 16: ' + card.slice(0, 200));
+  await shot(page, `v23-03-youth-star${tag}`, { full: false });
+  await click(page, T('btn-start'));
+  await page.waitForFunction(() => location.hash.startsWith('#/match'), { timeout: 20000 });
+  return { first: name };
+}
+
+/** The scripted debut: pre-match + stakes card, 3 coach-marks, the player is subbed on and scores (mega), the legend card. */
+async function playDebutUI(page, tag = '') {
+  await page.waitForSelector(T('btn-start-match'), { visible: true, timeout: 20000 });
+  const m0 = await page.evaluate(() => window.__hy.game.getMatch());
+  assert(m0 && m0.tutorial === true, 'the first match is not the debut tutorial: ' + JSON.stringify(m0 && { tut: m0.tutorial, phase: m0.phase }));
+  let marks = 0, legend = null, summary = null;
+  await playMatch(page, 'watch', tag, {
+    watchMs: 240000,
+    onPre: async () => {
+      await page.waitForSelector(T('stakes-card'), { visible: true });
+      await sleep(1200);   // the stakes slide in
+      await noMarkers(page, 'debut pre-match' + tag);
+      await shot(page, `v23-04-debut-pre${tag}`);
+      await click(page, T('btn-start-match'));
+      await sleep(300);
+    },
+    onCoach: async () => {
+      marks++;
+      await sleep(350);
+      if (marks <= 3) await shot(page, `v23-05-coachmark-${marks}${tag}`, { full: false });
+      await click(page, T('btn-cm-next'));
+      await sleep(250);
+    },
+    onSummary: async () => {
+      await sleep(400);
+      summary = await page.evaluate(() => ({ text: document.querySelector('[data-testid="match-summary"]').innerText, stakes: !!document.querySelector('[data-testid="stakes-result"]'), share: !!document.querySelector('[data-testid="btn-share-goal"]') }));
+      await noMarkers(page, 'debut summary' + tag);
+      await shot(page, `v23-07-debut-summary${tag}`);
+      await click(page, T('btn-match-continue'));
+      await sleep(400);
+    },
+    onLegend: async () => {
+      await page.waitForSelector(T('legend-card'), { visible: true });
+      await sleep(900);
+      legend = await page.evaluate(() => ({ text: document.querySelector('[data-testid="legend-card"]').innerText, ach: !!document.querySelector('[data-testid="legend-ach"]'), stars: !!document.querySelector('[data-testid="legend-stars"]') }));
+      await noMarkers(page, 'legend card' + tag);
+      await noOverflow(page, 'legend card' + tag);
+      await shot(page, `v23-08-legend-card${tag}`, { full: false });
+      await click(page, T('btn-legend-continue'));
+      await sleep(500);
+    },
+  });
+  const celebs = await page.evaluate(() => window.__hyCelebs || []);
+  const last = await page.evaluate(() => window.__hy.game.getLastMatch());
+  assert(marks >= 3, 'coach-marks shown: ' + marks);
+  const myGoals = last && (last.goals !== undefined ? last.goals : last.my && last.my.g);
+  assert(myGoals >= 1, 'the debut did not score: ' + JSON.stringify(last).slice(0, 300));
+  assert(celebs.some((c) => c.kind === 'mega'), 'no mega celebration in the debut: ' + JSON.stringify(celebs.map((c) => c.kind)));
+  assert(summary && summary.stakes, 'debut summary without the stakes resolution');
+  assert(legend && legend.ach && legend.stars && /ככה מתחילים אגדה/.test(legend.text), 'legend card: ' + JSON.stringify(legend));
+  assert(/נבחרת/.test(legend.text), 'legend card has no path teaser (הבא: נבחרת הנוער): ' + legend.text.slice(0, 300));
+  return { celebs, legend, summary };
+}
+
+/** Back on the hub (week summary / scout report / leftovers closed). */
+async function toHub(page) {
+  for (let i = 0; i < 14; i++) {
+    const s = await uiState(page, 6000);
+    if (s === 'hub') return;
+    if (s === 'week') { await click(page, T('btn-week-ok')); await sleep(400); continue; }
+    if (s === 'match') { await playMatch(page, 'auto'); continue; }
+    if (s === 'interstitial') { await click(page, T('btn-ad-close')); continue; }
+    if (s === 'scout') { await click(page, T('btn-scout-ok')); continue; }
+    if (s === 'fbprompt') { await click(page, T('btn-fb-later')); continue; }
+    await closeTopModals(page);
+    await goto(page, '#/hub');
+  }
+  throw new Error('hub not reached');
+}
+
+async function groupF(browser) {
+  const ctx = await browser.createBrowserContext();
+  const page = await newPage(ctx, 'F');
+  await recordCelebrations(page);
+  await mockClock(page);
+  await stubShare(page);
+  // day 1 of the clock: Sunday 2026-10-04 12:00 local
+  await page.evaluateOnNewDocument((t) => { try { if (!localStorage.getItem('hy.test.now')) localStorage.setItem('hy.test.now', String(t)); } catch { /* opaque */ } }, localNoon(2026, 10, 4));
+
+  await scenario('F1 fast start (boy): 2 steps -> OVR 60 youth star -> straight into the debut -> coach-marks -> subbed on, SCORES (mega) -> "ככה מתחילים אגדה"', async () => {
+    await page.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(page);
+    const t0 = Date.now();
+    await fastStartUI(page, { gender: 'm', first: 'איתי' });
+    await playDebutUI(page);
+    step('debut done in ' + ((Date.now() - t0) / 1000).toFixed(0) + 's');
+    await toHub(page);
+    const h = await hubVM(page);
+    const m = await page.evaluate(() => window.__hy.game.getSaveMeta());
+    assert(m.ovr >= 59 && m.ovr <= 62, 'start OVR ' + m.ovr);
+    assert(h.player.age === 16, 'start age ' + h.player.age);
+    const ach = await page.evaluate(() => window.__hy.game.getAchievements());
+    assert(ach.length >= 50, 'achievements ' + ach.length);
+    const un = ach.filter((a) => a.unlocked).map((a) => a.id);
+    assert(un.length >= 2, 'unlocked after the debut: ' + un.join(','));
+    const stars = await page.evaluate(() => window.__hy.game.getStars());
+    assert(stars.balance > 0, 'no stars after the debut');
+  });
+
+  await scenario('F2 hub after the debut: career path bar (next milestone + what is missing), 3 weekly objectives + season objective, stars, daily banner', async () => {
+    await toHub(page);
+    await closeTopModals(page);
+    await sleep(600);
+    for (const id of ['path-bar', 'objectives', 'hub-daily']) assert(await present(page, T(id)), 'hub has no ' + id);
+    const ob = await page.evaluate(() => window.__hy.game.getObjectives());
+    assert(ob.weekly.length === 3 && ob.season && ob.season.he, 'objectives ' + JSON.stringify(ob).slice(0, 300));
+    const objEls = await page.$$('[data-testid^="obj-"]');
+    assert(objEls.length >= 3, 'objective rows on the hub ' + objEls.length);
+    const pth = await page.evaluate(() => window.__hy.game.getPath());
+    assert(pth.steps.length >= 10 && pth.next && pth.next.missingHe, 'path ' + JSON.stringify(pth.next));
+    assert(pth.steps[0].done, 'debut step not done');
+    await noMarkers(page, 'hub v2.3');
+    await noOverflow(page, 'hub v2.3');
+    await shot(page, 'v23-10-hub', { full: false });
+    await shot(page, 'v23-10-hub-full');
+    await setWidth(page, 360); await noOverflow(page, 'hub 360'); await shot(page, 'v23-10-hub-360'); await setWidth(page, 390);
+  });
+
+  await scenario('F2b review fixes: the play button is in view on the first hub screen (dock); after a week summary one nudge card (reward / pro contract) appears', async () => {
+    await toHub(page);
+    const dock = await page.evaluate(() => { const b = document.querySelector('[data-testid="btn-advance"]'); const r = b.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, vh: innerHeight }; });
+    assert(dock.bottom <= dock.vh && dock.top > 0, 'play button not in the first screen ' + JSON.stringify(dock));
+    const objTop = await page.evaluate(() => document.querySelector('[data-testid="objectives"]').getBoundingClientRect().top);
+    assert(objTop < 844, 'weekly objectives below the fold: ' + objTop);
+    await page.evaluate(() => localStorage.setItem('hy.nudge.auto', '1'));
+    let seen = null;
+    for (let i = 0; i < 6 && !seen; i++) {
+      await click(page, T('btn-advance'));
+      await sleep(500);
+      if ((await page.evaluate(() => location.hash)).startsWith('#/match')) await playMatch(page, 'auto');
+      for (let k = 0; k < 20; k++) {
+        if (await present(page, T('btn-week-ok'))) { await page.evaluate(() => document.querySelector('[data-testid="btn-week-ok"]').click()); await sleep(700); }
+        seen = await page.evaluate(() => { const n = document.querySelector('.modal-wrap:not(.closing) [data-testid^="nudge-"]'); return n ? n.dataset.testid : null; });
+        if (seen || (await present(page, T('hub')) && !(await page.evaluate(() => !!document.querySelector('.modal-wrap:not(.closing)'))))) break;
+        await sleep(200);
+      }
+    }
+    assert(seen, 'no nudge card after the week summaries');
+    await noMarkers(page, 'nudge');
+    await shot(page, 'v23-10b-nudge', { full: false });
+    await sleep(500);
+    await page.evaluate(() => { const b = document.querySelector('.modal-wrap:not(.closing) [data-nudge-later]'); if (b) b.click(); });
+    await page.evaluate(() => localStorage.removeItem('hy.nudge.auto'));
+    await sleep(400);
+    await toHub(page);
+  });
+
+  await scenario('F3 achievements screen (50+ badges, tiers, progress); rewards shop: buy a cosmetic with stars, it is equipped', async () => {
+    await goto(page, '#/achievements');
+    await page.waitForSelector(T('achievements'), { visible: true });
+    const n = await page.$$eval('[data-testid^="ach-"]', (els) => els.length);
+    assert(n >= 50, 'achievement tiles ' + n);
+    await noMarkers(page, 'achievements'); await noOverflow(page, 'achievements');
+    await shot(page, 'v23-11-achievements', { full: false });
+    await shot(page, 'v23-11-achievements-full');
+    await goto(page, '#/shop?cat=rewards');
+    await page.waitForSelector(T('rewards'), { visible: true });
+    await noMarkers(page, 'rewards'); await noOverflow(page, 'rewards');
+    await shot(page, 'v23-12-rewards', { full: false });
+    const before = await page.evaluate(() => window.__hy.game.getStars().balance);
+    const buy = await page.evaluate(() => { const b = [...document.querySelectorAll('[data-testid^="rw-buy-"]')].find((x) => !x.disabled); return b ? b.dataset.testid : null; });
+    assert(buy, 'no affordable reward with ' + before + ' stars');
+    const id = buy.replace('rw-buy-', '');
+    await click(page, T(buy));
+    await click(page, T('btn-confirm-yes'));
+    await sleep(800);
+    const after = await page.evaluate(() => window.__hy.game.getStars().balance);
+    const cos = await page.evaluate(() => window.__hy.game.getCosmetics());
+    assert(after < before && after >= 0, `stars ${before} -> ${after}`);
+    assert(cos.owned.includes(id), 'not owned: ' + id);
+    assert(Object.values(cos.equipped).includes(id), 'not equipped: ' + id + ' ' + JSON.stringify(cos.equipped));
+    await sleep(1600);
+    await shot(page, 'v23-13-rewards-bought', { full: false });
+    await sleep(2600);
+    await page.evaluate(() => { for (const c of document.querySelectorAll('[data-testid="celebration"]')) c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+  });
+
+  await scenario('F4 every match matters: stakes card before the match (stakes + personal goal), resolution after; every week has something', async () => {
+    let seen = false;
+    for (let w = 0; w < 6 && !seen; w++) {
+      await toHub(page);
+      await closeTopModals(page);
+      await click(page, T('btn-advance'));
+      await sleep(400);
+      for (let i = 0; i < 20; i++) {
+        const s = await uiState(page);
+        if (s === 'match') {
+          await playMatch(page, 'auto', '', {
+            onPre: async () => {
+              if (await present(page, T('stakes-card'))) {
+                seen = true;
+                const txt = await page.$eval(T('stakes-card'), (e) => e.innerText);
+                assert(txt.trim().length > 10, 'empty stakes card');
+                await sleep(1200);
+                await noMarkers(page, 'stakes card');
+                await shot(page, 'v23-14-stakes-card', { full: false });
+              }
+              await click(page, T('btn-autoplay'));
+            },
+            onSummary: async () => {
+              if (seen) { assert(await present(page, T('stakes-result')), 'no stakes resolution after the match'); await sleep(300); await shot(page, 'v23-15-stakes-result'); }
+              await click(page, T('btn-match-continue'));
+              await sleep(300);
+            },
+          });
+          continue;
+        }
+        if (s === 'week') {
+          const wk = await page.$eval(T('week-summary'), (e) => e.innerText);
+          assert(wk.trim().length > 20, 'empty week summary');
+          await click(page, T('btn-week-ok')); await sleep(350); break;
+        }
+        if (s === 'interstitial') { await click(page, T('btn-ad-close')); continue; }
+        break;
+      }
+    }
+    assert(seen, 'no stakes card in 6 weeks');
+  });
+
+  await scenario('F5 share card: PNG drawn on a canvas (blob), shared as a file through the Web Share API with the link', async () => {
+    await toHub(page);
+    await goto(page, '#/achievements');
+    await page.waitForSelector(T('achievements'), { visible: true });
+    const tile = await page.evaluate(() => { const t = document.querySelector('.ach-tile.on[data-testid^="ach-"]'); return t ? t.dataset.testid : null; });
+    assert(tile, 'no unlocked achievement tile');
+    await click(page, T(tile));
+    await click(page, T('btn-share-ach'));
+    await page.waitForSelector(T('share-img'), { visible: true, timeout: 15000 });
+    const img = await page.$eval(T('share-img'), (e) => ({ src: e.src, w: e.naturalWidth, h: e.naturalHeight }));
+    assert(img.src.startsWith('blob:') && img.w >= 600 && img.h >= 600, 'share image ' + JSON.stringify(img));
+    const b64 = await page.evaluate(async (src) => { const b = await (await fetch(src)).blob(); return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(',')[1]); fr.readAsDataURL(b); }); }, img.src);
+    fs.mkdirSync(SHOTS, { recursive: true });
+    fs.writeFileSync(path.join(SHOTS, 'v23-16-share-card.png'), Buffer.from(b64, 'base64'));
+    await shot(page, 'v23-16-share-sheet', { full: false });
+    await page.waitForFunction(() => { const b = document.querySelector('[data-testid="btn-share-native"]'); return b && !b.disabled; });
+    await click(page, T('btn-share-native'));
+    await sleep(600);
+    const shared = await page.evaluate(() => window.__hyShared);
+    assert(shared.length === 1 && shared[0].files.length === 1 && shared[0].files[0].type === 'image/png' && shared[0].files[0].size > 20000, 'shared ' + JSON.stringify(shared));
+    assert(/tinyurl\.com\/hayeled|moshe0408\.github\.io\/hayeled/.test(shared[0].text + ' ' + shared[0].url), 'share text without the link: ' + shared[0].text);
+    const ach = await page.evaluate(() => window.__hy.game.getAchievements().filter((a) => a.unlocked && /share/.test(a.id)).map((a) => a.id));
+    assert(ach.length >= 1, 'the "shared a card" achievement did not unlock');
+    await closeTopModals(page);
+  });
+
+  await scenario('F6 "המשך עד האירוע הבא": fast-forward stops on something interesting and says why', async () => {
+    await toHub(page);
+    await closeTopModals(page);
+    await click(page, T('btn-ff'));
+    await click(page, T('ff-next-event'));
+    await sleep(300);
+    await page.waitForFunction(() => !document.querySelector('[data-testid="ff-overlay"]'), { timeout: 120000 });
+    await sleep(400);
+    let reason = null;
+    for (let i = 0; i < 20 && !reason; i++) {
+      reason = await page.evaluate(() => { const e = document.querySelector('[data-testid="ff-stop-reason"]'); return e ? e.innerText : null; });
+      if (reason) break;
+      const s = await uiState(page, 3000);
+      if (s === 'match') { await playMatch(page, 'auto'); continue; }
+      await sleep(250);
+    }
+    assert(reason && reason.trim().length > 3, 'no stop reason shown');
+    await noMarkers(page, 'ff stop');
+    await shot(page, 'v23-17-ff-stop', { full: false });
+    await toHub(page);
+  });
+
+  await scenario('F7 daily reward + streak (mocked clock): sheet on the first open of a day, once per day, next day continues, 1 missed day = streak freeze, longer gap resets, IndexedDB copy', async () => {
+    const rd = () => page.evaluate(() => JSON.parse(localStorage.getItem('hy.daily') || '{}'));
+    const openDay = async (t) => {
+      await flushSave(page);
+      await page.evaluate((x) => { localStorage.setItem('hy.test.now', String(x)); localStorage.setItem('hy.daily.auto', '1'); }, t);
+      await page.reload({ waitUntil: 'load' });
+      await waitBoot(page);
+      if (!(await present(page, T('hub'))) && (await present(page, T('btn-continue')))) await click(page, T('btn-continue'));
+      await page.waitForSelector(T('hub'), { visible: true });
+      await sleep(700);
+    };
+    const claim = async (name) => {
+      await page.waitForSelector(T('daily-sheet'), { visible: true, timeout: 8000 });
+      await sleep(400);
+      if (name) await shot(page, name, { full: false });
+      const s0 = await page.evaluate(() => window.__hy.game.getStars().balance);
+      await click(page, T('btn-daily-claim'));
+      await page.waitForSelector(T('daily-won'), { visible: true });
+      await sleep(600);
+      if (name) await shot(page, name + '-claimed', { full: false });
+      const s1 = await page.evaluate(() => window.__hy.game.getStars().balance);
+      await click(page, T('btn-daily-ok'));
+      await sleep(300);
+      return s1 - s0;
+    };
+    await openDay(localNoon(2026, 10, 5));
+    const ds1 = await claim('v23-18-daily-day1');
+    let d = await rd();
+    assert(d.streak === 1 && d.last === '2026-10-05', 'day 1 ' + JSON.stringify(d));
+    assert(ds1 >= 0, 'stars delta ' + ds1);
+    await openDay(localNoon(2026, 10, 5) + 3600e3);
+    assert(!(await present(page, T('daily-sheet'))) && !(await present(page, T('hub-daily'))), 'daily offered twice on the same day');
+    await openDay(localNoon(2026, 10, 6));
+    await claim('v23-18-daily-day2');
+    d = await rd(); assert(d.streak === 2, 'day 2 ' + JSON.stringify(d));
+    await openDay(localNoon(2026, 10, 8));    // 10-07 missed: the weekly freeze keeps the streak
+    await claim();
+    d = await rd(); assert(d.streak === 3 && d.freezeWeek, 'freeze ' + JSON.stringify(d));
+    await openDay(localNoon(2026, 10, 11));   // 2 days missed: reset
+    await claim();
+    d = await rd(); assert(d.streak === 1, 'reset ' + JSON.stringify(d));
+    await page.evaluate(() => localStorage.removeItem('hy.daily'));
+    await openDay(localNoon(2026, 10, 11) + 7200e3);
+    d = await rd(); assert(d.streak === 1 && d.last === '2026-10-11', 'IndexedDB copy not restored ' + JSON.stringify(d));
+    assert(!(await present(page, T('daily-sheet'))), 'daily offered again after the localStorage copy was wiped');
+    await page.evaluate(() => localStorage.removeItem('hy.daily.auto'));
+  });
+
+  await scenario('F8 leaderboard without a backend: friendly empty state; the title has the board button', async () => {
+    await goto(page, '#/leaderboard');
+    await page.waitForSelector(T('leaderboard'), { visible: true });
+    await page.waitForSelector(T('lb-empty'), { visible: true, timeout: 8000 });
+    await noMarkers(page, 'leaderboard offline');
+    await shot(page, 'v23-19-leaderboard-offline', { full: false });
+    await goto(page, '#/title');
+    assert(await present(page, T('btn-leaderboard')), 'no leaderboard button on the title');
+  });
+  await ctx.close();
+
+  // ---------------- girl, random identity, 360 px
+  const ctxG = await browser.createBrowserContext();
+  const pg = await newPage(ctxG, 'Fg');
+  await recordCelebrations(pg);
+  await scenario('F9 fast start (girl, random identity, 360 px): debut scores, feminine Hebrew, no {{ markers', async () => {
+    await pg.setViewport({ width: 360, height: 780, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await pg.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(pg);
+    await fastStartUI(pg, { gender: 'f', random: true, tag: '-f' });
+    await playDebutUI(pg, '-f');
+    await toHub(pg);
+    const h = await hubVM(pg);
+    assert(h.player.gender === 'f', 'gender ' + h.player.gender);
+    await closeTopModals(pg);
+    await noMarkers(pg, 'hub (girl)');
+    await noOverflow(pg, 'hub (girl) 360');
+    const all = (await docText(pg)) + JSON.stringify(await pg.evaluate(() => [window.__hy.game.getPath(), window.__hy.game.getObjectives()]));
+    assert(/הנערות|הבוגרות|לנשים|שחקנית/.test(all), 'no feminine wording on the girl hub / path');
+    await shot(pg, 'v23-10-hub-f', { full: false });
+    await goto(pg, '#/achievements');
+    await pg.waitForSelector(T('achievements'), { visible: true });
+    await noMarkers(pg, 'achievements (girl)');
+    await shot(pg, 'v23-11-achievements-f', { full: false });
+  });
+  await ctxG.close();
+
+  // ---------------- v4 -> v5 migration from a REAL v2.2 save
+  const ctxM = await browser.createBrowserContext();
+  const pm = await newPage(ctxM, 'Fm');
+  await scenario('F10 migration: a real v2.2 save (OVR 52, schema v4) -> continue -> OVR 60 + "קפיצת מדרגה" message exactly once (also after reload)', async () => {
+    const fx = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'v4-save-m.json'), 'utf8'));
+    await bareOrigin(pm);
+    await pm.evaluate((ls) => { localStorage.clear(); for (const [k, v] of Object.entries(ls)) localStorage.setItem(k, v); localStorage.setItem('hy.dev.backend', JSON.stringify({ off: true })); localStorage.setItem('hy.intro.skip', '1'); }, fx.localStorage);
+    await pm.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(pm);
+    await click(pm, T('btn-continue'));
+    await pm.waitForSelector(T('hub'), { visible: true });
+    await sleep(900);
+    await shot(pm, 'v23-20-migrated-hub', { full: false });
+    const count = () => pm.evaluate(() => { let n = 0; for (const r of window.__hy.game.getInbox()) { const t = window.__hy.game.getThread(r.id); if (/קפיצת מדרגה/.test(JSON.stringify(t))) n++; } return n; });
+    const m = await meta(pm);
+    assert(fx.meta.ovr < 60 && m.ovr >= 59 && m.ovr <= 61, `OVR ${fx.meta.ovr} -> ${m.ovr}`);
+    assert(m.careerId === fx.meta.careerId && m.week === fx.meta.week, 'not the same career');
+    const c1 = await count();
+    assert(c1 === 1, 'migration message count ' + c1);
+    await flushSave(pm);
+    await pm.reload({ waitUntil: 'load' });
+    await waitBoot(pm);
+    if (await present(pm, T('btn-continue'))) await click(pm, T('btn-continue'));
+    await pm.waitForSelector(T('hub'), { visible: true });
+    const c2 = await count();
+    assert(c2 === 1, 'message repeated after reload: ' + c2);
+    assert((await meta(pm)).ovr === m.ovr, 'OVR changed after reload');
+    const tut = await pm.evaluate(() => window.__hy.game.getTutorial());
+    assert(!tut.active, 'an old career replays the tutorial');
+    await goto(pm, '#/inbox');
+    await sleep(500);
+    await shot(pm, 'v23-21-migrated-inbox', { full: false });
+  });
+  await ctxM.close();
+
+  // ---------------- mock backend: leaderboard, challenge link, funnel telemetry, admin funnel + moderation
+  await mockReset();
+  const ctxB = await browser.createBrowserContext();
+  const pb = await newPage(ctxB, 'Fb');
+  await stubShare(pb);
+  await pb.evaluateOnNewDocument((url) => { try { localStorage.setItem('hy.dev.backend', JSON.stringify({ url, anonKey: 'mock-anon' })); } catch { /* opaque */ } }, MOCK);
+  await scenario('F11 leaderboard (mock): season end submits the career -> board lists it -> "אתגר חבר" link -> a fresh visitor sees the challenge card on the title', async () => {
+    await pb.goto(BASE, { waitUntil: 'load' });
+    await waitBoot(pb);
+    await fastStartUI(pb, { gender: 'f', first: 'נועה', tag: '-mock' });
+    await playMatch(pb, 'auto');
+    await toHub(pb);
+    await ffToSeasonReview(pb);
+    await click(pb, T('btn-season-ok'));
+    // v2.3 review: the public board is opt-in - the first season end asks once
+    for (let i = 0; i < 60 && !(await present(pb, T('btn-lb-optin-yes'))); i++) { if (await present(pb, T('btn-fb-later'))) await click(pb, T('btn-fb-later')); await sleep(300); }
+    await pb.waitForSelector(T('btn-lb-optin-yes'), { visible: true, timeout: 5000 });
+    await sleep(300);
+    await shot(pb, 'v23-21b-board-optin', { full: false });
+    await click(pb, T('btn-lb-optin-yes'));
+    await sleep(800);
+    if (await present(pb, T('btn-fb-later'))) await click(pb, T('btn-fb-later'));
+    let st = null;
+    for (let i = 0; i < 30; i++) { st = await mockState(); if ((st.leaderboard || []).length) break; await sleep(300); }
+    assert(st.leaderboard.length >= 1 && st.leaderboard.some((x) => /נועה/.test(x.name)), 'no board row: ' + JSON.stringify(st.leaderboard));
+    await toHub(pb);
+    await goto(pb, '#/leaderboard');
+    await pb.waitForSelector(T('lb-row'), { visible: true, timeout: 10000 });
+    const rows = await pb.$$eval(T('lb-row'), (els) => els.map((e) => e.innerText));
+    assert(rows.some((t) => /נועה/.test(t)), 'board rows ' + JSON.stringify(rows));
+    await noMarkers(pb, 'leaderboard'); await noOverflow(pb, 'leaderboard');
+    await shot(pb, 'v23-22-leaderboard', { full: false });
+    await click(pb, T('btn-challenge'));
+    await pb.waitForSelector(T('share-sheet'), { visible: true });
+    await pb.waitForSelector(T('share-img'), { visible: true, timeout: 15000 });
+    await shot(pb, 'v23-23-challenge-share', { full: false });
+    const href = await pb.$eval(T('btn-share-whatsapp'), (e) => decodeURIComponent(e.getAttribute('href')));
+    const mt = /https:\/\/moshe0408\.github\.io\/hayeled\/\?c=([A-Za-z0-9_.-]+)/.exec(href);
+    assert(mt, 'no challenge link in ' + href);
+    await pb.waitForFunction(() => { const b = document.querySelector('[data-testid="btn-share-native"]'); return b && !b.disabled; });
+    await click(pb, T('btn-share-native'));
+    await sleep(500);
+    const shared = await pb.evaluate(() => window.__hyShared);
+    const ls = shared[shared.length - 1] || {};
+    assert(/\?c=/.test((ls.url || '') + ' ' + (ls.text || '')), 'challenge not shared with the link: ' + JSON.stringify(shared));
+    await closeTopModals(pb);
+    // a friend opens the link (fresh browser profile, no career)
+    const ctxC = await browser.createBrowserContext();
+    const pc = await newPage(ctxC, 'Fc');
+    await pc.evaluateOnNewDocument((url) => { try { localStorage.setItem('hy.dev.backend', JSON.stringify({ url, anonKey: 'mock-anon' })); } catch { /* opaque */ } }, MOCK);
+    await pc.goto(BASE + '?c=' + mt[1], { waitUntil: 'load' });
+    await waitBoot(pc);
+    await pc.waitForSelector(T('challenge-card'), { visible: true, timeout: 10000 });
+    await sleep(500);
+    const card = await pc.$eval(T('challenge-card'), (e) => e.innerText);
+    assert(/נועה/.test(card), 'challenge card ' + card);
+    await noMarkers(pc, 'challenge card');
+    await shot(pc, 'v23-24-challenge-card', { full: false });
+    await click(pc, T('btn-challenge-accept'));
+    await pc.waitForSelector(T('gender-m'), { visible: true });
+    await pc.evaluate(() => window.__hy.telemetry.flush());
+    await sleep(500);
+    await ctxC.close();
+  });
+
+  await scenario('F12 funnel telemetry reaches the mock: onboarding_step, first_match_done, week_reached, achievement, objective_done, share, leaderboard_view, challenge_open', async () => {
+    await pb.evaluate(() => window.__hy.telemetry.flush());
+    await sleep(600);
+    const st = await mockState();
+    const names = new Set(st.events.map((e) => e.name));
+    for (const n of ['onboarding_step', 'first_match_done', 'week_reached', 'achievement', 'objective_done', 'share', 'leaderboard_view', 'challenge_open']) assert(names.has(n), 'missing event ' + n + ' (have ' + [...names].join(',') + ')');
+    const pr = (e) => e.props || e.properties || e.p || {};
+    const steps = new Set(st.events.filter((e) => e.name === 'onboarding_step').map((e) => pr(e).step));
+    for (const s of ['open', 'gender', 'kickoff']) assert(steps.has(s), 'onboarding step ' + s + ' missing: ' + [...steps].join(','));
+    const wk = st.events.filter((e) => e.name === 'week_reached').map((e) => Number(pr(e).n));
+    assert(wk.includes(1) && wk.every((n) => [1, 3, 5, 10, 20, 40].includes(n)), 'week_reached ' + wk.join(','));
+  });
+
+  await scenario('F13 admin (mock): funnel card in plain Hebrew + retention D1/D7; board tab hides an entry -> gone from the public board', async () => {
+    const admin = await newPage(ctxB, 'Fadmin');
+    await admin.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    await admin.goto(BASE + 'admin.html', { waitUntil: 'load' });
+    await admin.waitForSelector(T('adm-email'), { visible: true });
+    await admin.type(T('adm-email'), 'admin@test.local');
+    await admin.type(T('adm-password'), 'test1234');
+    await click(admin, T('adm-login'));
+    await admin.waitForSelector(T('funnel-card'), { visible: true, timeout: 15000 });
+    await sleep(800);
+    const txt = await admin.$eval(T('funnel-text'), (e) => e.innerText);
+    const ret = await admin.$eval(T('retention-text'), (e) => e.innerText);
+    assert(/מתוך|מכל/.test(txt) && /\d/.test(txt), 'funnel text: ' + txt);
+    assert(/\d/.test(ret), 'retention text: ' + ret);
+    await noOverflow(admin, 'admin funnel');
+    await shot(admin, 'v23-25-admin-dashboard');
+    const slot = await admin.$(T('v23-slot'));
+    if (slot) await slot.screenshot({ path: path.join(SHOTS, 'v23-25-admin-funnel.png') });
+    await click(admin, T('nav-board'));
+    await admin.waitForSelector(T('board-list') + ' .adm-lb-row', { timeout: 10000 });
+    await shot(admin, 'v23-26-admin-board', { full: false });
+    const hid = await admin.$eval('[data-testid^="board-hide-"]', (e) => e.dataset.testid.replace('board-hide-', ''));
+    await click(admin, T('board-hide-' + hid));
+    await sleep(250);
+    if (!(await admin.$(T('board-show-' + hid)))) await click(admin, T('board-hide-' + hid));   // 2-tap confirm
+    await admin.waitForSelector(T('board-show-' + hid), { timeout: 8000 });
+    const st = await mockState();
+    assert(st.leaderboard.find((x) => String(x.id) === hid).hidden === true, 'not hidden in the mock');
+    // the public board (anon RPC, as the game reads it; the game caches it for 60 s, so ask for a fresh copy)
+    const pub = await pb.evaluate(async () => { const m = await import(new URL('js/core/leaderboard.js', location.href).href); const r = await m.getLeaderboard({ kind: 'legacy', period: 'all', fresh: true }); return { ok: r.ok, names: (r.rows || []).map((x) => x.name) }; });
+    assert(pub.ok && !pub.names.some((t) => /נועה/.test(t)), 'hidden entry still on the public board: ' + JSON.stringify(pub));
+    await admin.close();
+  });
+  await ctxB.close();
 }
 
 async function main() {
@@ -2082,6 +2694,7 @@ async function main() {
     if (!ONLY || ONLY === 'b') await groupB(browser);
     if (!ONLY || ONLY === 'd') await groupD(browser);
     if (!ONLY || ONLY === 'e') await groupE(browser);
+    if (!ONLY || ONLY === 'f') await groupF(browser);
   } finally {
     await browser.close().catch(() => {});
     for (const c of children) { try { c.kill(); } catch { /* ignore */ } }

@@ -178,8 +178,47 @@ function headLayers(o, id) {
   const front = neck + collar + ears + earrings
     + `<path d="${face}" fill="url(#${id}sk)"/>` + shadeSide + hl + blush
     + eye(51.6, false) + eye(68.4, true) + brows + nose + mouth
-    + `<g filter="url(#${id}hs)">${hairPaths(H.front)}${rows}${part}</g>${sheen}`;
+    + `<g filter="url(#${id}hs)">${hairPaths(H.front)}${rows}${part}</g>${sheen}` + headAcc(o);
   return { back, front };
+}
+
+/* v2.3 cosmetics (F6): avatar accessories bought with stars (content COSMETICS acc keys).
+   Head layer: headband, snood, clip, chain. Body: armband (both poses), wristband / gloves / tape / sleeve (full pose). */
+const ACC_KEYS = ['headband', 'chain', 'armband', 'snood', 'clip', 'wristband', 'gloves', 'tape', 'sleeve'];
+function armbandFull(c) {
+  return `<path d="M30 98.6L39.9 100.6L39.3 105.4L29.6 103.4Z" fill="${c}"/><path d="M30 98.6L39.9 100.6L39.7 101.8L29.9 99.8Z" fill="#FFFFFF" opacity=".45"/><text x="34.8" y="102.6" text-anchor="middle" dominant-baseline="central" font-family="Rubik,Arial,sans-serif" font-weight="900" font-size="4" fill="#2A1A02">C</text>`;
+}
+function armbandPortrait(c) {
+  return `<path d="M8.2 103.6L29.6 98.4L30.6 105.4L7.4 110.6Z" fill="${c}"/><path d="M8.2 103.6L29.6 98.4L29.8 100L8 105.2Z" fill="#FFFFFF" opacity=".45"/><text x="19" y="104.6" text-anchor="middle" dominant-baseline="central" font-family="Rubik,Arial,sans-serif" font-weight="900" font-size="6" fill="#2A1A02" transform="rotate(-12 19 104.6)">C</text>`;
+}
+function headAcc(o) {
+  const a = o.accA, b = o.accB;
+  if (o.acc === 'headband') {
+    const c = a || '#FFFFFF', t = b || o.kitA || '#1E6FE0';
+    return `<path d="M40.4 40.4Q60 31.6 79.6 40.4L79.4 45.2Q60 36.6 40.6 45.2Z" fill="${c}"/><path d="M40.5 42.6Q60 34 79.5 42.6" fill="none" stroke="${t}" stroke-width="1.5"/><path d="M40.6 45.2Q60 36.6 79.4 45.2" fill="none" stroke="#000000" stroke-width=".6" opacity=".2"/>`;
+  }
+  if (o.acc === 'chain') {
+    return '<path d="M49.4 79.6Q60 93.4 70.6 79.6" fill="none" stroke="#F6CF6A" stroke-width="1.5" stroke-dasharray="1.6 .9"/><path d="M60 88.2l2.6 3.4-2.6 3.4-2.6-3.4z" fill="#FFE07A" stroke="#B07A18" stroke-width=".5"/>';
+  }
+  if (o.acc === 'snood') {
+    const c = a || '#1B1F27', t = b || '#3A4250';
+    return `<path d="M49.6 74Q60 80 70.4 74L71.6 85.6Q60 93 48.4 85.6Z" fill="${c}"/><path d="M49 79Q60 85.4 71 79M48.8 83Q60 89.6 71.2 83" fill="none" stroke="${t}" stroke-width="1.1" opacity=".8"/>`;
+  }
+  if (o.acc === 'clip') {
+    const c = a || '#E8B931', t = b || '#6B4A00';
+    return `<g transform="rotate(-28 71 33)"><rect x="65.4" y="31" width="11.2" height="3.6" rx="1.8" fill="${c}" stroke="${t}" stroke-width=".6"/><circle cx="67.6" cy="32.8" r=".9" fill="#FFFFFF" opacity=".8"/></g>`;
+  }
+  return '';
+}
+function bodyAccFull(o) {
+  const a = o.accA, b = o.accB;
+  const both = (fn) => fn((x) => x) + fn((x) => 120 - x);
+  if (o.acc === 'armband') return armbandFull(a || '#E8B931');
+  if (o.acc === 'wristband') return both((X) => `<path d="M${X(30.2)} 116.6L${X(36.8)} 116.9L${X(36.7)} 121.2L${X(30.3)} 120.9Z" fill="${a || '#FFFFFF'}"/><path d="M${X(30.2)} 118.6L${X(36.8)} 118.9" stroke="${b || '#E0262E'}" stroke-width="1.2"/>`);
+  if (o.acc === 'gloves') return both((X) => `<path d="M${X(29.6)} 120.4C${X(29)} 125 ${X(31)} 129.6 ${X(33.6)} 129.4C${X(36.4)} 129.2 ${X(38)} 125 ${X(37.4)} 120.6Z" fill="${a || '#1B1F27'}"/><path d="M${X(30)} 121.2H${X(37.2)}" stroke="${b || '#E8B931'}" stroke-width="1"/>`);
+  if (o.acc === 'tape') return both((X) => `<path d="M${X(43.6)} 163.4L${X(55.2)} 163.4L${X(55.1)} 167.6L${X(43.8)} 167.6Z" fill="${a || '#F4F6FA'}" opacity=".95"/><path d="M${X(43.8)} 165.5H${X(55.1)}" stroke="${b || '#9AA3B2'}" stroke-width=".7"/>`);
+  if (o.acc === 'sleeve') return both((X) => `<path d="M${X(33.4)} 90C${X(30)} 101 ${X(28.6)} 111 ${X(30.4)} 121L${X(36.6)} 121.4C${X(36.4)} 111 ${X(38)} 101 ${X(41)} 93Z" fill="${a || '#1B1F27'}"/>`);
+  return '';
 }
 
 /* ------------------------------------------------------------------ body */
@@ -195,12 +234,13 @@ function portraitBody(o, id) {
   const shade = `<path d="M86 85.6C98.4 88.6 109 94 111.4 104L114 122L84 122C90 108 88 96 80 84Z" fill="#000000" opacity=".2"/><path d="M34 85.6C24 88 15 93 12 101L22 103C25 95 30 90 38 86Z" fill="#FFFFFF" opacity=".14"/>`;
   const fold = `<path d="M46 104Q52 110 50 122M72 100Q68 110 71 122" fill="none" stroke="#000000" stroke-width="1.6" opacity=".09"/>`;
   const number = num != null && num !== '' ? numberText(num, 76, 97, 10, numFill(kitA, kitB), mix(kitA, '#000000', 0.45)) : '';
-  return `<path d="${torso}" fill="url(#${id}kit)"/>${seams}${shade}${fold}${number}`;
+  const band = o.acc === 'armband' ? armbandPortrait(o.accA || '#E8B931') : '';
+  return `<path d="${torso}" fill="url(#${id}kit)"/>${seams}${shade}${fold}${number}${band}`;
 }
 function fullBody(o, id) {
   const { kitA, kitB, num } = o;
   const shorts = contrast(kitA, kitB) >= 1.3 ? kitB : mix(kitA, '#000000', 0.5);
-  const sock = kitA, boot = lum(kitA) > 0.5 ? '#14161C' : '#F4C35A';
+  const sock = kitA, boot = o.boots || (lum(kitA) > 0.5 ? '#14161C' : '#F4C35A');
   const side = (s, fn) => fn((x) => f1(s > 0 ? x : 120 - x));
   const arm = (s) => side(s, (X) => `<path d="M${X(33.4)} 90C${X(30)} 101 ${X(28.6)} 111 ${X(30.4)} 121L${X(36.6)} 121.4C${X(36.4)} 111 ${X(38)} 101 ${X(41)} 93Z" fill="url(#${id}sk2)"/>`
     + `<path d="${ell(s > 0 ? 33.4 : 86.6, 124.4, 4.3, 4.8)}" fill="url(#${id}sk2)"/>`);
@@ -216,7 +256,9 @@ function fullBody(o, id) {
   const ball = `<g transform="translate(86 179)"><path d="${circ(0, 0, 10)}" fill="url(#${id}ball)"/>`
     + `<path d="M0 -3.6L3.4 -1.1L2.1 2.9L-2.1 2.9L-3.4 -1.1Z M0 -10L0 -6.4 M9.5 -3.1L6.1 -1.1 M5.9 8.1L3.9 5.1 M-5.9 8.1L-3.9 5.1 M-9.5 -3.1L-6.1 -1.1" fill="#1A1E28" stroke="#1A1E28" stroke-width="1.1" stroke-linejoin="round"/>`
     + `<path d="${ell(-3, -4, 3.4, 2.2)}" fill="#FFFFFF" opacity=".55"/></g>`;
-  return arm(1) + arm(-1) + leg(1) + leg(-1) + shortsP + `<path d="${torso}" fill="url(#${id}kit)"/>` + cuffs + tshade + number + ball;
+  const band = bodyAccFull(o);
+  const under = o.acc === 'sleeve' || o.acc === 'armband' || o.acc === 'wristband' || o.acc === 'gloves' ? band : '';
+  return arm(1) + arm(-1) + under + leg(1) + leg(-1) + (o.acc === 'tape' ? band : '') + shortsP + `<path d="${torso}" fill="url(#${id}kit)"/>` + cuffs + tshade + number + ball;
 }
 
 /* --------------------------------------------------------------- compose */
@@ -236,7 +278,11 @@ export function avatarSVG(opts = {}) {
   const full = opts.pose === 'full';
   const size = opts.size || (full ? 160 : 96);
   const VH = full ? 200 : 120;
-  const o = { gender, skinC, hairC, eyeC, kitA, kitB, style, num: opts.number, collar: seed % 3 === 0 ? 'v' : 'crew' };
+  const o = { gender, skinC, hairC, eyeC, kitA, kitB, style, num: opts.number, collar: seed % 3 === 0 ? 'v' : 'crew',
+    boots: typeof opts.boots === 'string' && /^#[0-9a-f]{3,8}$/i.test(opts.boots) ? opts.boots : null,
+    acc: ACC_KEYS.includes(opts.acc) ? opts.acc : null,
+    accA: Array.isArray(opts.accColors) && /^#[0-9a-f]{3,8}$/i.test(String(opts.accColors[0])) ? opts.accColors[0] : null,
+    accB: Array.isArray(opts.accColors) && /^#[0-9a-f]{3,8}$/i.test(String(opts.accColors[1])) ? opts.accColors[1] : null };
   const hd = headLayers(o, id);
   const bg = opts.bg !== false;
   const bgTop = mix(kitA, '#0A1530', lum(kitA) > 0.5 ? 0.78 : 0.55);

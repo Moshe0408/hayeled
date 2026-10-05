@@ -10,8 +10,9 @@ import { startRouter, setGuard, onRoute, isKnownHash, currentRoute } from './ui/
 import { initInstall } from './ui/install.js';
 import { refreshGender, careerGender } from './ui/gender.js';
 import { playIntro } from './ui/scene/intro.js';
+import * as daily from './core/daily.js';
 
-const PUBLIC_ROUTES = new Set(['/title', '/new', '/hof', '/settings', '/feedback', '/install']);
+const PUBLIC_ROUTES = new Set(['/title', '/new', '/hof', '/settings', '/feedback', '/install', '/leaderboard', '/friends', '/friends/join']);
 const AUTOSAVE_MS = 400;
 
 /* ------------------------------------------------------------------ */
@@ -130,14 +131,28 @@ async function openSlot(slot, { quiet = false } = {}) {
   // A lagging IndexedDB mirror is healed silently.
   if (r.repaired && r.source === 'idb') toast('שחזרנו את השמירה שלך מהגיבוי במכשיר ✓', { ms: 4500 });
   if (r.migratedFrom !== null && r.migratedFrom !== undefined) saveNow();
+  import('./core/friends.js').then((m) => m.syncMyCareer({})).catch(() => {});
   onGameChange(); // HoF safety net for retired careers
   snapshotOnOpen(); // v2.2: one career_snapshot per telemetry session (consent + backend checked inside)
   cancelAutosave();
   return { ok: true };
 }
 
-/** New career flow (SPEC §9.2 step 9). */
-async function startNewCareer(opts, slot) {
+/** v2.3 fast start: game.quickCareer (engine defaults: Israel, ST, top-6 club, youth star). Older engines: newCareer. */
+function createCareer(opts, quick) {
+  if (quick && typeof game.quickCareer === 'function') return game.quickCareer(opts);
+  if (quick) {
+    const o = { nation: 'isr', pos: 'ST', foot: 'R', ...opts };
+    if (!o.club) {
+      try { const g = game.getAcademyOptions('isr', { gender: o.gender }).groups[0]; o.club = g && g.clubs[0] && g.clubs[0].id; } catch { /* engine decides */ }
+    }
+    return game.newCareer(o);
+  }
+  return game.newCareer(opts);
+}
+
+/** New career flow (SPEC §9.2 step 9). opts3.quick: the v2.3 two-step fast start. */
+async function startNewCareer(opts, slot, opts3 = {}) {
   let has = false;
   try { has = game.hasCareer(); } catch { has = false; }
   if (has && ctx.activeSlot) { saveNow(); await flushAll(); }
@@ -151,7 +166,7 @@ async function startNewCareer(opts, slot) {
     occupied = !!(s && (!s.empty || s.corrupt || s.tooNew));
   } catch (e) { console.warn(e); }
   ctx.activeSlot = null;
-  const res = call(() => game.newCareer(opts));
+  const res = call(() => createCareer(opts, !!(opts3 && opts3.quick)));
   if (!res || !res.ok) {
     try { if (game.hasCareer() && prevSlot) ctx.activeSlot = prevSlot; } catch { /* ignore */ }
     return res || { ok: false, messageHe: 'לא הצלחנו ליצור את הקריירה. אפשר לנסות שוב.' };
@@ -396,7 +411,7 @@ function guard(info) {
   let has = false;
   try { has = game.hasCareer(); } catch { has = false; }
   if (info.path === '*') return has ? '#/hub' : '#/title';
-  if (!PUBLIC_ROUTES.has(info.path) && !has) return '#/title';
+  if (!PUBLIC_ROUTES.has(info.path) && !info.path.startsWith('/friends/') && !has) return '#/title';
   if (has) {
     const hub = hubSafe();
     if (hub && hub.status === 'retired' && ['/hub', '/match', '/season', '/offers'].includes(info.path)) return managerActive(hub) ? '#/manager' : '#/retire';
@@ -415,7 +430,12 @@ async function startIntro(gender) {
   try { skip = localStorage.getItem('hy.intro.skip') === '1'; } catch { skip = false; }
   if (skip || typeof playIntro !== 'function') return { played: false, done: false };
   let p;
-  try { p = Promise.resolve(playIntro(gender ? { gender } : {})); } catch (e) { console.warn('[hayeled] intro', e); return { played: false, done: false }; }
+  // v2.3 review: the full 8 s on the first visit; afterwards the last 3 s (the logo), and only 2 s for a challenge link
+  let seen = false, ch = false;
+  try { seen = !!localStorage.getItem('hy.intro.seen'); } catch { seen = false; }
+  try { ch = /[?&]c=/.test(location.search); } catch { ch = false; }
+  const startAt = ch ? 6 : seen ? 5 : 0;
+  try { p = Promise.resolve(playIntro(Object.assign(gender ? { gender } : {}, startAt ? { startAt } : {}))); } catch (e) { console.warn('[hayeled] intro', e); return { played: false, done: false }; }
   const r = await Promise.race([p.catch((e) => { console.warn('[hayeled] intro', e); return null; }), new Promise((res) => setTimeout(() => res(null), 14000))]);
   // a run that failed to render (or timed out) is neither "watched" nor "skipped": not tracked
   const res = { played: !!r && !r.off && !r.failed, done: !!(r && r.done) };
@@ -438,6 +458,9 @@ async function boot() {
   save.configure({ schemaVersion: game.SCHEMA_VERSION, appVersion: APP_VERSION, migrate: game.migrateState });
   try { ctx.storage = await save.initStorage(); } catch (e) { console.warn('[hayeled] initStorage', e); ctx.storage = { ls: false, idb: false }; }
 
+  // v2.3: the daily-reward streak lives outside the slots (localStorage + IndexedDB mirror)
+  try { await daily.sync(); } catch (e) { console.warn('[hayeled] daily', e); }
+
   // 2. Service worker
   registerSW();
 
@@ -448,6 +471,8 @@ async function boot() {
   try { svc.remote.onRemoteConfig((cfg) => applyRemote(cfg)); } catch (e) { console.warn(e); }
   try { const p = svc.remote.loadRemoteConfig(); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ }
   try { const p = svc.feedback.flushFeedbackQueue(); if (p && p.catch) p.catch(() => {}); } catch { /* ignore */ }
+  // v2.3: leaderboard submissions that waited for the network (no-op without a backend)
+  import('./core/leaderboard.js').then((m) => m.flushPending && m.flushPending()).catch(() => {});
 
   // 4. Install prompt capture
   try { initInstall(); } catch (e) { console.warn(e); }
@@ -486,6 +511,15 @@ async function boot() {
   // screens (settings, Hall of Fame, feedback, install) are kept. With the test flag 'hy.intro.skip' the
   // v2 resume behaviour stays (straight back to the career), which the e2e persistence scenarios rely on.
   if (intro.played && !(PUBLIC_ROUTES.has(startInfo.path) && !['/title', '/new'].includes(startInfo.path) && isKnownHash(startHash))) initial = '#/title';
+  // v2.3 (F11): a challenge link (?c=<code>) always opens on the title screen, where the challenge card waits
+  try { if (/[?&]c=/.test(location.search)) initial = '#/title'; } catch { /* ignore */ }
+  // friends league invite (?league=CODE): open the join card; also push this career to my leagues
+  try {
+    const fr = await import('./core/friends.js');
+    const leagueCode = fr.handleLeagueParam();
+    if (leagueCode) initial = '#/friends/join?code=' + leagueCode;
+    fr.syncMyCareer().then(() => fr.refreshLeagues()).catch(() => {});
+  } catch { /* optional module */ }
   setGuard(guard);
   onRoute((info) => {
     if (info.path === '/hub') {

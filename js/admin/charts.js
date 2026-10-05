@@ -361,3 +361,68 @@ export function rateBars(items, { empty = 'אין עדיין נתונים', colo
   wrap.appendChild(tip);
   return wrap;
 }
+
+/**
+ * v2.3 funnel: one horizontal bar per step (single series, one hue = magnitude), bar length = share of the
+ * first step. Between steps: how many dropped off; the biggest drop is marked with a word, not only a colour.
+ * steps: [{ key, name, count }] in funnel order (first = everyone). Hover / tap a row for the exact numbers.
+ */
+export function funnelBars(steps, { testid, color = '#3987e5', empty = 'אין עדיין נתונים' } = {}) {
+  const list = (Array.isArray(steps) ? steps : []).map((s) => ({ ...s, count: Math.max(0, Number(s.count) || 0) }));
+  const wrap = htmlEl('div', 'adm-chart adm-funnel-wrap');
+  if (testid) wrap.setAttribute('data-testid', testid);
+  const top = list.length ? list[0].count : 0;
+  if (!top) {
+    wrap.appendChild(htmlEl('div', 'adm-empty', empty));
+    return wrap;
+  }
+  // the biggest absolute drop between two consecutive steps (ties: the earlier one)
+  let worst = -1;
+  let worstN = 0;
+  for (let i = 1; i < list.length; i++) {
+    const d = list[i - 1].count - list[i].count;
+    if (d > worstN) { worstN = d; worst = i; }
+  }
+  const ol = htmlEl('ol', 'adm-funnel');
+  const tip = htmlEl('div', 'adm-tip');
+  tip.hidden = true;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  list.forEach((s, i) => {
+    const prev = i ? list[i - 1].count : s.count;
+    const drop = Math.max(0, prev - s.count);
+    if (i > 0) {
+      const dl = htmlEl('li', 'adm-funnel-drop' + (i === worst ? ' worst' : ''));
+      dl.setAttribute('aria-hidden', 'true');
+      dl.appendChild(htmlEl('span', 'arrow', '↓'));
+      dl.appendChild(htmlEl('span', '', drop ? (drop + ' נשרו כאן' + (prev ? ' (' + pct(drop, prev) + '%)' : '')) : 'אף אחד לא נשר כאן'));
+      if (i === worst) dl.appendChild(htmlEl('b', 'flag', 'הנפילה הגדולה ביותר'));
+      ol.appendChild(dl);
+    }
+    const li = htmlEl('li', 'adm-funnel-step');
+    if (s.key) li.setAttribute('data-step', s.key);
+    li.setAttribute('data-count', String(s.count));
+    li.appendChild(htmlEl('span', 'name', s.name));
+    li.appendChild(htmlEl('span', 'num', s.count + ' · ' + pct(s.count, top) + '%'));
+    const track = htmlEl('span', 'track');
+    const bar = htmlEl('span', 'bar');
+    bar.style.width = (s.count ? Math.max(1.5, (s.count / top) * 100) : 0) + '%';
+    bar.style.background = color;
+    track.appendChild(bar);
+    li.appendChild(track);
+    const show = (ev) => {
+      tip.textContent = s.name + ': ' + s.count + ' מתוך ' + top + ' (' + pct(s.count, top) + '%)'
+        + (i ? ' · מהשלב הקודם: ' + pct(s.count, prev) + '%' : '');
+      tip.hidden = false;
+      placeTip(tip, wrap, ev.clientX, ev.clientY);
+    };
+    li.addEventListener('pointermove', show);
+    li.addEventListener('pointerdown', show);
+    li.addEventListener('pointerleave', () => { tip.hidden = true; });
+    ol.appendChild(li);
+  });
+  wrap.appendChild(ol);
+  wrap.appendChild(tip);
+  wrap.appendChild(tableView(['שלב', 'מכשירים', 'מכל הנכנסים', 'מהשלב הקודם'],
+    list.map((s, i) => [s.name, String(s.count), pct(s.count, top) + '%', i ? pct(s.count, list[i - 1].count) + '%' : '–'])));
+  return wrap;
+}

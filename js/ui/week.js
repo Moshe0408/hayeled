@@ -10,6 +10,23 @@ import { gtext, g } from './gender.js';
 import { celebrate } from './scene/celebration.js';
 import { ico } from './icons.js';
 import { weekLoadLine, bandOf, bandHe } from './training.js';
+import * as STR from '../data/strings.js';
+import { submitSeason } from './leaderboard.js';
+import { afterWeekNudges } from './nudges.js';
+import { tomorrowTeaser } from './progress.js';
+
+/* v2.3 (F9): "המשך עד האירוע הבא" stop reasons from the content table (FF_STOPS.reasons), engine keys */
+function stopHe(key, s) {
+  const R = (STR.FF_STOPS && STR.FF_STOPS.reasons) || {};
+  const k = String(key || '');
+  const t = R[k] || STOP_HE[k];
+  if (!t) return '';
+  const info = (s && s.stopInfo) || {};
+  const v = { he: info.he || '', comp: info.he || (s && s.results && s.results[0] && s.results[0].compHe) || '', opp: '', n: '' };
+  const out = gtext(String(t).replace(/\{(\w+)\}/g, (m, x) => (v[x] ? String(v[x]) : ''))).replace(/:\s*$/, '').trim();
+  if (!out) return '';
+  return R[k] ? 'עצרנו: ' + out : out;
+}
 
 const STOP_HE = {
   until: '', offer: 'עצרנו: הגיעה הצעה חדשה', event: 'עצרנו: יש הודעה שמחכה לתשובה', review: 'העונה הסתיימה',
@@ -44,7 +61,8 @@ export function showWeekSummary(summary, extra = {}) {
   const promiseHe = s.promiseHe || s.talkHe || '';
   const promiseBad = s.promiseKept === false || ((s.promiseKept === undefined || s.promiseKept === null) && /הפר|לא עמד|לא קיים|קיבלת הזדמנות/.test(promiseHe));
   const lines = (s.linesHe || []).filter((l) => !promiseHe || l !== promiseHe);
-  const stopLine = extra.stopped && STOP_HE[extra.stopped] ? `<p class="note">${esc(STOP_HE[extra.stopped])}</p>` : '';
+  const stopTxt = extra.stopped ? stopHe(extra.stopInfo && extra.stopInfo.kind ? extra.stopInfo.kind : extra.stopped, { ...s, stopInfo: extra.stopInfo }) || (extra.stopInfo && extra.stopInfo.he ? 'עצרנו: ' + extra.stopInfo.he : '') : '';
+  const stopLine = stopTxt ? `<p class="note good ws-stop" data-testid="ff-stop-reason">${ico('spark', 'gold')} ${esc(stopTxt)}</p>` : '';
   const html = `
     <h2 class="modal-title">${extra.ffWeeks > 1 ? `קפצנו ${esc(extra.ffWeeks)} שבועות` : 'סיכום השבוע'}</h2>
     <div class="muted small">${esc(s.dateHe || '')}</div>
@@ -65,6 +83,7 @@ export function showWeekSummary(summary, extra = {}) {
     ${s.trainingHe ? `<p class="small">${ico('dumbbell', 'teal')} ${esc(s.trainingHe)}</p>` : ''}
     ${lines.length ? `<ul class="ws-lines">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
     ${s.newMessages || s.newOffers ? `<div class="chips">${s.newMessages ? `<span class="chip">${ico('chat')} ${s.newMessages === 1 ? 'הודעה חדשה' : esc(s.newMessages) + ' הודעות חדשות'}</span>` : ''}${s.newOffers ? `<span class="chip gold">${ico('mail')} ${s.newOffers === 1 ? 'הצעה חדשה' : esc(s.newOffers) + ' הצעות חדשות'}</span>` : ''}</div>` : ''}
+    ${tomorrowTeaser()}
     <button type="button" class="btn btn-primary btn-lg" data-testid="btn-week-ok" data-close>המשך</button>`;
   const close = openModal(html, { testid: 'week-summary', sheet: true, onClose: (why) => { if (why !== 'nav') afterSummary(s); } });
   return close;
@@ -78,6 +97,8 @@ function afterSummary(s) {
     navigate('#/season');
     return;
   }
+  // v2.3 review: one interrupting card (first pro contract / daily reward / a reward the stars can buy) instead of an ad
+  try { if (afterWeekNudges()) return; } catch { /* ignore */ }
   afterWeekAds(s);
 }
 
@@ -103,7 +124,7 @@ export function render(root) {
       <div>${esc(rv.clubHe || '')}${rv.leagueHe ? ' · ' + esc(rv.leagueHe) : ''}</div>
       ${rv.rankHe ? `<div class="rank-line">${esc(rv.rankHe)}</div>` : ''}
     </section>
-    ${(rv.trophies || []).length ? card(`<div class="trophy-row">${rv.trophies.map((t) => `<span class="trophy">${ico('trophy', 'gold')}<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'תארים', cls: 'gold-card' }) : ''}
+    ${(rv.trophies || []).length ? card(`<div class="trophy-row">${rv.trophies.map((t) => `<span class="trophy">${ico('trophy', 'gold')}<b>${esc(t.he)}</b></span>`).join('')}</div><button type="button" class="btn btn-glass btn-sm" data-act="share-trophy" data-testid="btn-share-trophy">${ico('upload', 'gold')}שתף את התואר</button>`, { title: 'תארים', cls: 'gold-card' }) : ''}
     ${(rv.awards || []).length ? card(`<div class="trophy-row">${rv.awards.map((t) => `<span class="trophy">${ico('medal', 'gold')}<b>${esc(t.he)}</b></span>`).join('')}</div>`, { title: 'פרסים אישיים' }) : ''}
     ${card(statGrid([
       { label: 'הופעות', value: st.apps ?? 0 }, { label: 'שערים', value: st.goals ?? 0 }, { label: 'בישולים', value: st.assists ?? 0 },
@@ -136,10 +157,14 @@ export function render(root) {
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
     if (!b || busy) return;
+    if (b.dataset.act === 'share-trophy') {
+      import('./sharecard.js').then((m) => m.shareMoment({ kind: 'trophy', titleHe: (rv.trophies || []).map((t) => t.he).join(' · '), vars: { trophy: ((rv.trophies || [])[0] || {}).he || '' } })).catch(() => {});
+      return;
+    }
     if (b.dataset.act === 'ok') {
       busy = true;
       const h = hubSafe();
-      if (h && h.status === 'review') call(() => game.ackSeasonReview());
+      if (h && h.status === 'review') { call(() => game.ackSeasonReview()); submitSeason().catch(() => {}); import('../core/friends.js').then((m) => m.syncMyCareer({ force: true })).catch(() => {}); }
       if (rv.isFirstSeason && pending) ctx.pendingPrompt = 'season1';
       navigate('#/hub');
       busy = false;

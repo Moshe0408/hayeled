@@ -231,6 +231,21 @@ function active() {
 //                    stage, careerId, why}  built by js/ui/app.js (careerSnapshot); admin_players reads the latest
 //                    one per (device, careerId). name = the character name chosen in the game (first + last, <= 40).
 //   career_started  also carries {name, nick} since 2.2
+// ---------- v2.3 event shapes (supabase/update-2.3.sql admin_funnel reads these exact props) ----------
+//   onboarding_step  {step}            step: open | gender | name | random | advanced | kickoff (<= 24 chars, [a-z0-9_])
+//   first_match_done {scored?}         the debut match is over (engine signal)
+//   week_reached     {n}               n in WEEK_MILESTONES only (any other n is dropped here, never queued)
+//   daily_reward     {day, streak}     day 1..7 of the 7-day calendar, streak = days in a row
+//   achievement      {id, tier}        tier: bronze | silver | gold (engine signal)
+//   objective_done   {id, kind}        kind: weekly | season (engine signal)
+//   share            {kind, method}    kind: goal | achievement | promotion | trophy | challenge | card | ...
+//                                      method: share (Web Share) | download | whatsapp | copy | cancel
+//   leaderboard_view {kind, period}    kind: legacy | goals | ballon, period: all | week
+//   challenge_open   {valid}           a ?c=<code> challenge link was opened (valid = the code decoded)
+export const WEEK_MILESTONES = [1, 3, 5, 10, 20, 40];
+const SLUG_RE = /[^a-z0-9_]/g;
+const slug = (v, n = 24, d = '?') => String(v == null ? '' : v).toLowerCase().replace(SLUG_RE, '').slice(0, n) || d;
+const intIn = (v, lo, hi) => { const x = Math.floor(Number(v)); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : null; };
 const INTENSITIES = ['light', 'normal', 'hard', 'extreme'];
 const APPROACHES = ['ask', 'demand', 'threat'];
 const isTrue = (v) => v === true || v === 'true' || v === 1;
@@ -266,6 +281,26 @@ function normProps(name, props) {
   if ((name === 'training' || name === 'burnout' || name === 'injury_training' || name === 'coach_talk') && p.n !== undefined) {
     p.n = Math.max(1, Math.min(500, Math.floor(Number(p.n) || 1)));
   }
+  // ---- v2.3 ----
+  if (name === 'week_reached') {
+    const n = Math.floor(Number(p.n));
+    if (!WEEK_MILESTONES.includes(n)) return null;   // only the funnel milestones are ever sent
+    return { n };
+  }
+  if (name === 'onboarding_step') return { ...p, step: slug(p.step) };
+  if (name === 'first_match_done') { if (p.scored !== undefined) p.scored = isTrue(p.scored); }
+  if (name === 'daily_reward') {
+    p.day = intIn(p.day, 1, 7) || 1;
+    if (p.streak !== undefined) p.streak = intIn(p.streak, 0, 100000);
+  }
+  if (name === 'achievement' || name === 'objective_done') {
+    p.id = cutText(String(p.id == null ? '' : p.id), 40) || '?';
+    if (name === 'achievement' && p.tier !== undefined) p.tier = slug(p.tier, 12);
+    if (name === 'objective_done' && p.kind !== undefined) p.kind = slug(p.kind, 12);
+  }
+  if (name === 'share') { p.kind = slug(p.kind); p.method = slug(p.method, 16, 'share'); }
+  if (name === 'leaderboard_view') { p.kind = slug(p.kind, 12, 'legacy'); p.period = p.period === 'week' ? 'week' : 'all'; }
+  if (name === 'challenge_open') p.valid = p.valid === undefined ? true : isTrue(p.valid);
   return p;
 }
 
@@ -273,8 +308,10 @@ export function track(name, props = {}) {
   try {
     if (!active()) return;
     if (typeof name !== 'string' || !NAME_RE.test(name)) return;
+    const np = normProps(name, props);
+    if (!np) return;   // dropped by design (e.g. week_reached with a non-milestone n)
     const q = readQueue();
-    q.push({ i: eid(), n: name, p: cleanProps(normProps(name, props)), t: new Date().toISOString(), s: getSessionId() });
+    q.push({ i: eid(), n: name, p: cleanProps(np), t: new Date().toISOString(), s: getSessionId() });
     writeQueue(q);
     touchSession();
     if (q.length >= FLUSH_AT && inited) flush().catch(() => {});
@@ -326,6 +363,32 @@ export function trackSignals(signals) {
 /** The intro finished (done=true) or was skipped (done=false). Safe to call before initTelemetry(). */
 export function trackIntro(done) {
   track('intro', { done: !!done });
+}
+
+// ---------- v2.3 helpers for the UI (all no-ops without backend / consent; never throw) ----------
+const onbSent = new Set();   // one onboarding_step per step per page load
+/** Fast-start funnel step: 'open' | 'gender' | 'name' | 'random' | 'advanced' | 'kickoff'. Deduped per page load. */
+export function trackOnboarding(step, extra = {}) {
+  const s = slug(step);
+  if (onbSent.has(s)) return;
+  onbSent.add(s);
+  track('onboarding_step', { ...(extra && typeof extra === 'object' ? extra : {}), step: s });
+}
+/** The daily reward sheet was claimed: day 1..7 of the calendar, streak = days in a row. */
+export function trackDailyReward(day, streak) {
+  track('daily_reward', { day, streak });
+}
+/** A share card / challenge link was shared. method: 'share' | 'download' | 'whatsapp' | 'copy' | 'cancel'. */
+export function trackShare(kind, method = 'share') {
+  track('share', { kind, method });
+}
+/** The leaderboard screen (or one of its tabs) was opened. */
+export function trackLeaderboardView(kind = 'legacy', period = 'all') {
+  track('leaderboard_view', { kind, period });
+}
+/** A ?c=<code> challenge link was opened (valid = the code decoded into a challenge card). */
+export function trackChallengeOpen(valid = true) {
+  track('challenge_open', { valid: !!valid });
 }
 
 const inflight = new Set();   // queue ids currently being sent (never sent twice concurrently)

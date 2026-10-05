@@ -1,5 +1,5 @@
 // Headless career simulation through the facade only (SPEC §10.1).
-// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--mgr-seasons 6] [--seed 1] [--quick] [--gender m|f|both]   (default both: every career runs as a boy and as a girl)
+// Usage: node tests/sim.mjs [--careers 12] [--seasons 25] [--mgr-seasons 6] [--seed 1] [--quick] [--gender m|f|both] [--v23-only]   (default both: every career runs as a boy and as a girl)
 // v2.1: every career that retires goes on to a coaching career (best retirement offer -> --mgr-seasons manager seasons).
 import * as game from '../js/engine/game.js';
 import { rngFor, hash32 } from '../js/core/rng.js';
@@ -15,7 +15,8 @@ const SEASONS = QUICK ? 6 : arg('seasons', 25);
 const SEED = arg('seed', 1);
 const MGR_SEASONS = QUICK ? 3 : arg('mgr-seasons', 6);
 const VERBOSE = argv.includes('--verbose');
-const V22_ONLY = argv.includes('--v22-only');   // only the v2.2 training-load / coach-talk section
+const V23_ONLY = argv.includes('--v23-only');   // only the v2.3 progression section
+const V22_ONLY = argv.includes('--v22-only') || V23_ONLY;   // only the v2.2 training-load / coach-talk section
 const GARG = (() => { const i = argv.indexOf('--gender'); return i >= 0 && argv[i + 1] ? argv[i + 1] : 'both'; })();
 const GENDERS = GARG === 'm' ? ['m'] : GARG === 'f' ? ['f'] : ['m', 'f'];
 
@@ -204,6 +205,10 @@ const GETTERS = [
   ['getAwards', () => game.getAwards()], ['getShop', () => game.getShop()], ['getRetirement', () => game.getRetirement()],
   ['getSaveMeta', () => game.getSaveMeta()], ['getManager', () => game.getManager()],
   ['canTalkToCoach', () => game.canTalkToCoach()], ['getTrainingPreview', () => game.getTrainingPreview('balanced', 'hard')], ['getTrainingPreview:rest', () => game.getTrainingPreview('rest')],
+  // v2.3
+  ['getObjectives', () => game.getObjectives()], ['getAchievements', () => game.getAchievements()], ['getStars', () => game.getStars()], ['getCosmetics', () => game.getCosmetics()],
+  ['getPath', () => game.getPath()], ['getStakes', () => game.getStakes()], ['getTutorial', () => game.getTutorial()], ['getCareerSummaryForBoard', () => game.getCareerSummaryForBoard()],
+  ['getDailyPreview', () => game.getDailyPreview()],
 ];
 function purityCheck(tag) {
   checkCounts.purity++;
@@ -891,6 +896,9 @@ function coachingRoles() {
     for (const [legacy, want] of [[650, (o) => o.kind === 'nation'], [170, (o) => o.role === 'assistant'], [15, (o) => o.role === 'youth']]) {
       const st = JSON.parse(JSON.stringify(snap));
       st.retired.legacy = legacy; st.mgr = null;
+      // v2.3 careers are stronger: fame and trophies alone can lift the band, so isolate the legacy (the point of this check)
+      if (st.player && st.player.rep) st.player.rep.w = 0;
+      st.hist.trophies = [];
       const lr = game.loadState(st);
       if (!lr.ok) { fail('coachingRoles loadState', lr); continue; }
       game.ensureCoachingOffers();
@@ -1005,7 +1013,9 @@ function trainingPolicies() {
   chkP(A.extreme.peak <= A.normal.peak + 0.25, 'always-extreme must not beat normal on peak OVR ' + JSON.stringify([A.extreme.peak, A.normal.peak]));
   chkP(A.rest.sharp < 35, 'always-rest sharpness should be low ' + A.rest.sharp);
   chkP(A.rest.peak < A.normal.peak - 5, 'always-rest should progress much less ' + JSON.stringify([A.rest.peak, A.normal.peak]));
-  for (const k of Object.keys(A)) if (k !== 'smart') chkP(A.smart.peak > A[k].peak, 'smart should have the highest mean peak OVR (vs ' + k + ') ' + JSON.stringify([A.smart.peak, A[k].peak]));
+  // v2.3: careers start at OVR 60 with potential 82-94 and the potential is a hard ceiling, so good policies can tie at the
+  // ceiling (smart within 0.5 of the best one)
+  for (const k of Object.keys(A)) if (k !== 'smart') chkP(A.smart.peak > A[k].peak || A.smart.peak >= A[k].peak - 0.5, 'smart should have the highest mean peak OVR (vs ' + k + ') ' + JSON.stringify([A.smart.peak, A[k].peak, A.smart.ovr25, A[k].ovr25]));
 }
 
 // coach talk: odds vs outcomes, the promise, no talk before the bench run
@@ -1100,10 +1110,13 @@ function trainingApiChecks() {
       for (const k of ['energyDelta', 'loadDelta', 'growthMult', 'sharpDelta', 'injuryRiskHe', 'warnHe']) if (pv[it][k] === undefined) fail('preview.' + k + ' missing', it);
     }
     if (!(pv.hard.energyDelta < pv.normal.energyDelta && pv.hard.loadDelta > pv.normal.loadDelta && pv.hard.growthMult > pv.normal.growthMult)) fail('hard preview should cost more and grow more', [pv.hard, pv.normal]);
-    // a 15-year-old cannot train at extreme
+    // a player under the minimum age cannot train at extreme (v2.3: careers start at 16, so check against the hub age)
+    const ageX = game.getHub().player.age;
     const ex = game.setTraining('balanced', 'extreme');
-    if (ex.ok) fail('extreme intensity allowed under 16');
-    if (!pv.extreme.locked) fail('extreme preview should be locked under 16');
+    if (ageX < 16 && ex.ok) fail('extreme intensity allowed under 16');
+    if (ageX < 16 && !pv.extreme.locked) fail('extreme preview should be locked under 16');
+    if (ageX >= 16 && !ex.ok) fail('extreme intensity refused at 16+', ex);
+    game.setTraining('balanced', 'normal');
     const rs = chk('getTrainingPreview(rest)', game.getTrainingPreview('rest'));
     if (rs.growthMult !== 0 || rs.loadDelta >= 0) fail('rest preview', rs);
     const ok = game.setTraining('balanced', 'hard');
@@ -1136,7 +1149,7 @@ function migrationV4Check() {
   if (!lr.ok) { fail('migrated v3 state does not load', lr); return; }
   const S = game.serialize();
   const p = S.player;
-  if (S.v !== 4 || S.trainInt !== 'normal' || p.load !== 20 || p.sharp !== 60 || p.benchRun !== 0 || p.lowMin !== 0 || !p.talk || p.talk.lastWeekAbs !== -99 || p.talk.promise !== null) fail('v4 migration defaults', [S.v, S.trainInt, p.load, p.sharp, p.benchRun, p.lowMin, p.talk]);
+  if (S.v !== game.SCHEMA_VERSION || S.trainInt !== 'normal' || p.load !== 20 || p.sharp !== 60 || p.benchRun !== 0 || p.lowMin !== 0 || !p.talk || p.talk.lastWeekAbs !== -99 || p.talk.promise !== null) fail('v4 migration defaults', [S.v, S.trainInt, p.load, p.sharp, p.benchRun, p.lowMin, p.talk]);
   walkAll('migrated-v4');
   const f1 = game.fastForward({ until: 'weeks', weeks: 3 });
   if (!f1.ok) fail('migrated v4 career does not advance', f1);
@@ -1185,6 +1198,255 @@ function v22Determinism() {
   }
 }
 
+
+// ---------------- v2.3 progression (docs: "אין רגע דל, כל משחק משחק"): fast start, youth star start, the scripted debut,
+// objectives, achievements, stars, cosmetics, path, stakes, quiet weeks, daily rewards, the board summary, the v5 migration.
+const v23 = { careers: 0, debuts: 0, debutGoals: 0, starsPerWeek: [], objDone: 0, achUnlocked: 0, firstTeamShare: [], quietWeeks: 0, emptyWeeks: 0, stakesSeen: {}, ffStops: {}, sec: 0 };
+const TOP6 = ['isr_mta', 'isr_mhaifa', 'isr_hbs', 'isr_beitar', 'isr_hta', 'isr_hhaifa'];
+function v23Start(tag) {
+  const h = chk('getHub(v23)', game.getHub());
+  const S = game.serialize();
+  if (!(h.player.ovr >= 59 && h.player.ovr <= 61)) fail(tag + ' start OVR not 60+-1', h.player.ovr);
+  if (h.player.age !== 16) fail(tag + ' start age not 16', h.player.age);
+  if (!(S.player.pot >= 82 && S.player.pot <= 94)) fail(tag + ' start potential not 82-94', S.player.pot);
+  if (S.player.stage !== 'youth' || !S.player.contract || S.player.contract.role !== 'prospect' || !S.player.fts) fail(tag + ' not a first-team prospect', [S.player.stage, S.player.contract && S.player.contract.role, S.player.fts]);
+  if (!S.meta || S.meta.tut.st !== 'pending') fail(tag + ' tutorial not pending', S.meta && S.meta.tut);
+  const ob = chk('getObjectives(v23)', game.getObjectives());
+  if (ob.weekly.length !== 3 || !ob.season) fail(tag + ' objectives at start', ob);
+  for (const o of ob.weekly) if (!(o.progress >= 0 && o.progress <= o.target) || !o.he || !(o.rewardStars > 0)) fail(tag + ' bad objective', o);
+  const pa = chk('getPath(v23)', game.getPath());
+  if (!pa.next || pa.next.id !== 'debut' || pa.steps.length < 10) fail(tag + ' path at start', pa.next);
+  const ach = chk('getAchievements(v23)', game.getAchievements());
+  if (ach.length < 50) fail(tag + ' fewer than 50 achievements', ach.length);
+  if (ach.some((a) => a.unlocked)) fail(tag + ' achievement unlocked at start', ach.filter((a) => a.unlocked).map((a) => a.id));
+  for (const a of ach) if (['bronze', 'silver', 'gold'].indexOf(a.tier) < 0 || !a.he || !(a.target >= 1) || !(a.progress >= 0 && a.progress <= a.target)) { fail(tag + ' bad achievement row', a); break; }
+  const st = chk('getStars(v23)', game.getStars());
+  if (st.balance !== 0 || st.earnedTotal !== 0) fail(tag + ' stars at start', st);
+  const co = chk('getCosmetics(v23)', game.getCosmetics());
+  for (const s of ['boots', 'celebration', 'frame', 'accessory']) if (!co.equipped[s]) fail(tag + ' no default cosmetic for ' + s, co.equipped);
+}
+// play the debut: option strategy k (0..2 = always that option, 3 = auto)
+function v23Debut(tag, k) {
+  const sig = [];
+  let a = chk('advanceWeek(debut)', game.advanceWeek());
+  for (const s of game.getAndClearSignals()) sig.push(s);
+  if (!a.ok || a.status !== 'match') { fail(tag + ' week 1 has no debut match', a.status || a.error); return null; }
+  const pre = chk('getStakes(debut)', game.getStakes());
+  if (!pre.live || !pre.stakes.some((s) => s.kind === 'debut') || !pre.goal) fail(tag + ' debut stakes', pre);
+  let m = chk('startMatch(debut)', game.startMatch());
+  if (!m.tutorial) fail(tag + ' live match not flagged tutorial');
+  if (k < 3) { let g = 0; while (m.phase === 'live' && m.moment && g++ < 10) m = chk('chooseMoment(debut)', game.chooseMoment(Math.min(k, m.moment.options.length - 1))).match; }
+  if (m.phase !== 'ended') m = chk('autoPlayMatch(debut)', game.autoPlayMatch());
+  const sum = chk('finishMatch(debut)', game.finishMatch());
+  for (const s of game.getAndClearSignals()) sig.push(s);
+  v23.debuts++;
+  if (!(sum.goals >= 1)) fail(tag + ' debut without a goal', sum.score);
+  else v23.debutGoals++;
+  if (!sum.log.some((e) => e.ev === 'goal' && e.who === 'me' && e.mega)) fail(tag + ' debut goal without a mega celebration');
+  const card = sum.tutorial;
+  if (!card || !card.titleHe || !card.achievement || !(card.stars > 0) || !card.nextHe) fail(tag + ' bad debut card', card);
+  if (!sum.stakes || !sum.stakes.items.length || !sum.stakes.goal || !sum.stakes.goal.ok) fail(tag + ' debut stakes not resolved', sum.stakes);
+  if (game.getTutorial().st !== 'done') fail(tag + ' tutorial not done after the debut');
+  if (sig.filter((s) => s.name === 'first_match_done').length !== 1) fail(tag + ' first_match_done signal', sig.map((s) => s.name));
+  const achIds = sig.filter((s) => s.name === 'achievement').map((s) => s.props.id);
+  if (achIds.indexOf('debut') < 0 || achIds.indexOf('first_goal') < 0) fail(tag + ' debut achievements', achIds);
+  a = chk('resumeWeek(debut)', game.resumeWeek());
+  if (a.ok && a.status === 'match') { game.autoPlayMatch(); game.finishMatch(); a = game.resumeWeek(); }
+  game.getAndClearSignals();
+  return sum;
+}
+// a normal policy for n weeks: accept pro / renewal offers, answer events, play matches (auto or option 0)
+function v23Play(tag, weeks, opts = {}) {
+  const res = { weeks: 0, matches: 0, ft: 0, quiet: 0, empty: 0, stars0: game.getStars().earnedTotal, signals: [], minBal: Infinity, dry: 0, maxDry: 0 };
+  for (let w = 0; w < weeks; w++) {
+    let S = game.serialize();
+    if (S.retired) break;
+    if (S.pending.review !== null) { game.ackSeasonReview(); continue; }
+    for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept && (o.type === 'pro' || o.type === 'renewal' || (opts.move && o.type === 'transfer'))) game.respondOffer(o.id, 'accept');
+    for (const it of game.getInbox()) { if (!it.needsAnswer) continue; const th = game.getThread(it.id); const ch = (th.choices || []).filter((c) => !c.disabled); if (ch.length) game.answerEvent(it.id, ch[0].index); }
+    const focus = w % 11 === 10 ? 'rest' : 'balanced';
+    let a = game.advanceWeek({ focus, intensity: w % 5 === 2 ? 'hard' : 'normal' });
+    while (a.ok && a.status === 'match') {
+      const st = chk('getStakes(live)', game.getStakes());
+      if (!st.live || !st.stakes.length || !st.goal) fail(tag + ' live match without stakes', st);
+      for (const s of st.stakes) v23.stakesSeen[s.kind] = (v23.stakesSeen[s.kind] || 0) + 1;
+      const L = game.serialize().live;
+      if (w % 2) chk('autoPlayMatch(v23)', game.autoPlayMatch());
+      else { let m = game.startMatch(); let g = 0; while (m.phase === 'live' && m.moment && g++ < 12) m = game.chooseMoment(0).match; if (m.phase !== 'ended') game.autoPlayMatch(); }
+      const sum = chk('finishMatch(v23)', game.finishMatch());
+      if (!sum.stakes || !sum.stakes.goal || sum.stakes.items.some((x) => typeof x.ok !== 'boolean' || !x.resultHe)) fail(tag + ' match stakes not resolved', sum.stakes);
+      res.matches++;
+      if (['league', 'cup', 'europe'].indexOf(L.fx.kind) >= 0) res.ft++;
+      // v2.3 review (form governor): an attacker never goes more than 4 senior games (20+ minutes) without a goal or an assist
+      if (['league', 'cup', 'europe', 'national', 'friendly'].indexOf(L.fx.kind) >= 0 && ['ST', 'LW', 'RW'].indexOf(game.serialize().player.pos) >= 0 && (sum.minutes || 0) >= 20) {
+        res.dry = (sum.goals || 0) + (sum.assists || 0) > 0 ? 0 : res.dry + 1;
+        res.maxDry = Math.max(res.maxDry, res.dry);
+      }
+      a = game.resumeWeek();
+    }
+    if (!a.ok) { if (a.error === 'review_pending') continue; break; }
+    const sm = chk('summary(v23)', a.summary);
+    res.weeks++;
+    S = game.serialize();
+    if (S.meta.st.bal < 0 || S.meta.st.earn < S.meta.st.bal) fail(tag + ' stars ledger broken', S.meta.st);
+    res.minBal = Math.min(res.minBal, S.meta.st.bal);
+    const wk = S.week === 1 ? 52 : S.week - 1;
+    if (wk <= 44 && !sm.hadMatchday && !sm.injuryHe && focus !== 'rest' && !S.player.injury) { if (sm.quiet) res.quiet++; else res.empty++; }
+    for (const s of game.getAndClearSignals()) res.signals.push(s);
+    const ob = game.getObjectives();
+    for (const o of ob.weekly) if (!(o.progress >= 0 && o.progress <= o.target)) fail(tag + ' objective progress out of range', o);
+  }
+  res.stars = game.getStars().earnedTotal - res.stars0;
+  return res;
+}
+function v23Migration() {
+  CUR_G = 'm';
+  // an active v4 player career below OVR 60 -> lifted once to 60 with the coach's message
+  game.newCareer({ ...careerOpts(3, 'm'), seed: hash32(SEED, 'mig5'), now: 0 });
+  game.fastForward({ until: 'weeks', weeks: 4 });
+  const base = JSON.parse(JSON.stringify(game.serialize()));
+  const down = (s, ovr) => { s.v = 4; delete s.meta; const p = s.player; const w = { ST: 1 }; for (const k of Object.keys(p.a)) p.a[k] = Math.max(1, p.a[k] - 14); p.peak = 50; p.pot = 70; return s; };
+  const v4 = down(JSON.parse(JSON.stringify(base)));
+  const ovr4 = (() => { game.loadState(Object.assign(JSON.parse(JSON.stringify(v4)), { v: game.SCHEMA_VERSION, meta: null })); return game.getHub().player.ovr; })();
+  const m = game.migrateState(JSON.parse(JSON.stringify(v4)), 4);
+  const lr = game.loadState(m);
+  if (!lr.ok) { fail('v5 migration: state does not load', lr); return; }
+  const h = game.getHub();
+  const S = game.serialize();
+  if (!(ovr4 < 60)) warn('v5 migration test: OVR before the lift was ' + ovr4);
+  if (h.player.ovr !== 60 || S.player.pot < 82 || !S.meta || !S.meta.m5) fail('v5 migration: OVR lift', [h.player.ovr, S.player.pot, S.meta && S.meta.m5]);
+  const msgs = S.inbox.filter((it) => it.lines.some((l) => l.t.indexOf('קפיצת מדרגה') >= 0));
+  if (msgs.length !== 1) fail('v5 migration: inbox message count', msgs.length);
+  if (S.meta.tut.st !== 'skip') fail('v5 migration: an old career must not replay the tutorial', S.meta.tut.st);
+  walkAll('migrated-v5');
+  // idempotent: the flag stops a second lift / message
+  const again = JSON.parse(JSON.stringify(game.serialize()));
+  again.v = 4;
+  for (const k of Object.keys(again.player.a)) again.player.a[k] = Math.max(1, again.player.a[k] - 10);
+  game.loadState(game.migrateState(again, 4));
+  const S2 = game.serialize();
+  if (game.getHub().player.ovr >= 60 || S2.inbox.filter((it) => it.lines.some((l) => l.t.indexOf('קפיצת מדרגה') >= 0)).length !== 1) fail('v5 migration not idempotent', game.getHub().player.ovr);
+  // a retired career is untouched
+  const ret = down(JSON.parse(JSON.stringify(base)));
+  ret.retired = { season: ret.season, week: ret.week, age: 34, reason: 'voluntary', legacy: 10 };
+  ret.player.stage = 'retired';
+  const before = JSON.stringify(ret.player.a);
+  const mr = game.migrateState(ret, 4);
+  if (JSON.stringify(mr.player.a) !== before) fail('v5 migration touched a retired career');
+  // the migrated career keeps playing
+  game.loadState(game.migrateState(JSON.parse(JSON.stringify(v4)), 4));
+  const f1 = game.fastForward({ until: 'weeks', weeks: 3 });
+  if (!f1.ok) fail('migrated v5 career does not advance', f1);
+  checkCounts.migrate++;
+}
+function v23Checks() {
+  const T0 = Date.now();
+  for (const gender of GENDERS) {
+    CUR_G = gender;
+    for (let k = 1; k <= 4; k++) {
+      const tag = 'v23 ' + gender + k;
+      const r = chk('quickCareer', game.quickCareer({ gender, random: true, seed: k * 7919, now: 0 }));
+      if (!r.ok) { fail(tag + ' quickCareer failed', r); continue; }
+      const S0 = game.serialize();
+      if (S0.player.nation !== 'isr' || S0.player.pos !== 'ST' || TOP6.indexOf(S0.player.club) < 0) fail(tag + ' quick defaults', [S0.player.nation, S0.player.pos, S0.player.club]);
+      if (!S0.player.first || !S0.player.last) fail(tag + ' random name');
+      game.getAndClearSignals();
+      v23Start(tag);
+      v23.careers++;
+      const sum = v23Debut(tag, k - 1);
+      if (!sum) continue;
+      const pl = v23Play(tag, QUICK ? 30 : 60, { move: k % 2 === 0 });
+      v23.starsPerWeek.push(+(pl.stars / Math.max(1, pl.weeks)).toFixed(1));
+      v23.firstTeamShare.push(+(pl.ft / Math.max(1, pl.weeks)).toFixed(2));
+      v23.quietWeeks += pl.quiet; v23.emptyWeeks += pl.empty;
+      const od = pl.signals.filter((s) => s.name === 'objective_done').length;
+      const au = pl.signals.filter((s) => s.name === 'achievement').length;
+      v23.objDone += od; v23.achUnlocked += au;
+      if (od < 3) fail(tag + ' fewer than 3 objectives done in ' + pl.weeks + ' weeks', od);
+      if (pl.minBal < 0) fail(tag + ' negative stars', pl.minBal);
+      v23.maxDry = Math.max(v23.maxDry || 0, pl.maxDry);
+      if (pl.maxDry > 4) fail(tag + ' an attacker went ' + pl.maxDry + ' senior games without a goal or an assist (form governor)');
+      const wr = pl.signals.filter((s) => s.name === 'week_reached').map((s) => s.props.n);
+      if (wr.indexOf(5) < 0 || wr.indexOf(10) < 0) fail(tag + ' week_reached signals', wr);
+      const ach = game.getAchievements();
+      if (ach.filter((a) => a.unlocked).length < 4) fail(tag + ' too few achievements after ' + pl.weeks + ' weeks', ach.filter((a) => a.unlocked).map((a) => a.id));
+      // stars shop: cosmetics / boosts never take the balance below zero
+      const co = game.getCosmetics();
+      const poor = co.items.find((c) => !c.owned && c.price > co.balance && c.slot !== 'boost');
+      if (poor) { const b0 = game.getStars().balance; const rr = game.spendStars(poor.id); if (rr.ok || game.getStars().balance !== b0) fail(tag + ' bought without enough stars', poor.id); }
+      const cheap = co.items.filter((c) => c.canBuy && c.slot !== 'boost').sort((x, y) => x.price - y.price)[0];
+      if (cheap) {
+        const s0 = game.getStars();
+        const rr = chk('spendStars', game.spendStars(cheap.id));
+        const s1 = game.getStars();
+        // the purchase itself may unlock an achievement (first cosmetic) that pays stars back
+        if (!rr.ok || s1.spent !== s0.spent + cheap.price || s1.balance !== s0.balance - cheap.price + (s1.earnedTotal - s0.earnedTotal)) fail(tag + ' spendStars', [rr.ok, s0, s1, cheap.price]);
+        const c2 = game.getCosmetics();
+        if (c2.equipped[cheap.slot] !== cheap.id) fail(tag + ' bought item not equipped', c2.equipped);
+        const def = c2.items.find((c) => c.slot === cheap.slot && c.isDefault);
+        if (def && !game.equipCosmetic(cheap.slot, def.id).ok) fail(tag + ' equip default');
+        if (game.spendStars(cheap.id).ok) fail(tag + ' bought an owned item twice');
+        if (game.getHub().cosmetics[cheap.slot] !== (def ? def.id : cheap.id)) fail(tag + ' hub cosmetics');
+      }
+      // daily rewards (engine side): once per date key, day 7 = chest
+      const b1 = game.getStars().balance;
+      const d1 = chk('claimDaily', game.claimDaily(1, '2026-10-0' + k, 1));
+      if (!d1.ok || !d1.rewards.length) fail(tag + ' claimDaily', d1);
+      if (game.claimDaily(2, '2026-10-0' + k, 2).ok) fail(tag + ' claimDaily twice on one date');
+      const d7 = game.claimDaily(7, '2026-11-1' + k, 7);
+      if (!d7.ok || !d7.chest) fail(tag + ' daily day 7 chest', d7);
+      if (game.claimDaily(7, '2026-10-0' + k, 7).ok) fail(tag + ' daily: an earlier date (clock moved back) was accepted');
+      if (game.getStars().balance < b1) fail(tag + ' daily reduced the balance');
+      if (!game.getAchievements().some((a) => a.id === 'streak_7' && a.unlocked) && game.getAchievements().some((a) => a.id === 'streak_7')) fail(tag + ' streak_7 not unlocked by a 7-day streak');
+      // leaderboard summary
+      const bs = chk('getCareerSummaryForBoard', game.getCareerSummaryForBoard());
+      for (const f of ['name', 'gender', 'nation', 'clubHe', 'ovr', 'goals', 'trophies', 'ballon', 'legacy', 'careerId']) if (bs[f] === undefined || bs[f] === null) fail(tag + ' board summary field ' + f, bs);
+      if (bs.name.length > 30 || bs.gender !== gender) fail(tag + ' board summary', bs);
+      // "המשך עד האירוע הבא"
+      const ff = chk('fastForward(event)', game.fastForward({ until: 'event' }));
+      if (!ff.ok || ff.weeks > 12) fail(tag + ' fastForward(event)', [ff.stopped, ff.weeks]);
+      v23.ffStops[ff.stopped] = (v23.ffStops[ff.stopped] || 0) + 1;
+      if (game.serialize().live) { game.autoPlayMatch(); game.finishMatch(); game.resumeWeek(); }
+      walkAll(tag);
+      if (k === 1) purityCheck(tag);
+      game.getAndClearSignals();
+    }
+    // every position of the advanced wizard starts at OVR 60 and scores on debut
+    for (const pos of POS) {
+      const opts = careerOpts(1, gender);
+      game.newCareer({ ...opts, pos, nation: 'isr', club: 'isr_hbs', seed: hash32(SEED, 'pos23', pos, gender), now: 0 });
+      const h = game.getHub();
+      if (!(h.player.ovr >= 59 && h.player.ovr <= 61)) fail('v23 ' + gender + ' ' + pos + ' start OVR', h.player.ovr);
+      v23Debut('v23 ' + gender + ' ' + pos, POS.indexOf(pos) % 4);
+    }
+  }
+  // determinism of the progression layer: same seed, same choices -> same state (incl. stars / objectives / achievements)
+  for (const gender of GENDERS) {
+    const run = (rt) => {
+      CUR_G = gender;
+      game.quickCareer({ gender, random: true, seed: 4242, now: 0 });
+      v23Debut('det23', 3);
+      for (let w = 0; w < 25; w++) {
+        const r = game.fastForward({ until: 'weeks', weeks: 1 });
+        if (r.stopped === 'review') game.ackSeasonReview();
+        for (const o of game.getOffers()) if (o.status === 'open' && o.canAccept && o.type === 'pro') game.respondOffer(o.id, 'accept');
+        if (rt && w % 6 === 3) game.loadState(JSON.parse(JSON.stringify(game.serialize())));
+      }
+      game.getAndClearSignals();
+      return stateHash() + ':' + JSON.stringify(game.getObjectives()).length + ':' + game.getStars().earnedTotal + ':' + game.getAchievements().filter((a) => a.unlocked).length;
+    };
+    const a = run(false), b = run(false), c = run(true);
+    if (a !== b || a !== c) fail('v2.3 determinism (' + gender + ')', [a, b, c]);
+  }
+  v23Migration();
+  if (v23.emptyWeeks > 0) fail('v2.3: weeks without a match and without a training challenge', v23.emptyWeeks);
+  const avgFt = v23.firstTeamShare.reduce((s, x) => s + x, 0) / Math.max(1, v23.firstTeamShare.length);
+  if (avgFt < 0.45) warn('v2.3: first-team matches per week ' + avgFt.toFixed(2) + ' (target >= 0.45)');
+  const avgSt = v23.starsPerWeek.reduce((s, x) => s + x, 0) / Math.max(1, v23.starsPerWeek.length);
+  if (avgSt < 12 || avgSt > 60) warn('v2.3: stars per week ' + avgSt.toFixed(1) + ' (target ~25)');
+  v23.sec = +((Date.now() - T0) / 1000).toFixed(1);
+}
+
 // ---------------- main
 const T0 = Date.now();
 const results = [];
@@ -1220,12 +1482,16 @@ if (!V22_ONLY) {
 }
 // v2.2
 const T22 = Date.now();
-trainingApiChecks();
-migrationV4Check();
-v22Determinism();
-coachTalkChecks();
-trainingPolicies();
+if (!V23_ONLY) {
+  trainingApiChecks();
+  migrationV4Check();
+  v22Determinism();
+  coachTalkChecks();
+  trainingPolicies();
+}
 v22.sec = +((Date.now() - T22) / 1000).toFixed(1);
+// v2.3
+v23Checks();
 
 // chunked vs unchunked fast-forward
 for (const gender of (V22_ONLY ? [] : GENDERS)) {
@@ -1312,7 +1578,7 @@ const report = {
   avgSeasonMs: Math.round(avgSeasonMs), totalSec: +((Date.now() - T0) / 1000).toFixed(1), midSeasonTransfer: midTransfer,
   genders: GENDERS, determinism: detOk ? 'ok' : 'FAIL', checksRun: checkCounts,
   manager: { ...mgrAgg, firstTier: mgrAgg.firstTier.map((x) => x.join(':')) },
-  v22,
+  v22, v23,
 };
 console.log('REPORT ' + JSON.stringify(report, null, 1));
 if (warnings.length) { console.log('CALIBRATION WARNINGS:'); for (const w of warnings) console.log('  - ' + w); }

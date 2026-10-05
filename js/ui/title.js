@@ -11,6 +11,7 @@ import { avatarFor, badge, shirtNumber, cardTier } from './components.js';
 import { gBy, gtext } from './gender.js';
 import { CLUB_INDEX } from '../data/leagues.js';
 import { ico } from './icons.js';
+import { titleChallenge, acceptChallenge } from './leaderboard.js';
 
 let scene = null;
 function stopScene() { if (scene) { try { scene.destroy(); } catch { /* ignore */ } scene = null; } }
@@ -28,6 +29,13 @@ export async function render(root) {
   try { slots = await save.listSlots(); } catch (e) { console.warn(e); slots = [1, 2, 3].map((s) => ({ slot: s, empty: true })); }
   draw(root, slots);
   startScene(root);
+  let chal = null;
+  const paintChallenge = async () => {
+    try { if (!chal) chal = await titleChallenge(); } catch { chal = null; }
+    const slotEl = root.querySelector('.ch-slot');
+    if (slotEl && chal && chal.html) slotEl.innerHTML = chal.html;
+  };
+  paintChallenge();
 
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-act]');
@@ -39,8 +47,12 @@ export async function render(root) {
       if (s) await load(s.slot);
     } else if (act === 'new') navigate('#/new');
     else if (act === 'hof') navigate('#/hof');
+    else if (act === 'friends') navigate('#/friends');
     else if (act === 'settings') navigate('#/settings');
     else if (act === 'install') navigate('#/install');
+    else if (act === 'board') navigate('#/leaderboard');
+    else if (act === 'ch-accept') acceptChallenge(chal && chal.mod);
+    else if (act === 'ch-later') { try { if (chal && chal.mod && chal.mod.stripChallengeFromUrl) chal.mod.stripChallengeFromUrl(); } catch { /* ignore */ } chal = null; const el = root.querySelector('.ch-slot'); if (el) el.innerHTML = ''; }
     else if (act === 'slot') {
       const s = slots.find((x) => x.slot === slot);
       if (!s) return;
@@ -61,6 +73,7 @@ export async function render(root) {
     try { slots = await save.listSlots(); } catch { /* keep */ }
     draw(root, slots);
     startScene(root);
+    paintChallenge();
   }
 
   async function load(slot) {
@@ -179,13 +192,16 @@ function draw(root, slots) {
   const standalone = (() => { try { return isStandalone(); } catch { return false; } })();
   root.innerHTML = `<div class="title-screen">
     ${hero(cont ? cont.meta : null)}
+    <div class="ch-slot"></div>
     <div class="title-actions">
       ${cont ? `<button type="button" class="btn btn-gold btn-xl" data-act="continue" data-testid="btn-continue"><span>${ico('play')}המשך קריירה</span><small>${esc(cont.meta.name)} · ${esc(gtext(cont.meta.clubHe || '', cont.meta.gender))}</small></button>` : ''}
-      <button type="button" class="btn ${cont ? 'btn-glass' : 'btn-gold btn-xl'}" data-act="new" data-testid="btn-new-career">${ico('ball')}קריירה חדשה</button>
+      <button type="button" class="btn ${cont ? 'btn-glass' : 'btn-gold btn-xl'}" data-act="new" data-testid="btn-new-career">${cont ? ico('ball') + 'קריירה חדשה' : '<span>' + ico('ball') + 'קריירה חדשה</span><small>שני צעדים, ובכורה בבוגרים</small>'}</button>
     </div>
-    <h2 class="section-title"><span>המשבצות שלך</span></h2>
-    <div class="slots">${slots.map(slotCard).join('')}</div>
+    ${slots.some((s) => !s.empty || s.corrupt || s.tooNew) ? `<h2 class="section-title"><span>המשבצות שלך</span></h2>
+    <div class="slots">${slots.map(slotCard).join('')}</div>` : ''}
     <div class="title-links">
+      <button type="button" class="btn btn-ghost" data-act="friends" data-testid="btn-friends">${ico('users')}ליגת חברים</button>
+      <button type="button" class="btn btn-ghost" data-act="board" data-testid="btn-leaderboard">${ico('table')}טבלת האגדות</button>
       <button type="button" class="btn btn-ghost" data-act="hof" data-testid="btn-hof">${ico('hof')}היכל התהילה</button>
       <button type="button" class="btn btn-ghost" data-act="settings" data-testid="btn-settings">${ico('gear')}הגדרות וגיבוי</button>
       ${standalone ? '' : '<button type="button" class="btn btn-ghost" data-act="install">' + ico('phone') + 'התקנה למסך הבית</button>'}

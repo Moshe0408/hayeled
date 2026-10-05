@@ -10,20 +10,27 @@
 //   + supabase/update-2.1.sql: admin_stats_v2, admin_feedback_v2, admin_delete_feedback, admin_reset_stats
 //   + supabase/update-2.2.sql: admin_stats_v3 (training intensity, burnouts, training injuries, coach talks),
 //                              admin_players (latest career_snapshot per device + career, the "שחקנים" tab)
+//   + supabase/update-2.3.sql: submit_career, get_leaderboard (anon: the public board, table hy_leaderboard),
+//                              admin_funnel (funnel + D1/D7 retention + 2.3 engagement),
+//                              admin_leaderboard, admin_leaderboard_hide (moderation)
 // Test helpers:
-//   GET  /__mock/state   -> { devices, sessions, events, feedback, app_config }
+//   GET  /__mock/state   -> { devices, sessions, events, feedback, app_config, leaderboard }
 //   POST /__mock/reset   -> clears everything, re-seeds app_config (ads disabled), schema back to the start value
 //   POST /__mock/fail    -> body {"on":true|false}: make every /rest and /auth call answer 503 (simulate outage)
-//   POST /__mock/schema  -> body {"v":"2.0"|"2.1"|"2.2"}: "2.0" hides the update-2.1.sql and update-2.2.sql RPCs,
-//                           "2.1" hides only the update-2.2.sql RPC (404 PGRST202, exactly like a project where
-//                           that SQL file was not run yet). "2.2" (default) = everything installed.
-//   POST /__mock/seed    -> body {"devices":40}: deterministic demo data (devices, sessions, events, feedback)
-// CLI flags: --legacy (start as schema 2.0), --schema 2.1 (start without update-2.2.sql), --seed (demo data at start).
+//   POST /__mock/schema  -> body {"v":"2.0"|"2.1"|"2.2"|"2.3"}: each value hides the RPCs of the later update files
+//                           (404 PGRST202, exactly like a project where that SQL file was not run yet).
+//                           "2.3" (default) = everything installed.
+//   POST /__mock/seed    -> body {"devices":40}: deterministic demo data (devices, sessions, events, feedback,
+//                           2.3: drop-off visitors, onboarding steps, weeks, daily rewards, achievements, leaderboard)
+//   POST /__mock/lbage   -> body {"sec":60}: make every leaderboard row older (skips the 20 s per-career limit in tests)
+// CLI flags: --legacy (start as schema 2.0), --schema 2.1|2.2 (start without the later update files), --seed (demo data at start).
 // Users: the admin (default admin@test.local / test1234) and a non-admin player@test.local / test1234.
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve as pathResolve } from 'node:path';
+import { cleanText, isBadName } from '../js/core/leaderboard.js';
+import { addFriendsRoutes, FRIENDS_RPCS, FRIENDS_ADMIN_RPCS } from './mock-friends.mjs';   // the same name rules as update-2.3.sql
 
 const ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 const NAME_RE = /^[a-z_]{2,32}$/;
@@ -81,11 +88,24 @@ function topBy(list, keyFn, limit = 10) {
 const TOP5 = ['eng1', 'esp1', 'ita1', 'ger1', 'fra1'];
 const V21_RPCS = new Set(['admin_stats_v2', 'admin_feedback_v2', 'admin_delete_feedback', 'admin_reset_stats']);
 const V22_RPCS = new Set(['admin_stats_v3', 'admin_players']);
-const SCHEMAS = ['2.0', '2.1', '2.2'];
-const normSchema = (v) => (SCHEMAS.includes(String(v)) ? String(v) : '2.2');
+const V23_RPCS = new Set(['submit_career', 'get_leaderboard', 'admin_funnel', 'admin_leaderboard', 'admin_leaderboard_hide']);
+const SCHEMAS = ['2.0', '2.1', '2.2', '2.3'];
+const normSchema = (v) => (SCHEMAS.includes(String(v)) ? String(v) : '2.3');
 /** True when the RPC is not installed on a server at schema version v. */
 function hiddenRpc(v, name) {
-  return (v === '2.0' && (V21_RPCS.has(name) || V22_RPCS.has(name))) || (v === '2.1' && V22_RPCS.has(name));
+  const lvl = SCHEMAS.indexOf(v);
+  return (V21_RPCS.has(name) && lvl < 1) || (V22_RPCS.has(name) && lvl < 2) || (V23_RPCS.has(name) && lvl < 3) || (FRIENDS_RPCS.has(name) && lvl < 3);
+}
+const LB_CAREER_RE = /^[A-Za-z0-9_-]{4,64}$/;
+const WEEKS = [1, 3, 5, 10, 20, 40];
+/** public.hy_clamp_int */
+function clampInt(v, lo, hi) {
+  const x = typeof v === 'number' ? v : (v === null || v === undefined || v === '' ? NaN : Number(v));
+  return Number.isFinite(x) ? Math.min(hi, Math.max(lo, Math.round(x))) : lo;
+}
+/** 'YYYY-MM-DD' + n calendar days */
+function addDays(day, n) {
+  return new Date(Date.parse(day + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 }
 
 /** Goals an event row stands for (mirrors public.hy_event_n). */
@@ -106,7 +126,7 @@ function demoRng(seed) {
   };
 }
 
-export function createMockSupabase({ admin = 'admin@test.local:test1234', schema = '2.2' } = {}) {
+export function createMockSupabase({ admin = 'admin@test.local:test1234', schema = '2.3' } = {}) {
   const [adminEmail, adminPass] = String(admin).split(':');
   const users = new Map([
     [adminEmail.toLowerCase(), { id: randomUUID(), email: adminEmail, password: adminPass || 'test1234' }],
@@ -122,11 +142,15 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
   let db;
   let eventSeq;
   let feedbackSeq;
+  let lbSeq;
+  let friends = null;   // set after the rpc table exists (see addFriendsRoutes below)
   function reset() {
-    db = { devices: [], sessions: [], events: [], feedback: [], app_config: defaultConfigRows() };
+    db = { devices: [], sessions: [], events: [], feedback: [], app_config: defaultConfigRows(), leaderboard: [] };
     eventSeq = 0;
     feedbackSeq = 0;
+    lbSeq = 0;
     schemaVersion = initialSchema;
+    if (friends && friends.reset) friends.reset();
   }
   reset();
 
@@ -183,6 +207,51 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
         // retired: the game keeps the last club + league of the playing career (js/ui/app.js careerSnapshot)
         if (stg === 'manager') later.clubHe = (gender === 'f' ? 'מאמנת ראשית' : 'מאמן ראשי') + ' · ' + CLUB_HE[later.club || 'isr_mta'];
         push(id, sid, 'career_snapshot', later, t + 100);
+
+        // v2.3 (own stream again): fast-start steps, debut, weeks, daily rewards, achievements, shares, the leaderboard
+        const r3 = demoRng(9900 + i);
+        const p3 = (arr) => arr[Math.floor(r3() * arr.length)];
+        const t0 = first + 30000;
+        push(id, sid, 'onboarding_step', { step: 'open' }, t0);
+        push(id, sid, 'onboarding_step', { step: 'gender', gender }, t0 + 3000);
+        push(id, sid, 'onboarding_step', { step: 'name' }, t0 + 6000);
+        if (r3() < 0.25) push(id, sid, 'onboarding_step', { step: 'random' }, t0 + 7000);
+        if (r3() < 0.12) push(id, sid, 'onboarding_step', { step: 'advanced' }, t0 + 8000);
+        push(id, sid, 'onboarding_step', { step: 'kickoff' }, t0 + 9000);
+        push(id, sid, 'first_match_done', { scored: true }, t0 + 120000);
+        const weeks = Math.floor(matches * (0.6 + r3() * 0.8));
+        for (const n of WEEKS) if (weeks >= n) push(id, sid, 'week_reached', { n }, Math.min(last, t0 + 120000 + n * 90000));
+        const span = Math.max(0, Math.floor((last - first) / DAY));
+        let streak = 0;
+        for (let d = 0; d <= span; d++) {
+          if (d > 0 && r3() < 0.45) continue;
+          streak = d === 0 ? 1 : streak + 1;
+          push(id, sid, 'daily_reward', { day: ((streak - 1) % 7) + 1, streak }, Math.min(last, first + d * DAY + 40000));
+          if (d > 0) { const st0 = Math.min(first + d * DAY + 30000, last - 60000); db.sessions.push({ id: sid + '-d' + d, device_id: id, started_at: iso(st0), last_seen: iso(Math.min(last, st0 + Math.floor(r3() * 1200000))), heartbeats: 3, app_version: '2.3.0', standalone: !!installed }); }
+        }
+        if (r3() < 0.3 && first + 7 * DAY + 3600000 < now - 60000) {   // came back a week later (D7)
+          const t7 = first + 7 * DAY + 3600000;
+          db.sessions.push({ id: sid + '-w1', device_id: id, started_at: iso(t7), last_seen: iso(t7 + 600000 < now ? t7 + 600000 : t7), heartbeats: 4, app_version: '2.3.0', standalone: !!installed });
+          const dv = findDevice(id);
+          if (dv && Date.parse(dv.last_seen) < t7) dv.last_seen = iso(t7);
+        }
+        const ACH = ['debut', 'first_goal', 'first_assist', 'goals_10', 'motm_1', 'starter', 'pro_contract', 'hat_trick', 'youth_national', 'streak_7', 'shared_card', 'goals_50'];
+        const nAch = 2 + Math.floor(r3() * Math.min(ACH.length - 2, 2 + seasons));
+        for (let k = 0; k < nAch; k++) push(id, sid, 'achievement', { id: ACH[k], tier: k < 5 ? 'bronze' : k < 9 ? 'silver' : 'gold' }, t0 + 130000 + k * 1000);
+        const OBJ = ['w_goals2', 'w_rating75', 'w_start3', 'w_load50', 's_goals15'];
+        const nObj = Math.floor(r3() * (weeks / 3));
+        for (let k = 0; k < nObj; k++) push(id, sid, 'objective_done', { id: p3(OBJ), kind: k % 6 === 5 ? 'season' : 'weekly' }, t0 + 140000 + k * 1000);
+        if (r3() < 0.35) push(id, sid, 'share', { kind: p3(['goal', 'goal', 'achievement', 'promotion', 'trophy', 'challenge']), method: p3(['share', 'share', 'download', 'whatsapp']) }, t0 + 150000);
+        if (r3() < 0.4) push(id, sid, 'leaderboard_view', { kind: p3(['legacy', 'legacy', 'goals', 'ballon']), period: p3(['all', 'week']) }, t0 + 160000);
+        if (r3() < 0.08) push(id, sid, 'challenge_open', { valid: r3() < 0.9 }, t0 + 1000);
+        if (r3() < 0.7) {
+          const at = iso(Math.min(last, t + 200));
+          const ballon = later.ovr >= 88 ? Math.floor(r3() * 3) : 0;
+          db.leaderboard.push({ id: ++lbSeq, device_id: id, career_id: careerId, name: base.name, raw_name: null, gender, nation: base.nation,
+            club: later.clubHe || null, ovr: later.ovr, goals: later.goals, trophies: Math.floor(seasons * r3() * 0.8), ballon,
+            legacy: Math.round(later.goals * 2 + seasons * 25 + ballon * 150 + r3() * 40), submissions: seasons, flagged: false, hidden: false,
+            hidden_at: null, hidden_by: null, created_at: iso(first + 25000), updated_at: at });
+        }
       }
       push(id, sid, 'goal', { mega: false, n: 1 + Math.floor(rnd() * 30) }, t + 1000);
       if (rnd() < 0.7) push(id, sid, 'goal', { mega: true, n: 1 + Math.floor(rnd() * 4) }, t + 2000);
@@ -224,6 +293,25 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
           if (rnd() < 0.4) { push(id, sid, 'manager_sacked', { gender }, t + 9000); push(id, sid, 'manager_started', { tier: pick(tiers), gender, first: false }, t + 10000); }
           if (rnd() < 0.3) push(id, sid, 'manager_trophy', { key: 'league' }, t + 11000);
         }
+      }
+    }
+    // v2.3: visitors who dropped off before / during the fast start (no career): the funnel's top
+    {
+      const r4 = demoRng(4400 + nDev);
+      const drop = Math.round(nDev * 0.6);
+      for (let i = 0; i < drop; i++) {
+        const id = 'demo-v23-' + nDev + '-' + String(i).padStart(4, '0');
+        const first = now - Math.floor(r4() * 29 * DAY) - 3600000;
+        const sid = 'demo-v23s-' + nDev + '-' + String(i).padStart(4, '0');
+        db.devices.push({ id, first_seen: iso(first), last_seen: iso(first + 90000), platform: platforms[Math.floor(r4() * platforms.length)], standalone: false,
+          app_version: '2.3.0', installed_at: null, rate_window: iso(first), rate_count: 0, feedback_day: null, feedback_count: 0 });
+        db.sessions.push({ id: sid, device_id: id, started_at: iso(first), last_seen: iso(first + 90000), heartbeats: 2, app_version: '2.3.0', standalone: false });
+        if (r4() < 0.15) db.sessions.push({ id: sid + '-d1', device_id: id, started_at: iso(first + DAY + 5000), last_seen: iso(first + DAY + 65000), heartbeats: 1, app_version: '2.3.0', standalone: false });
+        push(id, sid, 'app_open', { standalone: false, v: '2.3.0', ref: 'browser' }, first + 1000);
+        const deep = r4();
+        if (deep < 0.7) push(id, sid, 'onboarding_step', { step: 'open' }, first + 10000);
+        if (deep < 0.45) push(id, sid, 'onboarding_step', { step: 'gender', gender: r4() < 0.6 ? 'm' : 'f' }, first + 14000);
+        if (deep < 0.25) push(id, sid, 'onboarding_step', { step: 'name' }, first + 20000);
       }
     }
     for (let j = 0; j < Math.max(4, Math.round(nDev / 4)); j++) {
@@ -681,6 +769,222 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
       return { schema: '2.2', generated_at: new Date().toISOString(), total: rows.length, limit, offset, sort, rows: rows.slice(offset, offset + limit) };
     },
 
+    // ---------- supabase/update-2.3.sql ----------
+    // mirrors public.submit_career: upsert per (device, careerId), counters never go down, name rules, rate limits
+    submit_career(args) {
+      const dev = String(args.p_device == null ? '' : args.p_device);
+      const car = String(args.p_career == null ? '' : args.p_career);
+      if (!ID_RE.test(dev)) return { ok: false, error: 'bad_device' };
+      if (!LB_CAREER_RE.test(car)) return { ok: false, error: 'bad_career' };
+      const raw = cleanText(args.p_name, 30);
+      if (!raw) return { ok: false, error: 'bad_name' };
+      const gender = ['f', 'female', 'girl', 'w'].includes(String(args.p_gender || '').toLowerCase()) ? 'f' : 'm';
+      const natL = String(args.p_nation == null ? '' : args.p_nation).toLowerCase();
+      const nation = /^[a-z0-9_]{2,8}$/.test(natL) ? natL : null;
+      // 2.3 hardening: outliers rejected, only a registered device (with a session or seen > 2 min ago), club = a plain name
+      const num = (x) => { const n = Number(x); return Number.isFinite(n) ? n : 0; };
+      if (num(args.p_ovr) > 99 || num(args.p_goals) > 1500 || num(args.p_trophies) > 100 || num(args.p_ballon) > 15 || num(args.p_legacy) > 3000
+        || Math.min(num(args.p_ovr), num(args.p_goals), num(args.p_trophies), num(args.p_ballon), num(args.p_legacy)) < 0) return { ok: false, error: 'bad_stats' };
+      const dv = db.devices.find((d) => d.id === dev);
+      if (!dv || !(Date.parse(dv.first_seen) < Date.now() - 120000 || db.sessions.some((x) => x.device_id === dev))) return { ok: false, error: 'unknown_device' };
+      let club = cleanText(args.p_club, 40) || null;
+      if (club && (!/^[A-Za-z0-9 '"\u05D0-\u05EA\u05F3\u05F4.()-]{2,40}$/.test(club) || /(www|http|:\/\/|@|\.(com|net|org|io|co|ly|me|xyz|ru|il|info|biz)\b)/i.test(club))) club = null;
+      const badClub = !!club && isBadName(club);
+      if (badClub) club = null;
+      const bad = isBadName(raw);
+      const name = bad ? (gender === 'f' ? 'שחקנית מהשכונה' : 'שחקן מהשכונה') : raw;
+      const v = { ovr: clampInt(args.p_ovr, 0, 99), goals: clampInt(args.p_goals, 0, 1500), trophies: clampInt(args.p_trophies, 0, 100),
+        ballon: clampInt(args.p_ballon, 0, 15), legacy: clampInt(args.p_legacy, 0, 3000) };
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      let row = db.leaderboard.find((r) => r.device_id === dev && r.career_id === car);
+      if (row) {
+        if (Date.parse(row.updated_at) > now - 20000) return { ok: false, error: 'rate_limited' };
+        Object.assign(row, {
+          name, raw_name: bad ? raw : null, flagged: bad || badClub, gender, nation: nation || row.nation, club, ovr: v.ovr,
+          goals: Math.max(row.goals, v.goals), trophies: Math.max(row.trophies, v.trophies), ballon: Math.max(row.ballon, v.ballon),
+          legacy: Math.max(row.legacy, v.legacy), submissions: Math.min(row.submissions + 1, 1000000), updated_at: nowIso,
+        });
+      } else {
+        if (db.leaderboard.filter((r) => r.device_id === dev && Date.parse(r.created_at) > now - 86400000).length >= 10) return { ok: false, error: 'rate_limited' };
+        if (db.leaderboard.filter((r) => r.device_id === dev).length >= 50) return { ok: false, error: 'too_many' };
+        if (db.leaderboard.filter((r) => Date.parse(r.created_at) > now - 60000).length >= 60) return { ok: false, error: 'busy' };
+        row = { id: ++lbSeq, device_id: dev, career_id: car, name, raw_name: bad ? raw : null, gender, nation, club, ...v, submissions: 1,
+          flagged: bad || badClub, hidden: false, hidden_at: null, hidden_by: null, created_at: nowIso, updated_at: nowIso };
+        db.leaderboard.push(row);
+      }
+      return { ok: true, id: row.id, masked: bad, name,
+        rank: row.hidden ? null : db.leaderboard.filter((r) => !r.hidden && r.legacy > row.legacy).length + 1 };
+    },
+
+    // mirrors public.get_leaderboard: never returns device / career ids
+    get_leaderboard(args) {
+      const kind = ['legacy', 'goals', 'ballon'].includes(args.p_kind) ? args.p_kind : 'legacy';
+      const period = args.p_period === 'week' ? 'week' : 'all';
+      const n = Number(args.p_limit);
+      const limit = Math.min(Math.max(Number.isFinite(n) ? Math.trunc(n) : 50, 1), 50);
+      const dev = ID_RE.test(String(args.p_device || '')) ? String(args.p_device) : null;
+      const car = LB_CAREER_RE.test(String(args.p_career || '')) ? String(args.p_career) : null;
+      const since = period === 'week' ? Date.now() - 7 * 86400000 : -Infinity;
+      const metric = (r) => (kind === 'goals' ? r.goals : kind === 'ballon' ? r.ballon : r.legacy);
+      const list = db.leaderboard
+        .filter((r) => !r.hidden && Date.parse(r.updated_at) >= since && (kind !== 'goals' || r.goals > 0) && (kind !== 'ballon' || r.ballon > 0))
+        .sort((a, b) => (metric(b) - metric(a)) || (b.legacy - a.legacy) || (b.ballon - a.ballon) || (b.trophies - a.trophies) || (b.goals - a.goals)
+          || (Date.parse(a.updated_at) - Date.parse(b.updated_at)) || (a.id - b.id));
+      const out = list.map((r, i) => {
+        const rank = list.findIndex((x) => metric(x) === metric(r)) + 1;   // rank(): ties share a rank
+        return { rn: i + 1, o: { rank, name: r.name, gender: r.gender, nation: r.nation, club: r.club, ovr: r.ovr, goals: r.goals, trophies: r.trophies,
+          ballon: r.ballon, legacy: r.legacy, updated_at: r.updated_at, mine: !!(dev && car && r.device_id === dev && r.career_id === car) } };
+      });
+      const me = out.find((x) => x.o.mine);
+      return { ok: true, kind, period, generated_at: new Date().toISOString(), total: out.length,
+        rows: out.slice(0, limit).map((x) => x.o), me: me ? { ...me.o, in_top: me.rn <= limit } : null };
+    },
+
+    // mirrors public.admin_funnel (cohort = devices first seen in the last p_days local calendar days)
+    admin_funnel(args) {
+      const days = Math.min(Math.max(Number.isFinite(Number(args.p_days)) ? Math.trunc(Number(args.p_days)) : 30, 1), 365);
+      let tz = typeof args.p_tz === 'string' && args.p_tz ? args.p_tz : 'Asia/Jerusalem';
+      try { new Intl.DateTimeFormat('en-CA', { timeZone: tz }); } catch { tz = 'Asia/Jerusalem'; }
+      const now = Date.now();
+      const wk = (e) => Date.parse(e.created_at) > now - 7 * 86400000;
+      const today = dayIn(tz, new Date(now));
+      const fromDay = addDays(today, -(days - 1));
+      const coh = db.devices.filter((d) => dayIn(tz, new Date(d.first_seen)) >= fromDay);
+      const cohIds = new Set(coh.map((d) => d.id));
+      const per = new Map();
+      for (const d of coh) per.set(d.id, { onb: false, car: false, m1: false, mp: 0, wk: 0 });
+      for (const e of db.events) {
+        const p = per.get(e.device_id);
+        if (!p) continue;
+        if (e.name === 'onboarding_step') p.onb = true;
+        else if (e.name === 'career_started') p.car = true;
+        else if (e.name === 'first_match_done') p.m1 = true;
+        else if (e.name === 'match_played') { p.m1 = true; p.mp++; }
+        else if (e.name === 'week_reached' && e.props && typeof e.props.n === 'number') p.wk = Math.max(p.wk, Math.min(e.props.n, 100000));
+      }
+      const g = [...per.values()].map((p) => {
+        const w = Math.max(p.wk, p.mp);
+        const sM1 = p.m1 || w >= 1;
+        return { ...p, w, sM1, sCar: p.car || sM1, sOnb: p.onb || p.car || sM1 };
+      });
+      const cnt = (fn) => g.filter(fn).length;
+      const funnel = {
+        visitors: g.length, onboarding: cnt((x) => x.sOnb), career: cnt((x) => x.sCar), first_match: cnt((x) => x.sM1),
+        week_1: cnt((x) => x.w >= 1), week_3: cnt((x) => x.w >= 3), week_5: cnt((x) => x.w >= 5), week_10: cnt((x) => x.w >= 10),
+        week_20: cnt((x) => x.w >= 20), week_40: cnt((x) => x.w >= 40),
+        new_careers: cnt((x) => x.car), returning_careers: cnt((x) => x.sM1 && !x.car), onboarding_raw: cnt((x) => x.onb),
+      };
+      const stepM = new Map();
+      for (const e of db.events) {
+        if (e.name !== 'onboarding_step' || !cohIds.has(e.device_id)) continue;
+        const k = (e.props && typeof e.props.step === 'string' && e.props.step ? e.props.step.slice(0, 24) : '?');
+        if (!stepM.has(k)) stepM.set(k, new Set());
+        stepM.get(k).add(e.device_id);
+      }
+      const onboarding_steps = [...stepM.entries()].map(([key, s]) => ({ key, devices: s.size }))
+        .sort((a, b) => (b.devices - a.devices) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, 12);
+      const act = new Map();
+      for (const s of db.sessions) {
+        if (!cohIds.has(s.device_id)) continue;
+        if (!act.has(s.device_id)) act.set(s.device_id, new Set());
+        act.get(s.device_id).add(dayIn(tz, new Date(s.started_at)));
+        act.get(s.device_id).add(dayIn(tz, new Date(s.last_seen)));
+      }
+      const r = coh.map((d) => {
+        const d0 = dayIn(tz, new Date(d.first_seen));
+        const a = act.get(d.id) || new Set();
+        const has = (fn) => [...a].some(fn);
+        return { d0, d1: a.has(addDays(d0, 1)), d7: a.has(addDays(d0, 7)), back: has((x) => x > d0), back7: has((x) => x >= addDays(d0, 7)) };
+      });
+      const y1 = addDays(today, -1);
+      const y7 = addDays(today, -7);
+      const retention = {
+        cohort: r.length,
+        eligible_d1: r.filter((x) => x.d0 <= y1).length, d1: r.filter((x) => x.d0 <= y1 && x.d1).length,
+        eligible_d7: r.filter((x) => x.d0 <= y7).length, d7: r.filter((x) => x.d0 <= y7 && x.d7).length,
+        returned: r.filter((x) => x.d0 <= y1 && x.back).length, returned_7: r.filter((x) => x.d0 <= y7 && x.back7).length,
+      };
+      const cohorts = [];
+      for (let i = 0; i < Math.min(days, 14); i++) {
+        const day = addDays(today, -i);
+        const rows = r.filter((x) => x.d0 === day);
+        cohorts.push({ day, new: rows.length, d1: day <= y1 ? rows.filter((x) => x.d1).length : null, d7: day <= y7 ? rows.filter((x) => x.d7).length : null });
+      }
+      const ev = (name) => db.events.filter((e) => e.name === name);
+      const devs = (arr) => new Set(arr.map((e) => e.device_id)).size;
+      const pr = (e, k) => (e.props ? e.props[k] : undefined);
+      const tops = (arr, key, limit, withDev = false) => {
+        const m = new Map();
+        for (const e of arr) {
+          const v = pr(e, key);
+          const k = typeof v === 'string' && v ? v.slice(0, 40) : (v === undefined || v === null || v === '' ? '?' : String(v).slice(0, 40));
+          if (!m.has(k)) m.set(k, { c: 0, d: new Set() });
+          m.get(k).c++;
+          m.get(k).d.add(e.device_id);
+        }
+        return [...m.entries()].sort((a, b) => (b[1].c - a[1].c) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, limit)
+          .map(([k, x]) => (withDev ? { key: k, count: x.c, devices: x.d.size } : { key: k, count: x.c }));
+      };
+      const dr = ev('daily_reward');
+      const byDay = {};
+      for (let d = 1; d <= 7; d++) byDay[String(d)] = dr.filter((e) => String(pr(e, 'day')) === String(d)).length;
+      const ach = ev('achievement');
+      const obj = ev('objective_done');
+      const sh = ev('share');
+      const lv = ev('leaderboard_view');
+      const co = ev('challenge_open');
+      const fm = ev('first_match_done');
+      const wr = ev('week_reached');
+      const streaks = dr.map((e) => pr(e, 'streak')).filter((v) => typeof v === 'number' && Number.isFinite(v));
+      const lb = db.leaderboard;
+      return {
+        schema: '2.3', generated_at: new Date(now).toISOString(), days, tz,
+        funnel, onboarding_steps, retention, cohorts,
+        engagement: {
+          daily_reward: { total: dr.length, total_7d: dr.filter(wk).length, devices: devs(dr), max_streak: streaks.length ? Math.min(Math.max(...streaks), 100000) : 0, by_day: byDay },
+          achievements: { total: ach.length, total_7d: ach.filter(wk).length, devices: devs(ach), top: tops(ach, 'id', 15, true) },
+          objectives: { total: obj.length, total_7d: obj.filter(wk).length, devices: devs(obj), top: tops(obj, 'id', 10) },
+          share: { total: sh.length, total_7d: sh.filter(wk).length, devices: devs(sh), by_kind: tops(sh, 'kind', 12), by_method: tops(sh, 'method', 6) },
+          leaderboard_view: { total: lv.length, total_7d: lv.filter(wk).length, devices: devs(lv) },
+          challenge_open: { total: co.length, valid: co.filter((e) => String(pr(e, 'valid')) !== 'false').length, total_7d: co.filter(wk).length, devices: devs(co) },
+          first_match_done: { total: fm.length, devices: devs(fm) },
+          week_reached: WEEKS.map((n) => ({ n, devices: devs(wr.filter((e) => typeof pr(e, 'n') === 'number' && pr(e, 'n') >= n)) })),
+        },
+        leaderboard: {
+          entries: lb.length, visible: lb.filter((x) => !x.hidden).length, hidden: lb.filter((x) => x.hidden).length,
+          flagged: lb.filter((x) => x.flagged).length, devices: new Set(lb.map((x) => x.device_id)).size,
+          submissions: lb.reduce((a, x) => a + x.submissions, 0),
+          new_7d: lb.filter((x) => Date.parse(x.created_at) > now - 7 * 86400000).length,
+          updated_7d: lb.filter((x) => Date.parse(x.updated_at) > now - 7 * 86400000).length,
+        },
+      };
+    },
+
+    // mirrors public.admin_leaderboard (moderation: hidden rows, device ids and the original flagged names included)
+    admin_leaderboard(args) {
+      const limit = Math.min(Math.max(Number.isFinite(Number(args.p_limit)) ? Math.trunc(Number(args.p_limit)) : 50, 1), 200);
+      const offset = Math.min(Math.max(Number.isFinite(Number(args.p_offset)) ? Math.trunc(Number(args.p_offset)) : 0, 0), 1000000);
+      const filter = ['all', 'visible', 'hidden', 'flagged'].includes(args.p_filter) ? args.p_filter : 'all';
+      const q = String(args.p_search == null ? '' : args.p_search).slice(0, 60).trim().toLowerCase();
+      const lb = db.leaderboard;
+      const list = lb.filter((r) => (filter === 'all' || (filter === 'visible' && !r.hidden) || (filter === 'hidden' && r.hidden) || (filter === 'flagged' && r.flagged))
+        && (!q || r.name.toLowerCase().includes(q) || String(r.raw_name || '').toLowerCase().includes(q)))
+        .sort((a, b) => (Date.parse(b.updated_at) - Date.parse(a.updated_at)) || (b.id - a.id));
+      return {
+        schema: '2.3', generated_at: new Date().toISOString(), filter, limit, offset, total: list.length,
+        counts: { all: lb.length, visible: lb.filter((r) => !r.hidden).length, hidden: lb.filter((r) => r.hidden).length, flagged: lb.filter((r) => r.flagged).length },
+        rows: list.slice(offset, offset + limit).map((r) => ({ ...r, legacy_rank: lb.filter((o) => !o.hidden && o.legacy > r.legacy).length + 1 })),
+      };
+    },
+
+    admin_leaderboard_hide(args, user) {
+      const h = args.p_hidden === undefined || args.p_hidden === null ? true : !!args.p_hidden;
+      const r = db.leaderboard.find((x) => x.id === Number(args.p_id));
+      if (r) { r.hidden = h; r.hidden_at = h ? new Date().toISOString() : null; r.hidden_by = h ? user.email : null; }
+      return { ok: !!r, id: Number(args.p_id), hidden: h, updated: r ? 1 : 0 };
+    },
+
     admin_feedback_v2(args) {
       const limit = Math.min(Math.max(Number.isFinite(Number(args.p_limit)) ? Math.trunc(Number(args.p_limit)) : 50, 1), 200);
       const offset = Math.max(Number.isFinite(Number(args.p_offset)) ? Math.trunc(Number(args.p_offset)) : 0, 0);
@@ -721,7 +1025,10 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
     },
   };
   const ADMIN_RPCS = new Set(['admin_stats', 'admin_feedback', 'admin_mark_read', 'admin_get_config', 'admin_set_config',
-    'admin_stats_v2', 'admin_feedback_v2', 'admin_delete_feedback', 'admin_reset_stats', 'admin_stats_v3', 'admin_players']);
+    'admin_stats_v2', 'admin_feedback_v2', 'admin_delete_feedback', 'admin_reset_stats', 'admin_stats_v3', 'admin_players',
+    'admin_funnel', 'admin_leaderboard', 'admin_leaderboard_hide', ...FRIENDS_ADMIN_RPCS]);
+  // friends league (docs/FRIENDS_LEAGUE.md): in-memory fl_* RPCs
+  friends = addFriendsRoutes(rpcs);
   const AUTH_RPCS = new Set(['admin_whoami']);
 
   // ---------- HTTP ----------
@@ -762,7 +1069,7 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
     if (req.method === 'OPTIONS') return send(res, 204);
 
     // test helpers (no apikey needed)
-    if (path === '/__mock/state' && req.method === 'GET') return send(res, 200, db);
+    if (path === '/__mock/state' && req.method === 'GET') return send(res, 200, { ...db, friends: friends.db });
     if (path === '/__mock/reset' && req.method === 'POST') { reset(); failMode = false; return send(res, 200, { ok: true }); }
     if (path === '/__mock/fail' && req.method === 'POST') {
       const b = await readBody(req).catch(() => ({}));
@@ -778,6 +1085,12 @@ export function createMockSupabase({ admin = 'admin@test.local:test1234', schema
       const b = await readBody(req).catch(() => ({}));
       const n = Math.min(Math.max(Number.isFinite(Number(b.devices)) ? Math.trunc(Number(b.devices)) : 40, 1), 2000);
       return send(res, 200, seed({ devices: n }));
+    }
+    if (path === '/__mock/lbage' && req.method === 'POST') {
+      const b = await readBody(req).catch(() => ({}));
+      const sec = Math.min(Math.max(Number.isFinite(Number(b.sec)) ? Number(b.sec) : 60, 0), 400 * 86400);
+      for (const r of db.leaderboard) { r.updated_at = new Date(Date.parse(r.updated_at) - sec * 1000).toISOString(); r.created_at = new Date(Date.parse(r.created_at) - sec * 1000).toISOString(); }
+      return send(res, 200, { ok: true, rows: db.leaderboard.length });
     }
     if (path === '/' || path === '/__mock') return send(res, 200, { ok: true, name: 'mock-supabase' });
 
@@ -883,7 +1196,7 @@ if (isMain) {
   const argv = process.argv.slice(2);
   let port = 54321;
   let admin = 'admin@test.local:test1234';
-  let schema = '2.2';
+  let schema = '2.3';
   let seed = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--legacy') { schema = '2.0'; continue; }

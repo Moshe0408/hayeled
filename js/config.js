@@ -3,7 +3,7 @@
 // and every online feature (telemetry, feedback, remote config) is silently disabled.
 // To connect a Supabase project, see docs/ADMIN_SETUP.md (step 4).
 
-export const APP_VERSION = '2.2.0';            // MUST equal VERSION in sw.js
+export const APP_VERSION = '2.3.0';            // MUST equal VERSION in sw.js
 export const APP_NAME = 'הילד מהשכונה';
 const CONFIG_URL = 'https://emjoopohyldozggfnetb.supabase.co';                          // the owner pastes the Supabase Project URL here, e.g. 'https://abcd1234.supabase.co'
 const CONFIG_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVtam9vcG9oeWxkb3pnZ2ZuZXRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2ODM0MzYsImV4cCI6MjEwNDI1OTQzNn0.G5mRLPnPe6ti0uDhIXyK8_d6pZpoDUlagotwRQdI4kg';                     // the owner pastes the anon / publishable key here (it is public by design; data is protected by RLS)

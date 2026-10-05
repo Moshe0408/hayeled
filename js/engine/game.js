@@ -22,8 +22,8 @@ import {
 } from './national.js';
 import { createPlayer, ovrOf, ageOf, formAvg, formAvgOr, potStars, updatePotSeen, developWeek, potentialDrift, valueOf, fairWage, injuryChanceMatch, rollInjury, injuryHe, clampStatus, POS_W, OUT_ATTRS, GK_ATTRS, posGroup } from './player.js';
 import { clubSelection, youthSelection, nationalSelection, seniorScore, youthThreshold } from './selection.js';
-import { createLive, startLive, chooseLive, autoPlayLive, endLive, matchVM, computeRating, momentStats, resOf, compHe, roundHe, fxKey, teamVariant, lineOf, extraHe, sideStrength, cleanSheetEligible, tourHe, tourKindHe, euroHe, logVM, compNameHe as _compNameHe } from './match.js';
-import { generateOffers, renewalCheck, makeProOffer, proEligible, respond, expireOffers, requestTransfer as reqT, cancelTransferRequest as cancelT, offerVM, contractVM, endLoan, contractExpiry, releaseYouth, applyPrecontract, effSeason, teamStrOf, setAbroadFlag, resetBenchTalk } from './transfers.js';
+import { addStakeEvent, createLive, startLive, chooseLive, autoPlayLive, autoOneLive, endLive, matchVM, computeRating, momentStats, resOf, compHe, roundHe, fxKey, teamVariant, lineOf, extraHe, sideStrength, cleanSheetEligible, tourHe, tourKindHe, euroHe, logVM, compNameHe as _compNameHe } from './match.js';
+import { generateOffers, renewalCheck, makeProOffer, proEligible, respond, expireOffers, requestTransfer as reqT, cancelTransferRequest as cancelT, offerVM, contractVM, endLoan, contractExpiry, releaseYouth, applyPrecontract, effSeason, teamStrOf, setAbroadFlag, resetBenchTalk, signPro } from './transfers.js';
 import { createStars, evolveStars, buildBenchmarks, seasonEndAwards, ballonDor, giveTrophy, giveAward, awardsVM, awardHe, trophyHe } from './awards.js';
 import { raise, sysMsg, runWeekEvents, autoAnswerExpired, answerItem, inboxRows, threadVM, awLabel, coachName, queueEvent } from './narrative.js';
 import { addTimeline, openSpell, closeSpell, creditSpell, recordMatch, pruneMatches, archiveSeason, careerTotals, legacyScore, legacyTierHe, careerVM, hofEntry, trophiesVM, awardsListVM, sumLines, ALL_LINES, CLUB_LINES, lineAvg } from './history.js';
@@ -34,6 +34,8 @@ import { APPROACHES, canTalk, doTalk, talkOdds, onTeamSelection, onTeamMatch, ta
 import { migrateV4 } from './state.js';
 import * as STR22 from '../data/strings.js';
 import { fill as fillT } from './util.js';
+import * as META from './meta.js';
+import { START23 } from './player.js';
 
 export const SCHEMA_VERSION = SV;
 /** R3: engine money is in euros; every label is in shekels (fixed rate EUR_ILS). */
@@ -58,7 +60,14 @@ export function subscribe(fn) { subs.push(fn); return () => { const i = subs.ind
 export function getAndClearSignals() { const s = C.sig; C.sig = []; return s; }
 export function hasCareer() { return !!C.S; }
 export function closeCareer() { C.S = null; C.rng = null; }
-export function migrateState(data, fromVersion) { return _migrate(data, fromVersion); }
+export function migrateState(data, fromVersion) {
+  let fv = fromVersion;
+  if (typeof fv !== 'number' || !Number.isFinite(fv)) fv = data && data.v;
+  const d = _migrate(data, fv);
+  // v4 -> v5 (2.3): progression layer + the one-time OVR 60 lift ("קפיצת מדרגה")
+  if (d && typeof d === 'object' && !(fv >= 5)) META.migrateV5(d);
+  return d;
+}
 
 // ---------------------------------------------------------------- create
 const POS_ORDER = ['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CAM', 'LW', 'RW', 'ST'];
@@ -114,12 +123,15 @@ export function newCareer(opts = {}) {
   S.econ = gender === 'f' ? WOMEN_ECON : 1;
   S.id = 'c_' + b36(now) + '_' + b36(seed);
   S.createdAt = now; S.seed = seed; S.startSeason = startSeason; S.season = startSeason; S.week = 1;
-  C.S = S; C.rng = createRng(seed); C.sig = [];
+  C.S = S; C.rng = createRng(seed); C.sig = []; C.int = null;
   const rng = C.rng;
   initWorld(S);
   initNational(S, gender);
-  S.player = createPlayer(rng, { first, last, nick, nation: opts.nation, pos: opts.pos, foot: opts.foot, club: opts.club, gender, look, num }, startSeason, S.econ);
+  // v2.3: the attributes come from their own seeded stream, so the fast-start card (previewQuickPlayer) shows the real numbers
+  S.player = createPlayer(rngFor(seed, 'player'), { first, last, nick, nation: opts.nation, pos: opts.pos, foot: opts.foot, club: opts.club, gender, look, num, start: START23 }, startSeason, S.econ);
   const p = S.player;
+  p.fts = true;   // v2.3 (F2): a youth star already in the first-team squad (debut planned in week 1)
+  S.meta = META.freshMeta(opts.tutorial !== false);
   p.contract = { club: opts.club, wage: Math.round((150 + 5 * cs(S, opts.club)) * S.econ), until: p.born + 18, role: 'prospect', rc: 0, since: startSeason, loan: false };
   const nr = rngFor(seed, 'names');
   S.names.agent = nr.pick(AGENT_NAMES || []) || 'שוקי לוי';
@@ -134,9 +146,59 @@ export function newCareer(opts = {}) {
   addTimeline(S, 'start', 'הצטרפת לאקדמיה של ' + clubName(opts.club) + '. הכול מתחיל כאן.');
   sysMsg(S, 'system', '{{ברוך הבא|ברוכה הבאה}} ל"הילד מהשכונה"! ' + first + ', הקריירה שלך מתחילה באקדמיה של ' + clubName(opts.club) + '.');
   sysMsg(S, 'mom', 'אמא כאן. הכנתי לך שניצלים לאימון הראשון. אל {{תשכח|תשכחי}} לשתות מים! ❤️');
+  META.refreshObjectives(S);
+  if (opts.tutorial !== false) raise(S, 'strong_start');   // v2.3: week-1 inbox (coach / mom / friends)
   emit('career_started', { nation: p.nation, position: p.pos, club: opts.club, league: clubLeague(S, opts.club), gender });
   notify();
   return G({ ok: true, report: scoutReport(S) });
+}
+
+// v2.3 (F1): fast start. Defaults: Israel, ST (girl: חלוצה), a random top-6 Israeli club, a random look.
+const TOP6_ISR = ['isr_mta', 'isr_mhaifa', 'isr_hbs', 'isr_beitar', 'isr_hta', 'isr_hhaifa'];
+/** Random identity for the "🎲 שחקן אקראי" button: { first, last, nick, look, club, clubHe }. Pure (seeded). */
+export function getRandomIdentity(opts = {}) {
+  const seed = typeof opts.seed === 'number' ? (opts.seed >>> 0) : 0;
+  const gender = opts.gender === 'f' ? 'f' : 'm';
+  const r = rngFor(seed, 'quick', gender);
+  const nm = genName(r, poolOfCountry('isr'), gender);
+  const nk = r.chance(0.5) ? (r.pick((gender === 'f' ? NICKNAMES_F : NICKNAMES) || []) || '') : '';
+  const clubs = TOP6_ISR.filter((id) => CLUB_INDEX[id]);
+  const club = r.pick(clubs) || clubs[0];
+  const look = { skin: r.int(0, 5), hair: r.int(0, 7), hairColor: r.int(0, 5) };
+  return { first: nm.first.slice(0, 20), last: nm.last.slice(0, 20), nick: String(nk).slice(0, 16), look, club, clubHe: club ? clubName(club) : '', gender };
+}
+/** The youth-star card of the fast start before the career exists: { ovr, pos, attrs: [{ key, value }] } - the same numbers
+ * newCareer / quickCareer create for this seed and position. Pure (no career is touched). */
+export function previewQuickPlayer(opts = {}) {
+  const seed = typeof opts.seed === 'number' ? (opts.seed >>> 0) : 0;
+  const pos = POS_ORDER.indexOf(opts.pos) >= 0 ? opts.pos : 'ST';
+  const p = createPlayer(rngFor(seed, 'player'), { first: '', last: '', nation: 'isr', pos, foot: 'R', club: null, gender: opts.gender === 'f' ? 'f' : 'm', start: START23 }, 2026, 1);
+  const keys = pos === 'GK' ? GK_ATTRS.concat(['pac']) : OUT_ATTRS;
+  return { ovr: ovrOf(p), pos, gk: pos === 'GK', attrs: keys.map((k) => ({ key: k, value: Math.round(p.a[k]) })) };
+}
+/** quickCareer({ gender, first, last, nick, random, seed }) -> same as newCareer. Missing names are filled at random. */
+export function quickCareer(opts = {}) {
+  const seed = typeof opts.seed === 'number' ? (opts.seed >>> 0) : randomSeed();
+  const gender = opts.gender === 'f' ? 'f' : 'm';
+  const id = getRandomIdentity({ seed, gender });
+  // explicit fields always win; random (or a missing first / last name) fills the rest
+  const rnd = !!opts.random;
+  const first = String(opts.first || '').trim() || id.first;
+  const last = String(opts.last || '').trim() || id.last;
+  // one display name (v2.3 review): no random nickname on top of a random name
+  const nick = String(opts.nick || '').trim();
+  void rnd;
+  const clubOk = typeof opts.club === 'string' && TOP6_ISR.indexOf(opts.club) >= 0;
+  const r = rngFor(seed, 'quick-foot');
+  const res = newCareer({ first, last, nick, nation: 'isr', pos: POS_ORDER.indexOf(opts.pos) >= 0 ? opts.pos : 'ST', foot: r.chance(0.75) ? 'R' : 'L',
+    club: clubOk ? opts.club : id.club, gender, look: opts.look || id.look, seed, now: opts.now, startSeason: opts.startSeason, tutorial: opts.tutorial });
+  // v2.3 review: a fast-start career = auto-care training (light when tired) + the scouted potential stays in the promised 82-94
+  if (res && res.ok && C.S && C.S.meta) {
+    C.S.meta.fast = true;
+    updatePotSeen(C.S);
+    if (res.report && Array.isArray(res.report.potRange)) { res.report.potRange = C.S.player.potSeen.slice(); res.report.potStars = potStars(C.S.player.potSeen); }
+  }
+  return res;
 }
 
 // C7: optional look chosen in the wizard ({ skin, hair }: small integers or short id strings)
@@ -257,6 +319,19 @@ function recordRes(S, fx, hg, ag, extra, sel, rating) {
   S.comp.res.push({ w: S.week, s: fx.slot, c: fx.comp, k: fx.kind, h: fx.h, a: fx.a, hg, ag, x: extra || null, sel: sel || 'unknown', rt: rating === undefined ? null : rating, rd: roundHe(fx), big: !!fx.big, lvl: fx.lvl || null });
 }
 
+// v2.3 (F9): the stakes of a live match are frozen when it is created (the pre-match card and the resolution agree)
+function mkLive(S, rng, fx, side, sel) {
+  const L = createLive(S, rng, fx, side, sel);
+  try {
+    L.stk = META.stakesFor(S, Object.assign({}, L.fx, { week: S.week, compHe: compHe(S, L.fx.comp), roundHe: roundHe(L.fx) }), side, L.role, !!sel.tut);
+    const line = META.stakeLine(S, L.stk);
+    if (line) addStakeEvent(L, line);
+    // v2.3 review (form governor): after a blank run the coach keeps believing, and says so
+    if (!sel.tut && L.mo.some((x) => x.gov)) addStakeEvent(L, gtext('המאמן צועק מהקווים: "' + (S.player.nick || S.player.first) + ', {{תמשיך|תמשיכי}} לבעוט! זה יבוא"'));
+  } catch (e) { L.stk = null; }
+  return L;
+}
+
 // Decide the player's participation in a slot. Returns true if a live match was created.
 function decidePlayer(S, slot) {
   const p = S.player;
@@ -282,7 +357,7 @@ function decidePlayer(S, slot) {
       if (natLvl === 'senior' && sel.sel !== 'injured') W.ntCalled = true;   // an injured call-up is not "a call-up without minutes"
       fx.lvl = natLvl === 'senior' ? (fx.lvl || null) : natLvl;
       if (sel.plays) {
-        S.live = createLive(S, rng, fx, fx.h === p.nation ? 'h' : 'a', sel);
+        S.live = mkLive(S, rng, fx, fx.h === p.nation ? 'h' : 'a', sel);
         return true;
       }
       if (fx.ref && fx.ref.t === 'gen') {
@@ -302,22 +377,35 @@ function decidePlayer(S, slot) {
     const s = cs(S, p.club);
     const preQF = cfx.kind === 'cup' && ['qf', 'sf', 'f'].indexOf(cfx.rk) < 0;
     let sel;
-    if (p.stage === 'youth') {
+    if (META.tutorialPending(S) && !p.injury && p.susp <= 0 && (cfx.kind === 'league' || cfx.kind === 'cup')) {
+      // v2.3 (F3): the planned debut - on from the bench in the 62nd minute
+      sel = { sel: 'bench', on: 62, off: 90, plays: true, tut: true, score: 0 };
+      META.tutorialStart(S);
+      youthOk = false;
+      W.clubFx = true;
+    } else if (p.stage === 'youth') {
       const age = ageOf(S), ovr = ovrOf(p);
+      const fts = !!p.fts;   // v2.3: a youth star in the first-team squad sees a first-team match almost every week
       let inSquad = false;
-      if (!p.injury && age >= 16 && ovr >= s - 12) inSquad = rng.chance(clamp(0.15 + (ovr - (s - 12)) * 0.06, 0, 0.9));
+      if (!p.injury && age >= 16 && ovr >= s - (fts ? 16 : 12)) inSquad = rng.chance(fts ? clamp(0.62 + (ovr - (s - 12)) * 0.03, 0.55, 0.9) : clamp(0.15 + (ovr - (s - 12)) * 0.06, 0, 0.9));
       if (inSquad) {
         sel = clubSelection(S, rng, { kind: cfx.kind, preQF }, s);
-        if (sel.sel === 'out') {
+        if (sel.sel === 'out' || (fts && sel.sel === 'bench' && !sel.plays)) {
           sel.sel = 'bench';
-          if (rng.chance(clamp(0.55 + 0.05 * sel.score, 0.25, 0.9))) { sel.on = rng.int(55, 80); sel.off = 90; sel.plays = true; }
+          if (rng.chance(fts ? clamp(0.75 + 0.02 * sel.score, 0.6, 0.92) : clamp(0.55 + 0.05 * sel.score, 0.25, 0.9))) { sel.on = rng.int(55, 80); sel.off = 90; sel.plays = true; }
           else sel.plays = false;
         }
+        // v2.3: the first-team coach's word (coach talk) holds for a youth in the first-team squad too
+        const tp = p.talk && p.talk.promise;
+        if (tp && tp.ok === null && tp.club === p.club && sel.sel !== 'starter' && sel.sel !== 'injured' && sel.sel !== 'suspended' && !(p.talk && p.talk.pen)) sel = { sel: 'starter', on: 0, off: 90, plays: true, score: sel.score || 0, forced: true };
+        onTeamSelection(S, sel);   // bench run + promise follow the matches the youth is picked for
         youthOk = false;
         W.clubFx = true;
       } else sel = { sel: p.injury ? 'injured' : 'out', plays: false, youthTeam: true };
     } else {
       sel = clubSelection(S, rng, { kind: cfx.kind, preQF }, s);
+      // v2.3 (F9): "score and you start next week" - the coach keeps his word
+      if (sel.sel !== 'injured' && sel.sel !== 'suspended' && META.takeForcedStart(S) && sel.sel !== 'starter') sel = { sel: 'starter', on: 0, off: 90, plays: true, score: sel.score || 0, forced: true };
       youthOk = sel.sel === 'out' && ageOf(S) <= 18;
     }
     if (!sel.youthTeam) W.sel[fxKey(cfx)] = sel.sel;
@@ -328,7 +416,7 @@ function decidePlayer(S, slot) {
     if (sel.rested || ((sel.sel === 'bench' || sel.sel === 'out') && !sentDown && (p.load >= 80 || p.energy < 35))) W.rested = true;
     if (sel.sel === 'starter') W.started = true;
     if (sel.plays) {
-      S.live = createLive(S, rng, cfx, cfx.h === p.club ? 'h' : 'a', sel);
+      S.live = mkLive(S, rng, cfx, cfx.h === p.club ? 'h' : 'a', sel);
       return true;
     }
     if (!sel.youthTeam && p.stage === 'pro') p.trust = clamp(p.trust - 1, 0, 100);
@@ -341,7 +429,7 @@ function decidePlayer(S, slot) {
       W.sel[fxKey(yfx)] = sel.sel;
       if (p.stage === 'youth') onTeamSelection(S, sel);
       if (sel.plays) {
-        S.live = createLive(S, rng, yfx, yfx.h === p.club ? 'h' : 'a', sel);
+        S.live = mkLive(S, rng, yfx, yfx.h === p.club ? 'h' : 'a', sel);
         return true;
       }
     }
@@ -377,7 +465,8 @@ function simulateSlot(S, slot) {
     if (fixed || isPlayerTeamFx(S, fx, key)) {
       if (!fixed) {
         const sel = W.sel[key] || 'out';
-        const showRow = fx.kind !== 'youth' || p.stage === 'youth' || W.sel[key];
+        // v2.3 review: a youth match the player was not part of is not news (no 'לא נכללת בסגל' rows every week)
+        const showRow = fx.kind !== 'youth' || (W.sel[key] && W.sel[key] !== 'out');
         if (showRow) W.results.push(resultRow(S, fx, hg, ag, extra, false, null, NOTE[sel] || ''));
         recordRes(S, fx, hg, ag, extra, sel, null);
       } else {
@@ -465,7 +554,7 @@ function callups(S) {
     else if (p.caps.senior < 3) {
       const yl = youthLevelByAge(age);
       const year = S.season + 1;
-      if (yl && !(yl === 'u21' && year % 2 === 0) && ovrOf(p) >= youthThreshold(yl, str)) {
+      if (yl && !(yl === 'u21' && year % 2 === 0) && ovrOf(p) + META.yntBoost(S) >= youthThreshold(yl, str)) {
         buildYouthTournament(S, yl);
         S.comp.sc[S.nt.ytour.key] = { n: '', club: null, g: 3 + R().int(0, 3) };
         lvl = yl;
@@ -475,7 +564,7 @@ function callups(S) {
     if (seniorOk) lvl = 'senior';
     else if (p.caps.senior < 3) {
       const yl = youthLevelByAge(age);
-      if (yl && ovrOf(p) >= youthThreshold(yl, str)) lvl = yl;
+      if (yl && ovrOf(p) + META.yntBoost(S) >= youthThreshold(yl, str)) lvl = yl;
     }
   }
   if (!lvl) return;
@@ -523,28 +612,33 @@ function weekStart(S, training) {
   const p = S.player;
   const rng = R();
   ensureLoad(S);
+  META.ensureMeta(S);
   const tr = parseTraining(training);
   S.inWeek = true; S.wstep = 0;
   if (tr.focus !== undefined && tr.focus !== null) S.training = validTraining(S, tr.focus);
   else S.training = validTraining(S, S.training);
   if (tr.intensity !== undefined && tr.intensity !== null) { const vi = validIntensity(S, tr.intensity); if (vi) S.trainInt = vi; }
   // v2.2: the physio's "light week" (physio_warn) overrides the stored intensity for this one week only
-  const oneWeek = S.trainNext && INT_IDS.indexOf(S.trainNext) >= 0 ? S.trainNext : null;
+  let oneWeek = S.trainNext && INT_IDS.indexOf(S.trainNext) >= 0 ? S.trainNext : null;
   if (S.trainNext !== undefined) delete S.trainNext;
+  // v2.3 review: auto-care for fast-start careers - a tired player (energy under 40) trains light this week on its own
+  let autoLight = false;
+  if (!oneWeek && S.meta && S.meta.fast && S.training !== 'rest' && p.energy < 40 && ['normal', 'hard', 'extreme'].indexOf(effIntensity(S, S.training, S.trainInt)) >= 0) { oneWeek = 'light'; autoLight = true; }
   // v2.2: a new season starts a new bench run (summer weeks have no club matches)
   if (S.week === 1) { p.benchRun = 0; p.lowMin = 0; }
   S.ev.trig = (S.ev.carry || []).slice();
   S.ev.carry = [];
   S.wsum = { ovrBefore: ovrOf(p), results: [], lines: [], injuryHe: null, callupHe: null, msgs: 0, offers: 0, hadMatchday: false,
     dec: [0, 0], fixed: {}, sel: {}, min: 0, started: false, clubFx: false, derby: false, firstCall: false, newInj: 0, m0: S.ctr.m, trainHe: '', seasonEnded: false, retiredNow: false,
-    tf: S.training, ti: effIntensity(S, S.training, oneWeek || S.trainInt), physio: !!oneWeek, e0: p.energy, l0: Math.round(p.load), s0: Math.round(p.sharp), nm: 0, ntCalled: false, ntPlayed: false, tk: null };
+    tf: S.training, ti: effIntensity(S, S.training, oneWeek || S.trainInt), physio: !!oneWeek, e0: p.energy, l0: Math.round(p.load), s0: Math.round(p.sharp), nm: 0, ntCalled: false, ntPlayed: false, tk: null, st0: S.meta.st.earn };
+  if (autoLight) S.wsum.lines.push(gtext('האנרגיה נמוכה, אז הצוות המקצועי הוריד לך את האימון לקל השבוע'));
   // v2.2: natural load decay, then the energy recovery scaled by the load (replaces the flat +20 / +15)
   weekStartLoad(S, S.training);
   // a failed "threat" while on loan: back to the parent club when the window opens
   if (p.talk && p.talk.recall && p.contract && p.contract.loan && isWindowOpen(S.week) && S.week <= 44) recallLoan(S);
   if (p.injury) {
     p.injury.weeks--;
-    if (p.injury.weeks <= 0) { p.injury = null; raise(S, 'injury_return'); sysMsg(S, 'doctor', 'חזרת לכשירות מלאה. בהצלחה על הדשא!'); }
+    if (p.injury.weeks <= 0) { p.injury = null; raise(S, 'injury_return'); sysMsg(S, 'doctor', 'חזרת לכשירות מלאה. בהצלחה על הדשא!'); META.onInjuryEnd(S); }
   }
   const age = ageOf(S);
   if (S.week === 1) { raise(S, 'season_start'); if (age >= 33) raise(S, 'retire_soon'); if (age === 30) raise(S, 'age_30'); }
@@ -564,6 +658,7 @@ function weekStart(S, training) {
   callups(S);
   generateOffers(S, rng);
   renewalCheck(S, rng);
+  META.refreshObjectives(S);   // v2.3 (F4): rotate the weekly objectives
 }
 
 // ---------------------------------------------------------------- week run
@@ -643,6 +738,15 @@ function weekEnd(S, ff) {
   }
   if (p.stage === 'free') p.freeWeeks++; else p.freeWeeks = 0;
   if (p.agentPush > 0) p.agentPush--;
+  // v2.3: the first pro contract never slips by unseen - unanswered at its deadline, the club and the family sign it
+  if (p.stage === 'youth') {
+    for (const o of S.offers.slice()) {
+      if (o.status !== 'open' || o.type !== 'pro' || curAw(S) <= o.exp) continue;
+      o.status = 'accepted'; o.cl = curAw(S);
+      signPro(S, o);
+      sysMsg(S, 'club', 'לא הספקת לענות, אז ההורים חתמו בשבילך: החוזה המקצועני הראשון שלך ב' + clubName(p.club) + '!');
+    }
+  }
   // offers expiry
   const expired = expireOffers(S);
   if (p.stage === 'youth' && expired.some((o) => o.type === 'pro') && S.ev.flags._relpend) {
@@ -668,6 +772,9 @@ function weekEnd(S, ff) {
   nationalNote(S, !!W.ntCalled, !!W.ntPlayed);
   tidyLoad(p);
   const lvm = loadVM(S);
+  // v2.3: objectives / achievements / the training mini-goal of a week without a match / week_reached
+  const mw = META.onWeekEnd(S, { hadMatch: !!W.hadMatchday, focus: tr, intensity: ti, injured: injuredWeek });
+  for (const l of mw.lines) W.lines.push(l);
   if (S.week === 44) seasonEnd(S);
   if (!S.retired) runWeekEvents(S, rng, { opp: opponentHint(S), derby: W.derby });
   let retiredNow = false;
@@ -684,6 +791,8 @@ function weekEnd(S, ff) {
     loadLineHe: weekLoadLine(W, p, lvm), sharpBefore: typeof W.s0 === 'number' ? W.s0 : lvm.sharp,
     sharpLineHe: fillT(uiT('weekSharp', 'חדות {s0} ← {s1}'), { s0: typeof W.s0 === 'number' ? W.s0 : lvm.sharp, s1: lvm.sharp }),
     promiseHe: promiseHe || null, promiseKept: promiseHe ? (W.pk === true ? true : W.pk === false ? false : null) : null, burnout: !!lw.burnout, trainingInjury: !!tw.injured,
+    // v2.3
+    objectivesDone: mw.objectives, achievements: mw.achievements, quiet: mw.quiet, starsWeek: Math.max(0, S.meta.st.earn - (typeof W.st0 === 'number' ? W.st0 : S.meta.st.earn)), stars: S.meta.st.bal,
   };
   if (ff) { ff.newInj = W.newInj; ff.firstCall = W.firstCall; }
   S.inWeek = false; S.wstep = 0; S.wsum = null;
@@ -699,6 +808,7 @@ function onInjury(S, where) {
   const p = S.player;
   const W = S.wsum;
   p.morale -= 8;
+  META.onInjuryStart(S);
   raise(S, 'injury');
   if (p.injury.weeks >= 6) raise(S, 'long_injury');
   const he = injuryHe(p.injury);
@@ -746,6 +856,7 @@ function seasonEnd(S) {
     }
   }
   contractExpiry(S);
+  META.seasonObjectiveEnd(S);
   p.treq = false;
   S.pending.review = S.season;
   if (ageOf(S) >= 33 && p.stage !== 'retired') S.pending.retire = 'offer';
@@ -822,6 +933,7 @@ function retireNow(S, reason, forced) {
   S.retired.club = lastClub || null;
   // R2: coaching offers (the world keeps running in manager mode)
   MG.initRetirementOffers(S, !!(forced && S.week === 52));
+  META.checkAchievements(S);
 }
 
 // ---------------------------------------------------------------- facade: hub and time
@@ -882,6 +994,7 @@ export function talkToCoach(approach) {
   if (!c.ok) return G({ ok: false, error: 'not_now', messageHe: c.reasonHe, reasonHe: c.reasonHe });
   const r = doTalk(S, R(), approach, { recall: recallLoan });
   clampStatus(S.player);
+  META.noteTalk(S, !!r.success);
   emit('coach_talk', { approach, success: !!r.success });
   notify();
   return G(r);
@@ -963,6 +1076,15 @@ export function chooseMoment(optionIndex) {
   notify();
   return G({ outcome, match: matchVM(S, L) });
 }
+/** v2.3 review (key moments in watch mode): resolve only the current moment with the auto choice -> { outcome, match }. */
+export function autoMoment() {
+  const S = need();
+  const L = S.live;
+  if (!L) throw new Error('no_match');
+  const outcome = autoOneLive(S, R(), L);
+  notify();
+  return G({ outcome, match: matchVM(S, L) });
+}
 export function autoPlayMatch() {
   const S = need();
   const L = S.live;
@@ -1010,6 +1132,8 @@ function finishInternal(S) {
   if (nl) { p.caps[nl]++; p.ig[nl] += ms.g; }
   const F = S.hist.firsts;
   const aw = curAw(S);
+  const debutNow = (fx.kind === 'league' || fx.kind === 'cup' || fx.kind === 'europe') && F.debut === null;
+  const derbyNow = (fx.kind === 'league' || fx.kind === 'cup') && !!clubData(L.own) && clubData(L.own).rival === L.opp;
   if (fx.kind === 'league' || fx.kind === 'cup' || fx.kind === 'europe') {
     if (F.debut === null) { F.debut = aw; raise(S, 'debut'); emit('debut', { kind: 'senior' }); addTimeline(S, 'debut', 'הופעת בכורה בקבוצה הבוגרת של ' + clubName(L.own) + '!'); }
     if (ms.g > 0 && F.goal === null) { F.goal = aw; raise(S, 'first_goal'); addTimeline(S, 'goal', 'השער הראשון בקריירה הבוגרת, נגד ' + clubName(L.opp) + '!'); }
@@ -1061,7 +1185,7 @@ function finishInternal(S) {
     }
   }
   let injuryHeTxt = null;
-  if (!p.injury && rng.chance(injuryChanceMatch(S, minutes) * bandNow.inj)) {
+  if (!L.tut && !p.injury && rng.chance(injuryChanceMatch(S, minutes) * bandNow.inj)) {
     p.injury = rollInjury(S, rng);
     onInjury(S);
     injuryHeTxt = injuryHe(p.injury) + ' · ' + p.injury.weeks + ' שבועות';
@@ -1074,6 +1198,11 @@ function finishInternal(S) {
   if (fx.final && rating >= 8.0) giveAward(S, 'motm_final', fx.comp, null);
   clampStatus(p);
   emit('match_played', { kind: fx.kind, result: res, rating, role: L.role, auto: !!L.auto });
+  // v2.3: counters, stakes resolution, personal goal, objectives, achievements, the debut card
+  const tieWon = fx.ko ? koWinner(L.sc[0], L.sc[1], extra, fx.tie && fx.tie.agg ? fx.tie.agg : null) === L.side : null;
+  const lateWinner = L.log.some((e) => e.win && e.who === 'me' && e.m >= 85);
+  const myG = L.log.find((e) => e.ev === 'goal' && e.who === 'me');
+  const mx = META.onMatchDone(S, { fx, L, res, rating, g: ms.g, a: ms.a, minutes, starter, role: L.role, cs: csOk, th, home: L.side === 'h', debutNow, derby: derbyNow, tieWon, lateWinner, myGoalMinute: myG ? myG.m : null });
   // tie text
   let tieHe = null;
   if (fx.ko) {
@@ -1095,6 +1224,9 @@ function finishInternal(S) {
     myShortHe: (L.side === 'h' ? teamVM(fx.h, v) : teamVM(fx.a, v)).shortHe, oppShortHe: (L.side === 'h' ? teamVM(fx.a, v) : teamVM(fx.h, v)).shortHe,
     playerHe: L.pn || p.nick || p.last, num: p.num, gender: p.gender === 'f' ? 'f' : 'm', final: !!fx.final, big: !!fx.big,
     effectsHe: eff, tieHe, injuryHe: injuryHeTxt,
+    // v2.3
+    stakes: mx.stakes, achievements: mx.achievements, objectivesDone: mx.objectives, milestones: mx.milestones, starsEarned: mx.starsEarned, tutorial: mx.tutorial,
+    stars: S.meta.st.bal, cosmetics: META.equippedOf(S),
   };
   if (W) {
     W.fixed[fxKey(fx)] = [L.sc[0], L.sc[1], extra];
@@ -1131,13 +1263,16 @@ export function getLastMatch() {
 export function fastForward(opts = {}) {
   const S = need();
   const until = opts.until || 'next_match';
-  const maxW = typeof opts.maxWeeks === 'number' && opts.maxWeeks > 0 ? opts.maxWeeks : Infinity;
+  const ev = until === 'event';   // v2.3: "המשך עד האירוע הבא" - stops on anything interesting
+  const maxW = typeof opts.maxWeeks === 'number' && opts.maxWeeks > 0 ? opts.maxWeeks : (ev ? 12 : Infinity);
+  META.takeInteresting(S);
   const nWeeks = typeof opts.weeks === 'number' ? opts.weeks : 1;
   const summaries = [];
   let weeks = 0;
   let stopped = null;
   const startSeason = S.season;
-  const done = (st) => { notify(); return G({ ok: true, weeks, summaries: summaries.slice(-10), stopped: st, hub: hubVM(S) }); };
+  let stopInfo = null;
+  const done = (st) => { notify(); return G({ ok: true, weeks, summaries: summaries.slice(-10), stopped: st, stopInfo: stopInfo ? { kind: stopInfo.kind, he: stopInfo.he || '' } : null, hub: hubVM(S) }); };
   if (S.retired) return done('retired');
   const evalStop = (sum, m0, ff) => {
     if (S.retired) return 'retired';
@@ -1146,10 +1281,19 @@ export function fastForward(opts = {}) {
     if (S.inbox.some((it) => it.imp && Number(it.id.slice(1)) > m0 && it.ans === null)) return 'event';
     if (ff && ff.newInj >= 3) return 'injury';
     if (ff && ff.firstCall) return 'callup';
+    if (ev) { const k = META.takeInteresting(S); if (k) { stopInfo = k; return k.kind; } }
     return null;
+  };
+  const notable = () => {
+    if (!(ev && S.live && S.live.stk)) return false;
+    const k = S.live.stk.list.find((x) => NOTABLE.indexOf(x.kind) >= 0);
+    if (!k) return false;
+    stopInfo = { kind: k.kind, he: k.he };
+    return true;
   };
   const playOut = (r, m0) => {
     while (r && r.ok && r.status === 'match') {
+      if (notable()) return NOTABLE_STOP[stopInfo.kind] || 'stakes';
       autoPlayLive(S, R(), S.live);
       finishInternal(S);
       r = resumeInternal(S);
@@ -1190,6 +1334,8 @@ export function fastForward(opts = {}) {
     if (stopped) return done(stopped);
   }
 }
+const NOTABLE = ['debut', 'first_start', 'derby', 'cup_final', 'europe_ko', 'tournament', 'title', 'relegation', 'scout_abroad', 'scout_local', 'coach_promise', 'ynt_watch', 'nt_watch', 'contract', 'milestone'];
+const NOTABLE_STOP = { debut: 'debut', first_start: 'first_start', derby: 'derby', cup_final: 'big_match', europe_ko: 'big_match', tournament: 'big_match' };
 
 // ---------------------------------------------------------------- season review
 function seasonStatsFrom(st) {
@@ -1382,10 +1528,13 @@ function upcomingFixtures(S, ov) {
   const cur = S.week;
   const doneSlot = (w, s) => w < cur || (w === cur && S.inWeek && ((s === 'mw' && S.wstep >= 1) || (s === 'wk' && S.wstep >= 2)));
   const club = p.club;
+  // v2.3 (F9): a youth star in the first-team squad sees the first-team fixtures first (the youth side is the fallback)
+  const ftsY = !ov && p.stage === 'youth' && !!(p0 && p0.fts);
+  const firstTeam = p.stage !== 'youth' || ftsY;
   if (club && p.stage !== 'free') {
     const lid = clubLeague(S, club);
     const L = lid && S.comp.lg[lid];
-    if (L && p.stage !== 'youth') {
+    if (L && firstTeam) {
       const sl = leagueRoundSlots(L.R);
       for (let r = L.r; r < L.R; r++) {
         const fxs = leagueRoundFixtures(S, lid, r);
@@ -1395,7 +1544,7 @@ function upcomingFixtures(S, ov) {
         out.push({ f: { comp: lid, kind: 'league', h: m[0], a: m[1], r }, week: sl[r].w, slot: sl[r].s, isHome: m[0] === club, pri: 2 });
       }
     }
-    if (p.stage !== 'youth') {
+    if (firstTeam) {
       for (const id of cupIds()) {
         const Cp = S.comp.cups[id];
         if (!Cp || Cp.w) continue;
@@ -1424,7 +1573,7 @@ function upcomingFixtures(S, ov) {
       for (let r = Y.r; r < Y.R; r++) {
         const m = youthRoundFixtures(S, r).find((x) => x[0] === club || x[1] === club);
         if (!m || !sl[r] || doneSlot(sl[r].w, sl[r].s)) continue;
-        out.push({ f: { comp: Y.id, kind: 'youth', h: m[0], a: m[1], r }, week: sl[r].w, slot: sl[r].s, isHome: m[0] === club, pri: p.stage === 'youth' ? 3 : 1 });
+        out.push({ f: { comp: Y.id, kind: 'youth', h: m[0], a: m[1], r }, week: sl[r].w, slot: sl[r].s, isHome: m[0] === club, pri: p.stage === 'youth' && !ftsY ? 3 : 1 });
       }
     }
   }
@@ -1568,6 +1717,13 @@ function hubVM(S) {
     // R2: coaching career after retirement (status stays 'retired'; the UI routes to #/manager while manager.active)
     manager: S.mgr ? { active: S.mgr.st !== 'done', st: S.mgr.st, openOffers: S.mgr.offers.filter((o) => o.status === 'open').length, route: S.mgr.st !== 'done' ? '#/manager' : '#/retire' } : null,
     announcementsHe: ann,
+    // v2.3: stars, the career path's next milestone, the objectives, the equipped cosmetics, the debut tutorial
+    stars: { balance: S.meta ? S.meta.st.bal : 0, earnedTotal: S.meta ? S.meta.st.earn : 0 },
+    path: S.meta ? META.pathVM(S).next : null,
+    objectives: S.meta ? META.objectivesVM(S) : { weekly: [], season: null },
+    cosmetics: S.meta ? META.equippedOf(S) : { boots: null, celebration: null, frame: null, accessory: null },
+    tutorial: { st: S.meta ? S.meta.tut.st : 'skip', active: !!(S.meta && (S.meta.tut.st === 'pending' || S.meta.tut.st === 'live')) },
+    toasts: S.meta ? S.meta.tq.length : 0,
   };
 }
 export function getHub() { return G(hubVM(need())); }
@@ -1756,6 +1912,7 @@ export function answerEvent(id, choiceIndex) {
   const it = findItem(S, id);
   const r = answerItem(S, R(), it, choiceIndex, false);
   clampStatus(S.player);
+  if (r.ok) META.noteReply(S);
   if (r.ok) notify();
   return G({ ok: r.ok, thread: threadVM(S, it), effectsHe: r.effectsHe });
 }
@@ -1778,6 +1935,7 @@ export function respondOffer(id, action, counter) {
   const r = respond(S, R(), o, action, counter);
   if (action === 'reject' && o.type === 'pro' && p.stage === 'youth' && S.ev.flags._relpend) { delete S.ev.flags._relpend; releaseYouth(S); }
   clampStatus(p);
+  if (r.ok) META.checkAll(S);   // v2.3: first pro contract / move abroad / top-5 league
   if (r.ok) notify();
   return G({ ok: r.ok, error: r.error, status: r.status, offer: offerVM(S, o, awLabel), messageHe: r.messageHe });
 }
@@ -1862,7 +2020,7 @@ export function getAwards() {
   }));
 }
 export function getShop() { return G(shopVM(need())); }
-export function buyItem(id) { const S = need(); const r = buy(S, id); if (r.ok) notify(); return G(r); }
+export function buyItem(id) { const S = need(); const r = buy(S, id); if (r.ok) { META.noteBuy(S); notify(); } return G(r); }
 export function sellItem(id) { const S = need(); const r = sell(S, id); if (r.ok) notify(); return G(r); }
 
 // ---------------------------------------------------------------- manager / coach career (R2)
@@ -2151,6 +2309,7 @@ export function mgrRespondOffer(id, action) {
   const J = MG.startJob(S, o);
   mgrYouthLeague(S);
   if (J.role === 'youth' && S.week <= 40) MG.setObjective(S, J);
+  META.checkAchievements(S);
   notify();
   return G({ ok: true, status: 'accepted' });
 }
@@ -2180,6 +2339,7 @@ export function mgrAdvance(tactic) {
   if (e) return G(e);
   if (tactic && MG.TACTIC_IDS.indexOf(tactic) >= 0) S.mgr.tactic = tactic;
   const wk = mgrWeek(S);
+  META.checkAchievements(S);
   const summary = mgrSummaryVM(S, wk);
   notify();
   return G({ ok: true, summary });
@@ -2202,6 +2362,7 @@ export function mgrFastForward(opts = {}) {
     if (until === 'weeks' && weeks >= nW) { stopped = 'until'; break; }
     if (weeks >= maxW) { stopped = 'chunk'; break; }
     const wk = mgrWeek(S);
+    META.checkAchievements(S);
     weeks++;
     const sm = mgrSummaryVM(S, wk);
     summaries.push(sm);
@@ -2281,6 +2442,8 @@ export function getSaveMeta() {
     gender: p.gender === 'f' ? 'f' : 'm', look: p.look ? Object.assign({}, p.look) : null, num: p.num,
     // v2.2: the last club of the playing career (still known after retiring), for the admin career_snapshot
     lastClub: lastClubId, lastClubHe: lastClubId ? clubName(lastClubId) : '', lastLeague: lastClubId ? (clubLeague(S, lastClubId) || null) : null,
+    // v2.3
+    cosmetics: S.meta ? META.equippedOf(S) : null, stars: S.meta ? S.meta.st.bal : 0,
   });
 }
 export function loadState(data) {
@@ -2297,9 +2460,10 @@ export function loadState(data) {
     if (!data.player || !data.world || !data.comp) return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
     if (!data.ev.carry) data.ev.carry = [];
     migrateV4(data);   // v2.2 fields (no-op on a v4 save)
+    META.ensureMeta(data);   // v2.3 progression layer (a save without it never replays the tutorial)
     C.S = data;
     C.rng = createRng(data.rng >>> 0);
-    C.sig = [];
+    C.sig = []; C.int = null;
     return { ok: true };
   } catch (e) {
     return { ok: false, error: 'bad_state', messageHe: 'השמירה לא תקינה' };
@@ -2329,3 +2493,67 @@ export function compactState(level) {
   }
   return serialize();
 }
+
+// ---------------------------------------------------------------- v2.3 progression facade (F2-F11)
+/** { weekly: [{ id, type, he, progress, target, rewardHe, rewardStars, done, weeksLeft }], season: {...} | null }. Pure. */
+export function getObjectives() { const S = need(); return G(META.objectivesVM(S)); }
+/** [{ id, tier, he, descHe, unlocked, progress, target, unlockedAbs, stars }]. Pure. */
+export function getAchievements() { const S = need(); return G(META.achievementsVM(S)); }
+/** { balance, earnedTotal, spent, recent: [{ delta, srcHe }] }. Pure. */
+export function getStars() { const S = need(); return G(META.starsVM(S)); }
+/** Buy a cosmetic / boost with stars -> { ok, messageHe, balance }. */
+export function spendStars(itemId) { const S = need(); const r = META.spendStars(S, itemId); if (r.ok) notify(); return G(r); }
+/** { owned: [], equipped: { boots, celebration, frame, accessory }, balance, items: [{ id, slot, he, price, owned, equipped, canBuy, reasonHe }], slots }. Pure. */
+export function getCosmetics() { const S = need(); return G(META.cosmeticsVM(S)); }
+export function equipCosmetic(slot, id) { const S = need(); const r = META.equipCosmetic(S, slot, id); if (r.ok) notify(); return G(r); }
+/** { steps: [{ id, he, done }], next: { id, he, missingHe, progress } | null, doneCount, total }. Pure. */
+export function getPath() { const S = need(); return G(META.pathVM(S)); }
+/** Stakes of the upcoming match: { stakes: [{ he, kind }], goal: { he, rewardStars, kind } | null, live }. The live match's stakes are frozen. Pure. */
+export function getStakes() {
+  const S = need();
+  if (S.live && S.live.stk) return G(Object.assign(META.stakesVM(S.live.stk), { live: true }));
+  if (S.retired || !S.comp) return { stakes: [], goal: null, live: false };
+  const p = S.player;
+  const so = (s) => (s === 'mw' ? 0 : 1);
+  const ups = upcomingFixtures(S).filter((u) => u.week >= S.week).sort((a, b) => (a.week - b.week) || (so(a.slot) - so(b.slot)) || (b.pri - a.pri));
+  const u = ups[0];
+  if (!u) return { stakes: [], goal: null, live: false };
+  const own = u.isHome ? u.f.h : u.f.a, opp = u.isHome ? u.f.a : u.f.h;
+  let big = false;
+  try { big = isBigPure(S, u.f, own, opp); } catch (e) { big = false; }
+  const fx = Object.assign({}, u.f, { slot: u.slot, week: u.week, big, compHe: compHe(S, u.f.comp), roundHe: roundHe(u.f) });
+  const side = u.isHome ? 'h' : 'a', tut = META.tutorialPending(S);
+  // the role (starter / bench) is only decided when the week is played: the forecast keeps only what holds for both
+  // roles (the stakes of the fixture, and the personal goal when it does not depend on the role); the live match
+  // freezes its own stakes (S.live.stk), the single source once the week runs
+  const a = META.stakesVM(META.stakesFor(S, fx, side, 'starter', tut));
+  const b = tut ? a : META.stakesVM(META.stakesFor(S, fx, side, 'bench', tut));
+  const kinds = new Set(b.stakes.map((x) => x.kind));
+  const stakes = a.stakes.filter((x) => kinds.has(x.kind));
+  const goal = a.goal && b.goal && a.goal.id === b.goal.id ? a.goal : null;
+  return G({ stakes, goal, live: false, forecast: true, week: u.week, slot: u.slot });
+}
+/** Daily reward (the UI owns the calendar / streak): dayIndex 1..7, dateKey 'YYYY-MM-DD' -> { ok, day, chest, rewards: [{ kind, amount, he }], balance }. */
+export function claimDaily(dayIndex, dateKey, streak) {
+  const S = C.S;
+  if (!S) return { ok: false, error: 'no_career', rewards: [] };
+  const r = META.claimDaily(S, dayIndex, dateKey, streak);
+  if (r.ok) notify();
+  return G(r);
+}
+/** The 7-day reward calendar: [{ day, he, chest, stars, energy, morale, money, rewards: [{ kind, amount }] }]. Pure. */
+export function getDailyPreview() { const S = need(); return G(META.dailyPreview(S)); }
+/** Leaderboard / challenge summary: { name, gender, nation, clubHe, ovr, goals, trophies, ballon, legacy, careerId, highlight: { id, age, he }, ... }. Pure. */
+export function getCareerSummaryForBoard() {
+  const S = need();
+  let legacy = legacyScore(S);
+  if (S.mgr) { try { const ch = MG.coachHof(S); if (ch && ch.games > 0) legacy = round1(legacy + ch.legacy); } catch (e) { /* player legacy only */ } }
+  return G(META.boardSummary(S, { legacy }));
+}
+/** The debut tutorial: { st: pending|live|done|skip, active, card: { titleHe, achievement, achievements, stars, nextHe, nextMissingHe } | null, tips: [{ id, he }] }. Pure. */
+export function getTutorial() { const S = need(); return G(META.tutorialVM(S)); }
+export function skipTutorial() { const S = need(); META.tutorialSkip(S); notify(); return { ok: true }; }
+/** Pending toasts (achievement / objective / milestone / stars) since the last call; clears the queue. */
+export function takeToasts() { const S = C.S; if (!S) return []; return G(META.popToasts(S)); }
+/** The UI shared a card (F10): counts towards the "shared" achievement. */
+export function noteShare(kind) { const S = need(); const r = META.noteShare(S, kind); notify(); return G(r); }

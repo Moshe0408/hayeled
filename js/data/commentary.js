@@ -1282,6 +1282,138 @@ export const CELEBRATION_TEXT = {
   save: { textHe: ['איזו הצלה!', 'קיר!'], subHe: ['{player}'] },
   win: { textHe: ['ניצחון!', 'שלוש נקודות!'], subHe: ['{score}'] },
   trophy: { textHe: ['{{אלופים|אלופות}}!!!', 'הגביע שלנו!'], subHe: ['{player} {{מניף|מניפה}} את הגביע'] },
+  // v2.3 (kind 'trophy' small variant). {he} = achievement / objective / step name, {n} = stars
+  debut_goal: { textHe: ['גול בבכורה!!!', 'גוללללל בבכורה!!!', 'ככה מתחילים!!!'], subHe: ['{player} {minute}׳', '{{הילד מהשכונה הגיע|הילדה מהשכונה הגיעה}}!'] },
+  achievement: { textHe: ['הישג חדש!', 'נפתח!'], subHe: ['{he}', '{he} · +{n} ⭐'] },
+  objective: { textHe: ['משימה הושלמה!', 'בוצע!'], subHe: ['{he} · +{n} ⭐'] },
+  path: { textHe: ['קפיצת מדרגה!', 'צעד חדש!'], subHe: ['{he}'] },
+  chest: { textHe: ['התיבה נפתחה!', 'יום 7!'], subHe: ['+{n} ⭐'] },
+};
+
+// v2.3 celebration styles (COSMETICS items with slot 'celebration'). One subHe
+// line per style, shown under the main celebration text after the player's
+// goal. Placeholders: {player} {minute}.
+export const CELEBRATION_STYLE_TEXT = {
+  classic: ['{player} {{רץ|רצה}} אל הקהל עם אגרוף באוויר', '{player} {{פותח|פותחת}} ידיים מול היציע'],
+  knee_slide: ['{player} {{מחליק|מחליקה}} על הברכיים עד דגל הקרן!', 'החלקת ברכיים של {player}. הדשא לא ישכח'],
+  heart_hands: ['{player} עושה לב לקהל', 'לב ביד, ישר למצלמה. {player}'],
+  airplane: ['{player} {{פורש|פורשת}} ידיים {{וטס|וטסה}} מול היציע', 'המטוס של {player} נוחת ליד הקהל'],
+  shush: ['{player} {{משתיק|משתיקה}} את היציע של היריבה', 'אצבע על השפתיים. {player} {{אומר|אומרת}} הכול בלי מילה'],
+  salute: ['{player} {{עומד|עומדת}} זקוף {{ומצדיע|ומצדיעה}} ליציע', 'הצדעה של {player}. כל האצטדיון מצדיע בחזרה'],
+  dance: ['{player} {{רוקד|רוקדת}} ליד הדגל, וכל הקבוצה מצטרפת', 'ריקוד הניצחון של {player}. מחר כל השכונה תעתיק'],
+  spin_jump: ['{player} {{קופץ|קופצת}}, {{מסתובב|מסתובבת}} באוויר {{ונוחת|ונוחתת}} עם צעקה!', 'קפיצה, סיבוב, נחיתה. {player}!'],
+  backflip: ['סלטה אחורית של {player}!!!', '{player} עושה סלטה, והפיזיותרפיסט מחזיק את הראש'],
+};
+
+// v2.3 F3: the scripted debut (tutorial) match. The engine builds an
+// engine-valid match where the player comes on and scores; these are its log
+// lines. Placeholders: {minute} {player} {team} {opp} {teammate} {gk} {score}.
+//  gkSave* = goalkeeper careers (a decisive save instead of a goal).
+export const DEBUT_SCRIPT = {
+  intro: [
+    'ערב של בכורה: {team} נגד {opp}. {player} על הספסל, והלב דופק',
+    'האצטדיון מלא. אף אחד עוד לא יודע, אבל הערב הזה ייכנס לסיפור של {player}',
+    'השכונה מול המסך, אבא ביציע. {team} נגד {opp}, ו{player} מחכה לרגע',
+  ],
+  warmup: [
+    'דקה {minute}: המאמן מסמן ל{player} לחמם. זה קורה',
+    'דקה {minute}: {player} {{מוריד|מורידה}} את המעיל ליד הקו. הקהל מתחיל למחוא כפיים',
+  ],
+  subOn: [
+    'דקה {minute}: {player} עולה למגרש! בכורה בבוגרים',
+    'דקה {minute}: חילוף ל{team}: {player} {{נכנס|נכנסת}} לבכורה, והיציע קם על הרגליים',
+    'דקה {minute}: לוח החילופים עולה. המספר של {player}. בכורה!',
+  ],
+  firstTouch: [
+    'דקה {minute}: נגיעה ראשונה של {player}. נקייה, בטוחה, כאילו {{הוא|היא}} פה שנים',
+    'דקה {minute}: {player} {{מקבל|מקבלת}} כדור, {{מסתובב|מסתובבת}}, ו{{משאיר|משאירה}} {{בלם|בלמית}} מאחור. הקהל מתעורר',
+  ],
+  chance: [
+    'דקה {minute}: {teammate} {{מרים|מרימה}} את הראש ורואה את {player} {{רץ|רצה}} לעומק...',
+    'דקה {minute}: כדור חוזר בתוך הרחבה, ו{player} {{ראשון|ראשונה}} עליו...',
+    'דקה {minute}: {player} {{חותך|חותכת}} מהאגף פנימה, אחד על אחד מול {gk}...',
+  ],
+  goal: [
+    'דקה {minute}: גוללללל! {player} {{מבקיע|מבקיעה}} בבכורה! {score}',
+    'דקה {minute}: רשת! {player} {{משאיר|משאירה}} את {gk} בלי סיכוי. שער בבכורה! {score}',
+    'דקה {minute}: אין דברים כאלה! בכורה, נגיעה, שער. {player}! {score}',
+  ],
+  afterGoal: [
+    'דקה {minute}: כל הספסל רץ על {player}. אבא ביציע כבר לא עוצר את הדמעות',
+    'דקה {minute}: הקהל שר את השם של {player} בפעם הראשונה. לא בפעם האחרונה',
+  ],
+  gkSaveChance: [
+    'דקה {minute}: פנדל ל{opp}. {player} {{עומד|עומדת}} על הקו בבכורה',
+    'דקה {minute}: מתפרצת של {opp}, אחד על אחד מול {player}...',
+  ],
+  gkSave: [
+    'דקה {minute}: איזו הצלה!!! {player} {{עוצר|עוצרת}} את זה בבכורה!',
+    'דקה {minute}: {player} {{עף|עפה}} לפינה {{ומוציא|ומוציאה}} את הכדור. קיר בבכורה!',
+  ],
+  fullTime: {
+    W: ['שריקת הסיום: {team} מנצחת {score}, ו{player} {{הוא|היא}} הסיפור של הערב', 'סיום! {score}. בכורה, שער וניצחון. ככה מתחילים אגדה'],
+    D: ['שריקת הסיום: {score}. בלי ניצחון, אבל עם שער בבכורה שאף אחד לא ישכח'],
+    L: ['שריקת הסיום: {score}. הפסד, אבל כל העיתונים כותבים מחר רק על {player}'],
+  },
+  celebrate: {
+    textHe: ['גול בבכורה!!!', 'ככה מתחילים!!!'],
+    subHe: ['{player} {minute}׳', '{{הילד מהשכונה הגיע|הילדה מהשכונה הגיעה}} לבוגרים!'],
+  },
+};
+
+// v2.3 F9: in-match log lines about the match stakes (strings.js STAKES.kinds).
+// At most one per match, any minute. Placeholders: {minute} {player} {team} {opp} {teammate}.
+export const STAKES_COMMENTARY = {
+  scout_abroad: [
+    'דקה {minute}: המצלמה עוברת ליציע. הסקאוט מחו״ל רושם משהו במחברת',
+    'דקה {minute}: הסקאוט ביציע מדבר בטלפון. אחרי המהלך של {player}, זה לא נראה מקרי',
+    'דקה {minute}: {player} {{יודע|יודעת}} מי יושב ביציע. וזה רואים',
+  ],
+  scout_local: [
+    'דקה {minute}: ביציע, האיש עם המעיל רושם את השם של {player}',
+    'דקה {minute}: הסקאוט קם לראות את המהלך של {player} מקרוב',
+  ],
+  ynt_watch: [
+    'דקה {minute}: מאמן הנבחרת הצעירה ביציע, ו{player} {{נותן|נותנת}} לו סיבה טובה לזכור',
+    'דקה {minute}: המצלמה תופסת את מאמן הנבחרת הצעירה מהנהן',
+  ],
+  nt_watch: [
+    'דקה {minute}: מאמן הנבחרת ביציע הכבוד. כל נגיעה של {player} נרשמת',
+    'דקה {minute}: מאמן הנבחרת מסמן משהו לעוזר שלו אחרי המהלך של {player}',
+  ],
+  derby: [
+    'דקה {minute}: הדרבי בוער. אף אחד במגרש לא מוותר על כדור',
+    'דקה {minute}: שני היציעים שרים בבת אחת. ככה נשמע דרבי',
+    'דקה {minute}: תיקול של {player}, והיציע שלנו קם כאילו זה שער',
+  ],
+  coach_promise: [
+    'דקה {minute}: המאמן על הקו לא מוריד את העיניים מ{player}',
+    'דקה {minute}: {player} {{זוכר|זוכרת}} מה המאמן אמר: שער אחד, וההרכב {{שלו|שלה}}',
+  ],
+  coach_test: [
+    'דקה {minute}: {teammate} {{מחמם|מחממת}} על הקו. {player} {{מרגיש|מרגישה}} את זה',
+    'דקה {minute}: המאמן רושם משהו. {player} {{מגביר|מגבירה}} קצב',
+  ],
+  family: [
+    'דקה {minute}: אבא ביציע קם עם התרמוס ביד אחרי הנגיעה של {player}',
+    'דקה {minute}: בשורה הראשונה אמא צועקת {{"זה הבן שלי!"|"זאת הבת שלי!"}}',
+  ],
+  milestone: [
+    'דקה {minute}: עוד שער אחד למספר עגול, ו{player} {{מחפש|מחפשת}} אותו',
+    'דקה {minute}: {player} {{בועט|בועטת}} מרחוק. כולם יודעים מה {{הוא רודף|היא רודפת}} אחריו הערב',
+  ],
+  cup_final: [
+    'דקה {minute}: גמר. כל כדור שווה גביע',
+    'דקה {minute}: הגביע עומד ליד המנהרה. {player} {{עובר|עוברת}} לידו בדרך לקרן',
+  ],
+  relegation: [
+    'דקה {minute}: כל נקודה שווה הישארות. {team} נלחמת על כל כדור',
+    'דקה {minute}: היציע דוחף. במשחק כזה אין כדור קטן',
+  ],
+  title: [
+    'דקה {minute}: בטלפונים ביציע כבר בודקים את התוצאה של המתחרה באליפות',
+    'דקה {minute}: מרוץ האליפות בשיאו, והלחץ מורגש על הדשא',
+  ],
 };
 
 // v2.2 (optional, docs/SPEC-2.2-training-bench.md §3.4): watch-mode log lines about

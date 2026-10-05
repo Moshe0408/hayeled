@@ -124,6 +124,7 @@ export function render(root) {
       const ok = await confirmDialog({ title: o.roleHe + ' · ' + o.team.nameHe, text: gtext('{{מתחיל|מתחילה}} קריירה חדשה על הקווים. ההנהלה, האוהדים והשחקנים מחכים לך.'), yes: 'חותמים' });
       if (!ok) return;
       const res = call(() => game.mgrRespondOffer(o.id, 'accept'));
+      import('../core/friends.js').then((m) => m.syncMyCareer({ force: true })).catch(() => {});
       if (res && res.ok) {
         try { if (ctx.hooks && ctx.hooks.saveNow) ctx.hooks.saveNow(); } catch { /* ignore */ }
         toast(g('ברוך הבא לקווים!', 'ברוכה הבאה לקווים!'), { tone: 'good' });

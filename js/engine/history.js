@@ -150,7 +150,9 @@ export function careerVM(S, awLabel) {
   const tl = S.hist.timeline.slice().reverse().map((e) => ({ id: e.id, dateHe: awLabel(e.aw), icon: e.icon, textHe: gtext(e.t) }));
   return {
     timeline: tl, seasons,
-    totals: { apps: t.apps, goals: t.goals, assists: t.assists, avgRating: t.avgRating, motm: t.motm, caps: t.caps, intlGoals: t.intlGoals },
+    totals: { apps: t.apps, goals: t.goals, assists: t.assists, avgRating: t.avgRating, motm: t.motm, caps: t.caps, intlGoals: t.intlGoals,
+      // v2.3 review: youth national teams (U17 / U19 / U21) counted on their own row
+      youthCaps: S.player.caps.u17 + S.player.caps.u19 + S.player.caps.u21, youthGoals: S.player.ig.u17 + S.player.ig.u19 + S.player.ig.u21 },
     trophies: trophiesVM(S), awards: awardsListVM(S), clubs,
   };
 }

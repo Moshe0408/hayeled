@@ -3,6 +3,8 @@
 // women's competition names (C3).
 import { rngFor } from '../core/rng.js';
 import { MATCH_TEXT } from '../data/commentary.js';
+import * as COMX from '../data/commentary.js';
+import { equippedOf } from './meta.js';
 import { EURO_COMPS, TOURNAMENTS, ROUND_NAMES, ODDS, SELECTION } from '../data/strings.js';
 import { LEAGUE_BY_ID } from '../data/leagues.js';
 import { clamp, fill, round1, curGender, gtext } from './util.js';
@@ -91,6 +93,17 @@ export function extraHe(et, extra) {
   return m ? 'פנדלים ' + m[1] + '-' + m[2] : null;
 }
 
+// v2.3 (F3): the scripted debut's lines (commentary.js DEBUT_SCRIPT); null = use the normal commentary
+function tutLine(L, key, v, sub, salt) {
+  const DS = COMX.DEBUT_SCRIPT;
+  if (!L.tut || !DS) return null;
+  const arr = sub ? (DS[key] && DS[key][sub]) : DS[key];
+  if (!Array.isArray(arr) || !arr.length) return null;
+  const t = arr[rngFor('tut', L.ck || 'x', key, sub || '', salt || '').int(0, arr.length - 1)];
+  const out = fill(t, v);
+  return /{[a-zA-Z0-9_]+}/.test(out) ? null : out;
+}
+
 function teamName(S, id, variant) { return teamVM(id, variant).shortHe; }
 function playerCall(S) { const p = S.player; return p.nick || p.last; }
 
@@ -154,7 +167,33 @@ export function createLive(S, rng, fxd, side, sel) {
   const minutes = off - on;
   const sOwn = sOwnBase + (ovr - sOwnBase) * 0.10 * (minutes / 90);
   const big = isBig(S, fxd, own, opp);
-  const ms = generateMoments(rng, { pos: p.pos, starter: role === 'starter', on, off, big, ovr, teamStr: sOwnBase });
+  let ms = generateMoments(rng, { pos: p.pos, starter: role === 'starter', on, off, big, ovr, teamStr: sOwnBase });
+  // v2.3 (F3): the scripted debut. The player comes on, gets one build-up moment and one golden chance late on; every option
+  // of a tutorial moment succeeds (chooseLive), so the debut always ends with the player's goal (a mega celebration).
+  const tut = !!sel.tut;
+  if (tut) {
+    const gkP = p.pos === 'GK';
+    const firstType = gkP ? 'gk_penalty' : (p.pos === 'LW' || p.pos === 'RW' || p.pos === 'LB' || p.pos === 'RB') ? 'dribble' : 'through_ball';
+    ms = [{ m: Math.min(80, on + 7), type: firstType }, { m: 86, type: gkP ? 'penalty' : 'one_on_one' }];
+  }
+  // v2.3 review: the form governor. A drought (3+ senior games with 20+ minutes and no goal / assist) gets one golden
+  // chance (a one-on-one); after 4 blank games that chance cannot fail. A hot streak makes the chances a bit harder,
+  // so goals stay special. Deterministic: no draw from the match stream.
+  const fm = formOf(S);
+  const seniorK = fxd.kind === 'league' || fxd.kind === 'cup' || fxd.kind === 'europe' || fxd.kind === 'national' || fxd.kind === 'friendly';
+  const pg = posGroup(p.pos);
+  let govM = null;
+  if (!tut && seniorK && (pg === 'ATT' || p.pos === 'CAM') && fm.dry >= 3 && minutes >= 12) {
+    const ex = ms.find((x) => x.type === 'one_on_one' || x.type === 'penalty');
+    if (ex) govM = ex.m;
+    else {
+      let mm = clamp(Math.round(on + (off - on) * 0.62), on + 3, off - 2);
+      while (ms.some((x) => x.m === mm)) mm++;
+      govM = mm;
+      ms.push({ m: mm, type: 'one_on_one' });
+      ms.sort((a, b) => a.m - b.m);
+    }
+  }
   const att = ms.filter((m) => MOMENTS[m.type].side === 'att').length;
   const def = ms.filter((m) => MOMENTS[m.type].side === 'def').length;
   const gkm = ms.filter((m) => MOMENTS[m.type].side === 'gk' && m.type !== 'gk_distribution').length;
@@ -165,6 +204,7 @@ export function createLive(S, rng, fxd, side, sel) {
   const bg = [];
   for (let i = 0; i < nf; i++) bg.push({ m: rng.int(1, 90), side });
   for (let i = 0; i < na; i++) bg.push({ m: rng.int(1, 90), side: side === 'h' ? 'a' : 'h' });
+  if (tut) { bg.length = 0; bg.push({ m: 31, side: side === 'h' ? 'a' : 'h' }, { m: 57, side }); }
   bg.sort((x, y) => (x.m - y.m) || (x.side < y.side ? -1 : x.side > y.side ? 1 : 0));
   const tm = [0, 1, 2, 3, 4].map((k) => nameFor(own, S.season, 'mate', k));
   const gk = nameFor(opp, S.season, 'gk', 0);
@@ -185,13 +225,19 @@ export function createLive(S, rng, fxd, side, sel) {
     nm: { tm, gk, x, b, ox, ob, po: x[4], pi: b[4] }, ht: false, subOn: false, subOff: false, intro: '',
     ck: S.id + '|' + S.season + '|' + S.week + '|' + fxd.slot + '|' + fxd.comp, cc: 0, cx: [], ci: 0, out: [], mg: 0, pn: playerCall(S),
   };
+  if (tut) L.tut = 1;
   L.cx = genCosmetic(L);
   const v0 = vars(S, L);
   L.mo = ms.map((m, k) => {
     const vv = Object.assign({}, v0, { teammate: tm[(k + 1) % tm.length], minute: String(m.m) });
     delete vv.score;
-    return { m: m.m, type: m.type, opts: Object.keys(MOMENTS[m.type].opts), setup: setupText(rng, m.type, vv), res: null };
+    const setup = setupText(rng, m.type, vv);
+    const ts = tut ? tutLine(L, k === ms.length - 1 ? (p.pos === 'GK' ? '_none' : 'chance') : (p.pos === 'GK' ? 'gkSaveChance' : 'firstTouch'), Object.assign({}, vv, { gk: gk, score: '{score}' })) : null;
+    const mo = { m: m.m, type: m.type, opts: Object.keys(MOMENTS[m.type].opts), setup: ts || setup, res: null };
+    if (govM !== null && m.m === govM && (m.type === 'one_on_one' || m.type === 'penalty') && !L.mo.some((x) => x && x.gov)) { mo.gov = 1; if (fm.dry >= 4) mo.sure = 1; }
+    return mo;
   });
+  L.fm = !tut && seniorK && pg !== 'GK' ? (fm.hot >= 4 ? 0.75 : fm.hot >= 2 ? 0.85 : 1) : 1;
   // intro
   const MT = MATCH_TEXT || {};
   const intro = MT.intro || {};
@@ -204,9 +250,15 @@ export function createLive(S, rng, fxd, side, sel) {
   else if (fx.kind === 'youth') key = 'youth';
   const list = (intro[key] && intro[key].length) ? intro[key] : (intro.default || []);
   L.intro = pickLine(rng, list, v0) || ('יוצאים לדרך: ' + v0.team + ' נגד ' + v0.opp);
+  if (tut) L.intro = tutLine(L, 'intro', v0) || L.intro;
   return L;
 }
 
+/** v2.3 review: consecutive senior games with a goal (hot) / without a goal or an assist (dry), from the meta counters. */
+export function formOf(S) {
+  const c = S && S.meta && S.meta.cnt ? S.meta.cnt : {};
+  return { hot: Number(c.hot) || 0, dry: Number(c.dry) || 0 };
+}
 // n distinct generated names (not in `taken`; appended to it)
 function uniqNames(team, season, tag, n, taken) {
   const out = [];
@@ -313,7 +365,7 @@ function playerSubOn(S, rng, L) {
   L.subOn = true; L.cl = L.on;
   const po = L.nm.po || '';
   if (po) offList(L).push(po);
-  logPush(L, L.on, pickLine(rng, (MATCH_TEXT || {}).sub_on, vars(S, L)) || ('דקה ' + L.on + ': ' + (L.pn || playerCall(S)) + ' על הדשא!'), 'info', { ev: 'sub', who: 'me', side: 'own', i: L.pn || playerCall(S), o: po || null });
+  logPush(L, L.on, tutLine(L, 'subOn', vars(S, L)) || pickLine(rng, (MATCH_TEXT || {}).sub_on, vars(S, L)) || ('דקה ' + L.on + ': ' + (L.pn || playerCall(S)) + ' על הדשא!'), 'info', { ev: 'sub', who: 'me', side: 'own', i: L.pn || playerCall(S), o: po || null });
 }
 function playerSubOff(S, rng, L) {
   L.subOff = true;
@@ -324,11 +376,24 @@ function halfTime(S, rng, L) {
   logPush(L, 45, pickLine(rng, (MATCH_TEXT || {}).half_time, vars(S, L)) || ('מחצית. ' + L.sc[0] + '-' + L.sc[1]), 'info', { ev: 'ht' });
 }
 
+/** v2.3: one STAKES_COMMENTARY line in the feed (a cosmetic 'info' event at a minute after the player is on). */
+export function addStakeEvent(L, text) {
+  if (!text || L.phase !== 'pre' || !Array.isArray(L.cx)) return;
+  const r = crng(L);
+  const lo = Math.max(10, (L.on || 0) + 3), hi = Math.max(lo, Math.min(85, L.off || 90));
+  const m = r.int(lo, hi);
+  const ev = { m, t: 'stk', s: 'own', x: text };
+  let i = L.cx.length;
+  while (i > 0 && L.cx[i - 1].m > m) i--;
+  L.cx.splice(i, 0, ev);
+}
+
 function cosmeticEvent(S, L, c) {
   const v = vars(S, L);
   v.minute = String(c.m);
   const r = crng(L);
   const off = offList(L);
+  if (c.t === 'stk') { logPush(L, c.m, fill(c.x, v), 'info', { ev: 'info' }); return; }
   if (c.t === 'sub') {
     if (c.s === 'own') { if (off.indexOf(c.o) >= 0) return; off.push(c.o); } else off.push('o:' + c.o);
     v.in = c.i; v.out = c.o;
@@ -455,7 +520,7 @@ export function endLive(S, rng, L) {
   }
   const res = resOf(L);
   const ft = MT.full_time || {};
-  const ftText = pickLine(rng, ft[res], vars(S, L)) || 'שריקת הסיום.';
+  const ftText = tutLine(L, 'fullTime', vars(S, L), res) || pickLine(rng, ft[res], vars(S, L)) || 'שריקת הסיום.';
   const pensTxt = L.et && L.et.pens ? 'שריקת הסיום. הפנדלים הכריעו: ' + L.et.pens[0] + '-' + L.et.pens[1] : null;
   logPush(L, L.cl, pensTxt || ftText, 'info', { ev: 'ft' });
   finalizeFlags(L);
@@ -474,7 +539,9 @@ export function chooseLive(S, rng, L, idx) {
   const key = mo.opts[idx];
   if (key === undefined) throw new Error('bad_option');
   const ctx = momentCtx(S, L.sa, L.side === 'h' && !L.fx.neutral, L.fx.big);
-  const p = optionChance(mo.type, key, ctx);
+  // v2.3: tutorial moments (and the form governor's sure chance) always succeed; the governor scales attacking chances
+  const p0 = L.tut || mo.sure ? 1 : optionChance(mo.type, key, ctx);
+  const p = L.tut || mo.sure || MOMENTS[mo.type].side !== 'att' || !(L.fm && L.fm !== 1) ? p0 : clamp(p0 * L.fm, 0.03, 0.97);
   const r = resolveOption(rng, mo.type, key, p);
   const mine = L.side === 'h' ? 0 : 1;
   const ownHA = L.side, oppHA = L.side === 'h' ? 'a' : 'h';
@@ -488,7 +555,8 @@ export function chooseLive(S, rng, L, idx) {
   if (goalAgainst) v.score = mine === 0 ? L.sc[0] + '-' + (L.sc[1] + 1) : (L.sc[0] + 1) + '-' + L.sc[1];
   const oppScorer = goalAgainst ? pickScorer(L, 'opp') : null;
   if (r.code === 'GOAL') v.scorer = L.pn || playerCall(S); else if (r.code === 'ASSIST') v.scorer = v.teammate; else if (oppScorer) v.scorer = oppScorer;
-  const t = resultText(rng, mo.type, r.code, v);
+  const t0 = resultText(rng, mo.type, r.code, v);
+  const t = (L.tut && r.code === 'GOAL' ? tutLine(L, 'goal', Object.assign({}, v, { gk: L.nm.gk }), null, L.i) : L.tut && r.code === 'SAVE' ? tutLine(L, 'gkSave', v) : null) || t0;
   mo.res = { opt: idx, code: r.code, ok: r.ok, t, d: r.d };
   if (r.fans) mo.res.f = r.fans;
   L.rd = Math.round((L.rd + r.d) * 100) / 100;
@@ -507,6 +575,23 @@ export function chooseLive(S, rng, L, idx) {
     big: !!(entry && entry.big), mega: !!(entry && entry.mega) };
 }
 
+/** v2.3 review (key moments in watch mode): the soft auto choice for the current moment only. Returns the outcome. */
+export function autoOneLive(S, rng, L) {
+  if (L.phase === 'pre') startLive(S, rng, L);
+  if (L.phase !== 'live' || L.i >= L.mo.length) { if (L.phase === 'live') endLive(S, rng, L); return null; }
+  return chooseLive(S, rng, L, softPick(S, rng, L));
+}
+function softPick(S, rng, L) {
+  const mo = L.mo[L.i];
+  const ctx = momentCtx(S, L.sa, L.side === 'h' && !L.fx.neutral, L.fx.big);
+  const vals = mo.opts.map((k) => expectedValue(mo.type, k, optionChance(mo.type, k, ctx)));
+  const bv = Math.max(...vals);
+  const ws = vals.map((v) => Math.exp((v - bv) / 0.12));
+  let r = rng.float(0, ws.reduce((a, b) => a + b, 0));
+  let best = ws.length - 1;
+  for (let i = 0; i < ws.length; i++) { r -= ws[i]; if (r < 0) { best = i; break; } }
+  return best;
+}
 export function autoPlayLive(S, rng, L) {
   if (L.phase === 'pre') startLive(S, rng, L);
   L.auto = true;
@@ -563,7 +648,14 @@ export function matchVM(S, L) {
     const ctx = momentCtx(S, L.sa, L.side === 'h' && !fx.neutral, fx.big);
     moment = {
       minute: mo.m, type: mo.type, side: MOMENTS[mo.type].side, textHe: fill(mo.setup, { score: L.sc[0] + '-' + L.sc[1] }),
-      options: mo.opts.map((k, i) => { const p = optionChance(mo.type, k, ctx); const b = oddsBand(p); return { index: i, key: k, he: optionLabel(mo.type, k), odds: b, oddsHe: (ODDS && ODDS[b]) || b }; }),
+      options: mo.opts.map((k, i) => {
+        const p0 = optionChance(mo.type, k, ctx);
+        // the chance the player sees is the real one (tutorial / governor's sure chance = 100%, hot / dry streak scaling)
+        const p = L.tut || mo.sure ? 1 : MOMENTS[mo.type].side === 'att' && L.fm && L.fm !== 1 ? clamp(p0 * L.fm, 0.03, 0.97) : p0;
+        const b = oddsBand(p);
+        return { index: i, key: k, he: optionLabel(mo.type, k), odds: b, oddsHe: (ODDS && ODDS[b]) || b, pct: Math.round(p * 100) };
+      }),
+      key: !!(L.tut || mo.gov || mo.type === 'one_on_one' || mo.type === 'penalty'), sure: !!(L.tut || mo.sure),
     };
   }
   const roleHe = L.role === 'starter' ? ((SELECTION && SELECTION.starter) || 'בהרכב') : ('{{נכנס|נכנסת}} מהספסל בדקה ' + L.on);
@@ -581,6 +673,9 @@ export function matchVM(S, L) {
     myTeam, oppTeam, myShortHe: myTeam.shortHe, oppShortHe: oppTeam.shortHe,
     playerHe: L.pn || playerCall(S), playerNameHe: p.first + ' ' + p.last, num: typeof p.num === 'number' ? p.num : 10, pos: p.pos,
     gender: p.gender === 'f' ? 'f' : 'm', myGoals: L.mo.filter((m) => m.res && m.res.code === 'GOAL').length,
+    // v2.3: the debut tutorial, the match stakes card and the equipped cosmetics (boots / celebration style / frame / accessory)
+    tutorial: !!L.tut, stakes: L.stk ? { stakes: L.stk.list.filter((x) => x.he).map((x) => ({ kind: x.kind, he: x.he, need: x.need })), goal: L.stk.goal ? { id: L.stk.goal.id, he: L.stk.goal.he, rewardStars: L.stk.goal.stars, need: L.stk.goal.need } : null } : null,
+    cosmetics: S.meta ? equippedOf(S) : { boots: null, celebration: null, frame: null, accessory: null, celebrationStyle: 'classic', frameKey: 'basic', accKey: 'none', bootsColors: null, accColors: null },
   };
 }
 

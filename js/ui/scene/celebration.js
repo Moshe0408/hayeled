@@ -10,6 +10,10 @@
 // closes it early. prefers-reduced-motion -> a simple fade of the text. Never throws, never rejects.
 // Everything is an analytic function of time, so a debug clock can seek: celebrate({..., debug: true})
 // keeps it open and exposes window.__celebDebug = { seek(t), finish() }.
+//
+// v2.3: celebrate({..., style: 'knee'|'backflip'|'jump'|'heart', boots: '#hex', skin: '#hex'}) adds the player's own
+// celebration (bought with stars) acted out by a kit-coloured figure at the bottom of the screen;
+// celebrate({..., small: true}) is the compact, non-blocking variant used for achievement unlocks (≈2 s, taps pass through).
 
 import { roar, beat } from './crowd-audio.js';
 
@@ -134,10 +138,12 @@ function cpos(p, tt) { const e = (1 - Math.exp(-p.d * tt)) / p.d; return [p.x0 +
 /* ------------------------------------------------------------------ public API */
 let current = null;
 export function cancelCelebration() { if (current) current.close(true); }
+/** Is a celebration on screen now? (the achievement toasts wait for it to end) */
+export function celebrating() { return !!current; }
 function reduced() { try { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } }
 
 const CSS = `.hy-celeb{position:fixed;inset:0;z-index:2147482000;pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none;opacity:1;transition:opacity .22s ease}
-.hy-celeb.out{opacity:0;pointer-events:none}.hy-celeb canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hy-celeb.out{opacity:0;pointer-events:none}.hy-celeb.small{pointer-events:none}.hy-celeb canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .hy-celeb .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .hy-celeb-rm{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(3,7,15,.55);direction:rtl;text-align:center;opacity:0;transition:opacity .3s ease}
 .hy-celeb-rm b{font:900 clamp(44px,14vw,96px)/1 ${FONT};color:#FFE07A;text-shadow:0 4px 0 #8a5a10,0 10px 30px rgba(0,0,0,.6)}
@@ -157,12 +163,15 @@ export function celebrate(o = {}) {
 
 function run(o, resolve) {
   if (typeof document === 'undefined' || !document.body) { resolve(); return; }
+  if (current && o.small) { resolve(); return; }   // a badge never cuts a goal celebration short
   if (current) current.close(false);
   injectCSS();
-  const kind = DUR[o.kind] ? o.kind : 'goal', dur = DUR[kind];
+  const kind = DUR[o.kind] ? o.kind : 'goal';
+  const small = !!o.small, style = !small && FIG_STYLES.includes(o.style) ? o.style : null;
+  const dur = small ? 1.9 : style ? Math.max(DUR[kind], kind === 'mega' ? 3.9 : 3.1) : DUR[kind];
   const text = (o.textHe && String(o.textHe).trim()) || TEXT[kind], sub = o.subHe ? String(o.subHe) : '';
   const cA = parseColor(o.colors && o.colors[0], [244, 195, 90]), cB = parseColor(o.colors && o.colors[1], [10, 24, 56]);
-  const root = document.createElement('div'); root.className = 'hy-celeb'; root.dataset.testid = 'celebration'; root.dataset.kind = kind; root.setAttribute('role', 'status'); root.setAttribute('aria-live', 'assertive');
+  const root = document.createElement('div'); root.className = 'hy-celeb'; root.dataset.testid = 'celebration'; root.dataset.kind = kind; if (small) { root.classList.add('small'); root.dataset.small = '1'; } if (style) root.dataset.style = style; root.setAttribute('role', 'status'); root.setAttribute('aria-live', 'assertive');
   const sr = document.createElement('div'); sr.className = 'sr'; sr.textContent = text + (sub ? ' ' + sub : ''); root.appendChild(sr);
   const listeners = []; const on = (el, ev, fn) => { el.addEventListener(ev, fn); listeners.push([el, ev, fn]); };
   let raf = 0, timer = 0, closed = false;
@@ -178,8 +187,8 @@ function run(o, resolve) {
     },
   };
   current = me;
-  try { if (navigator.vibrate) navigator.vibrate(VIB[kind]); } catch { /* not allowed */ }
-  try { roar(kind === 'mega' || kind === 'trophy' ? 1.7 : kind === 'save' ? 0.6 : 1.1); if (kind !== 'save') beat(); } catch { /* audio off */ }
+  try { if (navigator.vibrate) navigator.vibrate(small ? [30, 30, 60] : VIB[kind]); } catch { /* not allowed */ }
+  try { if (!small) { roar(kind === 'mega' || kind === 'trophy' ? 1.7 : kind === 'save' ? 0.6 : 1.1); if (kind !== 'save') beat(); } } catch { /* audio off */ }
 
   const canvas = document.createElement('canvas');
   const g = !reduced() && canvas.getContext ? canvas.getContext('2d') : null;
@@ -188,7 +197,7 @@ function run(o, resolve) {
     box.innerHTML = '<b></b><span></span>'; box.firstChild.textContent = text; box.lastChild.textContent = sub;
     root.appendChild(box); document.body.appendChild(root);
     requestAnimationFrame(() => { box.style.opacity = '1'; });
-    on(root, 'pointerdown', () => me.close(true));
+    if (!small) on(root, 'pointerdown', () => me.close(true));
     timer = setTimeout(() => { box.style.opacity = '0'; timer = setTimeout(() => me.close(false), 320); }, o.debug ? 1e9 : Math.min(1400, dur * 600));
     return;
   }
@@ -199,6 +208,7 @@ function run(o, resolve) {
     S.dpr = Math.min(window.devicePixelRatio || 1, 1.75); canvas.width = Math.round(S.W * S.dpr); canvas.height = Math.round(S.H * S.dpr);
   };
   resize();
+  S.small = small; S.style = style; S.boots = o.boots; S.skin = o.skin;
   build(S, kind, text, sub, cA, cB);
   const t0 = performance.now(); let tDbg = null;
   const frame = (now) => {
@@ -208,7 +218,7 @@ function run(o, resolve) {
     try { draw(g, S, kind, t, dur); } catch (e) { console.warn('[celebrate] draw error', e); me.close(false); return; }
     if (!o.debug && t >= dur) me.close(false);
   };
-  on(root, 'pointerdown', () => { if (!o.debug) me.close(true); });
+  if (!small) on(root, 'pointerdown', () => { if (!o.debug) me.close(true); });
   on(window, 'resize', () => { resize(); build(S, kind, text, sub, cA, cB); });
   if (o.debug) window.__celebDebug = { _owner: root, seek(t) { tDbg = Math.max(0, +t || 0); draw(g, S, kind, tDbg, dur); return tDbg; }, finish() { me.close(false); } };
   raf = requestAnimationFrame(frame);
@@ -216,7 +226,7 @@ function run(o, resolve) {
 
 /* ------------------------------------------------------------------ build (once per celebration) */
 function build(S, kind, text, sub, cA, cB) {
-  const { W, H, dpr } = S, k = Math.min(W, H * 0.6) / 390, R = mulberry(kind.length * 977 + text.length * 131 + 7);
+  const { W, H, dpr } = S, sc = S.small ? 0.58 : 1, k = Math.min(W, H * 0.6) / 390 * sc, R = mulberry(kind.length * 977 + text.length * 131 + 7);
   const white = [255, 255, 255], gold = [255, 214, 100];
   const glowA = lum(cA) < 70 ? mix(cA, white, 0.5) : cA, glowB = lum(cB) < 70 ? mix(cB, white, 0.5) : cB;
   Object.assign(S, { k, glowA, glowB, cA, cB, TI: kind === 'trophy' ? 0.42 : 0.2 });
@@ -224,7 +234,7 @@ function build(S, kind, text, sub, cA, cB) {
   const m = cnv(4, 4).getContext('2d');
   if (kind === 'mega') {
     const chars = Array.from(text);
-    let px = Math.min(W * 0.2, H * 0.16);
+    let px = Math.min(W * 0.2, H * 0.16) * sc;
     m.font = `900 ${px}px ${FONT}`;
     let ws = chars.map((ch) => m.measureText(ch).width * 0.96), tot = ws.reduce((a, b) => a + b, 0);
     if (tot > W * 0.92) { const f = W * 0.92 / tot; px *= f; ws = ws.map((w) => w * f); tot *= f; }
@@ -232,7 +242,7 @@ function build(S, kind, text, sub, cA, cB) {
     S.letters = chars.map((ch, i) => { const sp = textSprite(ch, px * dpr, pal, { depth: Math.min(20, px * dpr * 0.1) }); const cx = x - ws[i] / 2; x -= ws[i]; return { sp, cx, i }; });
     S.px = px; S.hero = null;
   } else {
-    let px = kind === 'trophy' ? Math.min(W * 0.2, H * 0.11) : Math.min(W * 0.34, H * 0.19);
+    let px = (kind === 'trophy' ? Math.min(W * 0.2, H * 0.11) : Math.min(W * 0.34, H * 0.19)) * sc;
     m.font = `900 ${px}px ${FONT}`; m.direction = 'rtl';
     const tw = m.measureText(text).width + px * 0.25; if (tw > W * 0.86) px *= W * 0.86 / tw;
     S.hero = textSprite(text, px * dpr, pal);
@@ -240,17 +250,17 @@ function build(S, kind, text, sub, cA, cB) {
     S.tmp = cnv(S.hero.c.width, S.hero.c.height);
     S.px = px; S.letters = null;
   }
-  S.sub = sub ? subSprite(sub, Math.max(15, (kind === 'mega' ? 0.07 : 0.05) * W) * dpr) : null;
-  S.cup = kind === 'trophy' ? trophySprite(Math.min(H * 0.36, W * 0.7) * dpr) : null;
+  S.sub = sub ? subSprite(sub, Math.max(S.small ? 13 : 15, (kind === 'mega' ? 0.07 : 0.05) * W * sc) * dpr) : null;
+  S.cup = kind === 'trophy' ? trophySprite(Math.min(H * 0.36, W * 0.7) * sc * dpr) : null;
   const cols = [cA, glowB, gold, white, cA, gold];
-  S.conf = kind === 'save' ? [] : confetti(R, kind === 'mega' ? 240 : kind === 'goal' ? 150 : 200, W, H, cols, k);
+  S.conf = kind === 'save' ? [] : confetti(R, S.small ? 60 : kind === 'mega' ? 240 : kind === 'goal' ? 150 : 200, W, H, cols, k);
   S.sparks = [];
   for (let i = 0; i < 70; i++) {
     const a = R() * TAU, v = (380 + R() * 900) * k;
     S.sparks.push({ vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.7, c: kind === 'save' ? [140, 255, 240] : (i % 3 ? gold : white), w: (1.2 + R() * 2.4) * k, life: 0.45 + R() * 0.5 });
   }
   S.fw = [];
-  if (kind === 'mega' || kind === 'trophy' || kind === 'win') {
+  if (!S.small && (kind === 'mega' || kind === 'trophy' || kind === 'win')) {
     const plan = kind === 'mega'
       ? [[0.35, 0.25, 0.22], [0.55, 0.76, 0.18], [0.8, 0.5, 0.1], [1.05, 0.16, 0.34], [1.3, 0.84, 0.32], [1.6, 0.38, 0.16], [1.95, 0.66, 0.26], [2.3, 0.28, 0.28], [2.6, 0.72, 0.14]]
       : kind === 'trophy' ? [[0.5, 0.2, 0.16], [0.8, 0.8, 0.14], [1.2, 0.3, 0.3], [1.6, 0.72, 0.26], [2.1, 0.5, 0.1], [2.5, 0.18, 0.22]]
@@ -262,13 +272,13 @@ function build(S, kind, text, sub, cA, cB) {
     });
   }
   S.flash = [];
-  if (kind === 'mega' || kind === 'trophy') for (let i = 0; i < 44; i++) S.flash.push({ t: 0.25 + R() * 2.9, x: R() * W, y: R() < 0.7 ? R() * H * 0.36 : H * (0.36 + R() * 0.5), r: (6 + R() * 10) * k });
+  if (!S.small && (kind === 'mega' || kind === 'trophy')) for (let i = 0; i < 44; i++) S.flash.push({ t: 0.25 + R() * 2.9, x: R() * W, y: R() < 0.7 ? R() * H * 0.36 : H * (0.36 + R() * 0.5), r: (6 + R() * 10) * k });
   if (!S.spr) S.spr = { gold: glowSprite(32, gold), white: glowSprite(32, [200, 230, 255]), teal: glowSprite(32, [60, 240, 220]) };
 }
 
 /* ------------------------------------------------------------------ draw (pure function of t) */
 function draw(g, S, kind, t, dur) {
-  const { W, H, dpr, k, TI } = S, cx = W / 2, cy = H * (kind === 'trophy' ? 0.7 : 0.42);
+  const { W, H, dpr, k, TI } = S, cx = W / 2, cy = H * (S.small ? (kind === 'trophy' ? 0.42 : 0.3) : kind === 'trophy' ? 0.7 : 0.42);
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   g.clearRect(0, 0, W, H);
   const out = prog(t, dur - 0.35, dur), env = 1 - out, inA = clamp(t / 0.1);
@@ -279,8 +289,8 @@ function draw(g, S, kind, t, dur) {
     bd.addColorStop(0, rgba(S.glowA, (0.5 + 0.14 * pulse) * env)); bd.addColorStop(0.55, rgba(mix(S.cA, [0, 0, 8], 0.65), 0.8 * env)); bd.addColorStop(1, `rgba(0,0,8,${0.9 * env})`);
   } else if (kind === 'save') { bd.addColorStop(0, `rgba(4,40,52,${0.55 * inA * env})`); bd.addColorStop(1, `rgba(0,6,16,${0.85 * inA * env})`); }
   else { bd.addColorStop(0, rgba(mix(S.glowA, [0, 0, 10], 0.45), 0.55 * inA * env)); bd.addColorStop(0.6, `rgba(0,0,10,${0.66 * inA * env})`); bd.addColorStop(1, `rgba(0,0,10,${0.86 * inA * env})`); }
-  g.fillStyle = bd; g.fillRect(0, 0, W, H);
-  if (kind === 'mega' && t < 0.2) { const c = t < 0.06 ? S.glowA : t < 0.12 ? S.glowB : [255, 255, 255]; g.fillStyle = rgba(c, 0.85 - (t % 0.06) * 6); g.fillRect(0, 0, W, H); }
+  g.globalAlpha = S.small ? 0.42 : 1; g.fillStyle = bd; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  if (kind === 'mega' && t < 0.2 && !S.small) { const c = t < 0.06 ? S.glowA : t < 0.12 ? S.glowB : [255, 255, 255]; g.fillStyle = rgba(c, 0.85 - (t % 0.06) * 6); g.fillRect(0, 0, W, H); }
   // screen shake (120 ms after each impact)
   let sh = 0;
   const hit = (ti, a) => { if (t >= ti && t < ti + 0.12) sh = Math.max(sh, a * (1 - (t - ti) / 0.12)); };
@@ -340,7 +350,7 @@ function draw(g, S, kind, t, dur) {
   // trophy
   if (S.cup) {
     const a = prog(t, 0.05, 0.5), s = a < 1 ? lerp(0.25, 1, 1 + 2.70158 * Math.pow(a - 1, 3) + 1.70158 * Math.pow(a - 1, 2)) : 1 + 0.015 * Math.sin(t * 3);
-    const cw = S.cup.width / dpr, ch = S.cup.height / dpr, ty = H * 0.38 + Math.sin(t * 2) * 4 * k;
+    const cw = S.cup.width / dpr, ch = S.cup.height / dpr, ty = H * (S.small ? 0.22 : 0.38) + Math.sin(t * 2) * 4 * k;
     g.globalCompositeOperation = 'lighter';
     const gr = Math.min(W, H) * (0.55 + 0.05 * Math.sin(t * 4));
     g.globalAlpha = 0.55 * clamp(a * 2) * env; g.drawImage(S.spr.gold, cx - gr, ty - gr, gr * 2, gr * 2); g.globalAlpha = 1;
@@ -360,11 +370,13 @@ function draw(g, S, kind, t, dur) {
   if (S.sub) {
     const t1 = kind === 'mega' ? 0.95 : kind === 'trophy' ? 0.85 : TI + 0.28, a = eOut(prog(t, t1, t1 + 0.3)) * env;
     if (a > 0.01) {
-      const sw = S.sub.w / dpr, shh = S.sub.h / dpr, sy = kind === 'mega' ? H * 0.6 : kind === 'trophy' ? H * 0.8 : H * 0.42 + S.px * 1.08;
+      const sw = S.sub.w / dpr, shh = S.sub.h / dpr, sy = S.small ? cy + S.px * 0.75 : kind === 'mega' ? H * 0.6 : kind === 'trophy' ? H * 0.8 : H * 0.42 + S.px * 1.08;
       g.setTransform(dpr, 0, 0, dpr, dpr * ox, dpr * oy);
       g.globalAlpha = a; g.drawImage(S.sub.c, cx - sw / 2, sy + (1 - a) * 26 * k, sw, shh); g.globalAlpha = 1;
     }
   }
+  // v2.3: the player's own celebration move
+  if (S.style) { try { drawFigure(g, S, t, env); } catch (e) { S.style = null; } }
   // confetti (drag + gravity + flutter), in front of everything
   for (const p of S.conf) {
     const tt = t - p.t0; if (tt < 0) continue;
@@ -376,7 +388,7 @@ function draw(g, S, kind, t, dur) {
   }
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   // white flash on impact
-  const wf = t >= TI ? 0.5 * (1 - prog(t, TI, TI + 0.16)) : 0;
+  const wf = t >= TI && !S.small ? 0.5 * (1 - prog(t, TI, TI + 0.16)) : 0;
   if (wf > 0.01) { g.fillStyle = kind === 'save' ? `rgba(200,255,250,${wf})` : `rgba(255,250,235,${wf})`; g.fillRect(0, 0, W, H); }
 }
 
@@ -433,4 +445,200 @@ function drawLetters(g, S, t, env, ox, oy) {
     }
   }
   g.globalAlpha = 1; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/* ------------------------------------------------------------------ v2.3 celebration moves (F6 cosmetics)
+   A kit-coloured broadcast cut-out figure acting the bought celebration: knee slide, backflip, spinning jump
+   ("siuu"-like landing) or heart hands. Pure function of t like everything else. Angles in the body frame are
+   measured from "straight down", positive towards the facing direction. */
+const FIG_STYLES = ['knee', 'backflip', 'jump', 'heart', 'airplane', 'shush', 'salute', 'dance'];
+const L_TH = 0.235, L_SH = 0.235, L_UA = 0.165, L_FA = 0.155, L_TO = 0.4;
+
+function runCycle(ft, speed = 13) {
+  const ph = ft * speed;
+  const leg = (i) => { const s = Math.sin(ph + i * Math.PI); const th = 0.62 * s; return [th, th - 0.35 - 0.75 * Math.max(0, Math.sin(ph + i * Math.PI + 1.4))]; };
+  const arm = (i) => { const a = -0.75 * Math.sin(ph + i * Math.PI); return [a, a + 1.45]; };
+  return { legs: [leg(0), leg(1)], arms: [arm(1), arm(0)], lean: 0.28, bob: Math.abs(Math.sin(ph)) * 0.03 };
+}
+function blendPose(a, b, t) {
+  const L = (x, y) => x + (y - x) * t;
+  const pair = (p, q) => [L(p[0], q[0]), L(p[1], q[1])];
+  return {
+    x: L(a.x || 0, b.x || 0), lift: L(a.lift || 0, b.lift || 0), rot: L(a.rot || 0, b.rot || 0), sx: L(a.sx ?? 1, b.sx ?? 1), lean: L(a.lean || 0, b.lean || 0),
+    legs: [pair(a.legs[0], b.legs[0]), pair(a.legs[1], b.legs[1])], arms: [pair(a.arms[0], b.arms[0]), pair(a.arms[1], b.arms[1])],
+    frontal: t < 0.5 ? !!a.frontal : !!b.frontal, bob: L(a.bob || 0, b.bob || 0),
+  };
+}
+const STAND = { lean: 0, legs: [[0.06, 0.02], [-0.06, -0.02]], arms: [[0.15, 0.3], [-0.1, 0.2]] };
+const ARMS_UP = [[2.7, 2.9], [-2.7, -2.9]];
+
+function figPose(style, ft) {
+  if (style === 'knee') {
+    const run = { ...runCycle(ft), x: 0, sx: -1 };
+    const kneel = { lean: -0.5, legs: [[0.2, -1.55], [0.05, -1.62]], arms: [[2.35, 2.75 + 0.15 * Math.sin(ft * 10)], [-2.2, -2.6 - 0.15 * Math.sin(ft * 10 + 1)]], x: 0, sx: -1 };
+    let p, x;
+    if (ft < 0.55) { p = run; x = lerp(1.15, 0.66, ft / 0.55); }
+    else if (ft < 0.78) { p = blendPose(run, kneel, sm((ft - 0.55) / 0.23)); x = lerp(0.66, 0.56, (ft - 0.55) / 0.23); }
+    else { p = kneel; x = lerp(0.56, 0.34, eOut(clamp((ft - 0.78) / 0.9))); }
+    return { ...p, x, slide: ft > 0.7 && ft < 1.6 ? 1 - clamp((ft - 0.7) / 0.9) : 0 };
+  }
+  if (style === 'backflip') {
+    const base = { x: 0.5, sx: 1 };
+    const crouch = { ...base, lean: 0.45, legs: [[1.25, -0.55], [1.15, -0.6]], arms: [[-1.2, -0.7], [-1.3, -0.8]] };
+    const tuck = { ...base, lean: 0.2, legs: [[2.1, 0.1], [2.0, 0.0]], arms: [[1.6, 2.4], [1.5, 2.3]] };
+    const land = { ...base, lean: 0.15, legs: [[0.8, -0.4], [0.7, -0.45]], arms: [[1.6, 1.9], [1.5, 1.8]] };
+    const v = { ...base, lean: 0, legs: [[0.1, 0.05], [-0.1, -0.05]], arms: ARMS_UP };
+    if (ft < 0.3) return blendPose({ ...base, ...STAND }, v, sm(ft / 0.3));
+    if (ft < 0.5) return blendPose(v, crouch, sm((ft - 0.3) / 0.2));
+    if (ft < 1.12) {
+      const a = (ft - 0.5) / 0.62;
+      const pose = a < 0.3 ? blendPose(crouch, tuck, sm(a / 0.3)) : a > 0.75 ? blendPose(tuck, land, sm((a - 0.75) / 0.25)) : tuck;
+      return { ...pose, lift: 4 * a * (1 - a) * 0.95, rot: -TAU * sm(a), air: 1 };
+    }
+    if (ft < 1.35) return blendPose(land, v, sm((ft - 1.12) / 0.23));
+    return { ...v, arms: [[2.7 + 0.12 * Math.sin(ft * 9), 2.9], [-2.7 - 0.12 * Math.sin(ft * 9 + 1), -2.9]] };
+  }
+  if (style === 'jump') {
+    const run = { ...runCycle(ft), sx: -1, x: 0 };
+    const take = { lean: 0.3, legs: [[1.0, -0.6], [0.9, -0.5]], arms: [[-0.9, -0.5], [-1.0, -0.6]], sx: -1, x: 0 };
+    const air = { lean: 0, legs: [[0.05, 0.0], [-0.05, 0.0]], arms: [[0.25, 0.1], [-0.25, -0.1]], x: 0 };
+    const siu = { lean: 0, legs: [[0.5, 0.35], [-0.5, -0.35]], arms: [[1.05, 0.95], [-1.05, -0.95]], frontal: true, sx: 1, x: 0 };
+    if (ft < 0.45) return { ...run, x: lerp(1.12, 0.55, ft / 0.45) };
+    if (ft < 0.6) return { ...blendPose(run, take, sm((ft - 0.45) / 0.15)), x: 0.55 };
+    if (ft < 1.12) {
+      const a = (ft - 0.6) / 0.52;
+      return { ...blendPose(take, air, sm(clamp(a / 0.25))), x: 0.53, lift: 4 * a * (1 - a) * 0.75, sx: Math.cos(Math.PI * (1 + sm(a))), air: 1 };
+    }
+    if (ft < 1.3) return { ...blendPose({ ...air, sx: 1 }, siu, sm((ft - 1.12) / 0.18)), x: 0.53, ring: ft - 1.12 };
+    return { ...siu, x: 0.53, ring: ft - 1.12 };
+  }
+  if (style === 'airplane') {
+    const run = { ...runCycle(ft), sx: -1, x: 0 };
+    const plane = { lean: 0.15, legs: [[0.35, -0.3], [-0.3, -0.5]], arms: [[1.57, 1.57], [-1.57, -1.57]], frontal: true, sx: 1, x: 0 };
+    if (ft < 0.35) return { ...run, x: lerp(1.12, 0.8, ft / 0.35) };
+    if (ft < 0.55) return { ...blendPose(run, plane, sm((ft - 0.35) / 0.2)), x: lerp(0.8, 0.72, (ft - 0.35) / 0.2) };
+    const a = ft - 0.55;
+    const cyc = runCycle(ft, 9);
+    return { ...plane, legs: cyc.legs.map(([t1, t2]) => [t1 * 0.5, t2 * 0.6]), x: 0.72 - Math.min(0.42, a * 0.32), rot: 0.32 * Math.sin(a * 3.2), bob: cyc.bob };
+  }
+  if (style === 'shush' || style === 'salute') {
+    const run = { ...runCycle(ft), sx: -1, x: 0 };
+    const pose = style === 'shush'
+      ? { lean: -0.05, legs: [[0.12, 0.08], [-0.12, -0.08]], arms: [[0.25, 0.15], [-2.6, 1.4]], frontal: true, sx: 1, x: 0 }
+      : { lean: -0.04, legs: [[0.05, 0.03], [-0.05, -0.03]], arms: [[0.12, 0.05], [-2.3, 2.04]], frontal: true, sx: 1, x: 0 };
+    if (ft < 0.55) return { ...run, x: lerp(1.12, 0.5, eOut(ft / 0.55)) };
+    if (ft < 0.8) return { ...blendPose(run, pose, sm((ft - 0.55) / 0.25)), x: 0.5 };
+    return { ...pose, x: 0.5, still: 1 };
+  }
+  if (style === 'dance') {
+    const run = { ...runCycle(ft), sx: -1, x: 0 };
+    const dance = (tt) => { const s1 = Math.sin(tt * 9), s2 = Math.sin(tt * 9 + Math.PI);
+      return { lean: 0.12 * s1, legs: [[0.25 + 0.2 * s1, -0.1 - 0.5 * Math.max(0, s1)], [-0.25 + 0.2 * s1, 0.1 + 0.5 * Math.max(0, s2)]], arms: [[1.3 + 0.6 * s1, 2.5], [-1.3 + 0.6 * s1, -2.5]], frontal: true, sx: 1, x: 0, bob: 0.03 * Math.abs(s1) }; };
+    if (ft < 0.5) return { ...run, x: lerp(1.12, 0.5, eOut(ft / 0.5)) };
+    if (ft < 0.7) return { ...blendPose(run, dance(ft), sm((ft - 0.5) / 0.2)), x: 0.5 };
+    return { ...dance(ft), x: 0.5 + 0.04 * Math.sin(ft * 4.5) };
+  }
+  // heart hands: jog in, face the crowd, hands make a heart in front of the chest
+  const run = { ...runCycle(ft, 10), sx: -1, x: 0 };
+  const heart = { lean: 0, legs: [[0.14, 0.1], [-0.14, -0.1]], arms: [[0.5, -2.05], [-0.5, 2.05]], frontal: true, sx: 1, x: 0 };
+  if (ft < 0.6) return { ...run, x: lerp(1.12, 0.5, eOut(ft / 0.6)) };
+  if (ft < 0.85) return { ...blendPose(run, heart, sm((ft - 0.6) / 0.25)), x: 0.5 };
+  return { ...heart, x: 0.5, heart: ft - 0.85 };
+}
+
+function drawFigure(g, S, t, env) {
+  const ft = t - (S.TI + 0.12);
+  if (ft < 0) return;
+  const { W, H, dpr, k } = S;
+  const U = Math.min(200 * k, H * 0.24);
+  const ground = H * 0.94;
+  const P = figPose(S.style, ft);
+  const kit = S.cA, kitB = S.cB;
+  const boots = parseColor(S.boots, [244, 195, 90]);
+  const skin = parseColor(S.skin, [201, 140, 98]);
+  const shorts = lum(kitB) > 30 ? kitB : mix(kit, [0, 0, 0], 0.5);
+  const fr = !!P.frontal;
+  const seg = (x, y, a, l) => [x + Math.sin(a) * l * U, y + Math.cos(a) * l * U];
+  const legEnd = (i) => { const [th, sh] = P.legs[i]; const hx0 = fr ? (i ? -0.055 : 0.055) * U : 0; const kn = seg(hx0, 0, th, L_TH); const f = seg(kn[0], kn[1], sh, L_SH); return { hip: [hx0, 0], kn, ft: f, sh }; };
+  const legs = [legEnd(0), legEnd(1)];
+  const lean = P.lean || 0;
+  const neck = [Math.sin(lean) * L_TO * U, -Math.cos(lean) * L_TO * U];
+  const head = [neck[0] + Math.sin(lean) * 0.11 * U, neck[1] - Math.cos(lean) * 0.11 * U];
+  const armEnd = (i) => { const [ua, fa] = P.arms[i]; const sx0 = fr ? (i ? -0.085 : 0.085) * U : 0; const sh0 = [neck[0] + sx0, neck[1] + 0.03 * U]; const el = seg(sh0[0], sh0[1], ua, L_UA); const hd = seg(el[0], el[1], fa, L_FA); return { sh: sh0, el, hd }; };
+  const arms = [armEnd(0), armEnd(1)];
+  let low = 0;
+  if (!P.air) for (const l of legs) low = Math.max(low, l.ft[1], l.kn[1]);
+  else low = (L_TH + L_SH) * U * 0.92;
+  const bob = (P.bob || 0) * U;
+  const hx = P.x * W, hy = ground - low - (P.lift || 0) * U - bob - 0.025 * U;
+  const op = clamp(ft * 5) * env;
+  if (op <= 0.01) return;
+  g.save();
+  g.globalAlpha = op;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const shw = U * (0.34 - Math.min(0.2, (P.lift || 0) * 0.25));
+  g.fillStyle = 'rgba(0,0,0,.45)'; g.beginPath(); g.ellipse(hx, ground, Math.max(1, shw), U * 0.05, 0, 0, TAU); g.fill();
+  if (P.slide > 0) {
+    for (let i = 0; i < 26; i++) {
+      const a = (i * 0.618) % 1, life = (ft * 3 + a) % 1;
+      const px = hx + (P.sx < 0 ? 1 : -1) * (0.1 + life * 0.9) * U, py = ground - Math.sin(life * Math.PI) * U * (0.12 + a * 0.18);
+      g.fillStyle = i % 3 ? `rgba(120,220,120,${0.8 * (1 - life) * P.slide})` : `rgba(255,255,255,${0.7 * (1 - life) * P.slide})`;
+      g.fillRect(px, py, 2.6 * k, 2.6 * k);
+    }
+  }
+  if (P.ring !== undefined && P.ring < 0.6) {
+    const p = P.ring / 0.6;
+    g.strokeStyle = `rgba(255,230,160,${0.8 * (1 - p)})`; g.lineWidth = (2 + 10 * (1 - p)) * k;
+    g.beginPath(); g.ellipse(hx, ground, U * (0.2 + p * 1.4), U * (0.05 + p * 0.3), 0, 0, TAU); g.stroke();
+  }
+  const com = -0.18 * U;
+  g.setTransform(dpr, 0, 0, dpr, dpr * hx, dpr * hy);
+  g.translate(0, com); g.rotate(P.rot || 0); g.translate(0, -com);
+  const sxv = P.sx === undefined ? 1 : P.sx;
+  g.scale(Math.abs(sxv) < 0.08 ? (sxv < 0 ? -0.08 : 0.08) : sxv, 1);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.shadowColor = 'rgba(150,255,240,.55)'; g.shadowBlur = 10 * k;
+  const line = (pts, w, col) => { g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); g.stroke(); };
+  const lerpP = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+  const dk = (c, on) => (on ? mix(c, [0, 0, 0], 0.32) : c);
+  const drawLeg = (l, dark) => {
+    line([l.hip, l.kn], 0.085 * U, rgba(dk(skin, dark)));
+    line([l.hip, lerpP(l.hip, l.kn, 0.4)], 0.095 * U, rgba(dk(shorts, dark)));
+    line([l.kn, l.ft], 0.07 * U, rgba(dk(skin, dark)));
+    line([lerpP(l.kn, l.ft, 0.3), l.ft], 0.078 * U, rgba(dk(kit, dark)));
+    const fa = l.sh + Math.PI / 2;
+    const toe = [l.ft[0] + Math.sin(fa) * 0.085 * U, l.ft[1] + Math.cos(fa) * 0.085 * U];
+    line([[l.ft[0] - Math.sin(fa) * 0.02 * U, l.ft[1] - Math.cos(fa) * 0.02 * U], toe], 0.06 * U, rgba(dk(boots, dark)));
+  };
+  const drawArm = (a, dark) => {
+    line([a.sh, a.el], 0.07 * U, rgba(dk(kit, dark)));
+    line([a.el, a.hd], 0.058 * U, rgba(dk(skin, dark)));
+    g.fillStyle = rgba(dk(skin, dark)); g.beginPath(); g.arc(a.hd[0], a.hd[1], 0.035 * U, 0, TAU); g.fill();
+  };
+  drawLeg(legs[1], !fr); drawArm(arms[1], !fr);
+  line([[0, -0.02 * U], neck], 0.16 * U, rgba(kit));
+  line([lerpP([0, 0], neck, 0.86), neck], 0.11 * U, rgba(mix(kitB, kit, 0.2)));
+  line([[0, -0.02 * U], [0, 0.03 * U]], 0.15 * U, rgba(shorts));
+  drawLeg(legs[0], false);
+  g.fillStyle = rgba(skin); g.beginPath(); g.arc(head[0], head[1], 0.085 * U, 0, TAU); g.fill();
+  g.shadowBlur = 0;
+  g.fillStyle = 'rgba(30,18,10,.95)'; g.beginPath(); g.arc(head[0] - (fr ? 0 : 0.012 * U), head[1] - 0.012 * U, 0.088 * U, Math.PI * 1.02, Math.PI * 1.98); g.fill();
+  g.shadowBlur = 10 * k;
+  drawArm(arms[0], false);
+  g.restore();
+  if (P.heart !== undefined) {
+    const hp = arms[0].hd, hq = arms[1].hd;
+    const mx = hx + (hp[0] + hq[0]) / 2, my = hy + (hp[1] + hq[1]) / 2 - 0.03 * U;
+    const s = (0.07 + 0.012 * Math.sin(P.heart * 12)) * U * clamp(P.heart * 4);
+    const heartPath = (x, y, r) => { g.beginPath(); g.moveTo(x, y + r * 0.9); g.bezierCurveTo(x - r * 1.6, y - r * 0.2, x - r * 0.7, y - r * 1.4, x, y - r * 0.5); g.bezierCurveTo(x + r * 0.7, y - r * 1.4, x + r * 1.6, y - r * 0.2, x, y + r * 0.9); g.fill(); };
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalAlpha = op;
+    g.fillStyle = '#FF4F7A'; g.shadowColor = 'rgba(255,80,130,.8)'; g.shadowBlur = 16 * k;
+    if (s > 0.5) heartPath(mx, my, s);
+    for (let i = 0; i < 7; i++) {
+      const life = (P.heart * 0.7 + i / 7) % 1, x = mx + Math.sin(i * 2.1 + life * 5) * U * 0.5, y = my - life * U * 1.6;
+      g.globalAlpha = op * (1 - life) * clamp(P.heart * 2); g.fillStyle = i % 2 ? '#FF7AA8' : '#FFD0DF'; heartPath(x, y, U * 0.035);
+    }
+    g.shadowBlur = 0; g.globalAlpha = 1;
+  }
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalAlpha = 1;
 }

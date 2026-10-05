@@ -16,6 +16,11 @@ import { crestSVG } from './crests.js';
 import { celebrate } from './scene/celebration.js';
 import * as genderStatic from './gender.js';
 import { ico } from './icons.js';
+import { getStakesSafe, stakesCard, stakesResolution, maybeShowDaily } from './progress.js';
+import { equippedVis, starsState } from './cosmetics.js';
+import { coachMarks, showLegendCard, debutIntro } from './onboarding.js';
+import { SKIN_TONES } from './avatar.js';
+import * as STR from '../data/strings.js';
 
 /* ------------------------------------------------------------------ shared modules
    Crests (C6), the mega celebration (C9) and gender helpers (C2). Calls stay wrapped in try/catch so a
@@ -240,6 +245,8 @@ export function render(root) {
   let m = call(() => game.getMatch(), { quiet: true });
   if (!m) { navigate('#/hub', { replace: true }); return; }
   const decisions = !!(ctx.settings && ctx.settings.decisions === true);
+  // v2.3 review: watch mode with 1-2 one-tap key moments (the player's big chances); off in settings -> pure watch mode
+  const keyMoments = !decisions && !(ctx.settings && ctx.settings.keyMoments === false);
   const P = playerInfo(m);
   let summary = null;
   let outcome = null;
@@ -252,7 +259,39 @@ export function render(root) {
   let alive = true;
   let speed = 1;
   let lastEvs = null;  // the match events as replayed (the finish summary log may lack the C4 fields)
+  // v2.3: the debut tutorial (F3), the stakes card (F9), stars earned in this match (F6)
+  let meta0 = {};
+  try { meta0 = game.getSaveMeta() || {}; } catch { meta0 = {}; }
+  const tut = m.tutorial === true || (m.tutorial === undefined && !!(ctx.tutorial && ctx.tutorial.careerId && ctx.tutorial.careerId === meta0.careerId));
+  const preStakes = normStakes(m.stakes) || (m.phase === 'pre' || m.phase === 'live' ? getStakesSafe() : null);
+  const starsBefore = starsState().balance;
+  let tutShown = false;
+  let tutSummary = null, legendOpen = false;
+  let pendingKm = null;
+  // v2.3 (F9): "המשך עד האירוע הבא" stopped here - say why on the pre-match card
+  const ffStop = ctx.ffStop || null;
+  ctx.ffStop = null;
+  function ffStopHtml() {
+    if (!ffStop || m.phase !== 'pre') return '';
+    const R = (STR.FF_STOPS && STR.FF_STOPS.reasons) || {};
+    let t = R[ffStop.kind] || (ffStop.he ? '{he}' : '');
+    t = gt(String(t).replace(/\{(\w+)\}/g, (x, k) => (k === 'he' || k === 'comp' ? ffStop.he || m.compHe || '' : k === 'opp' ? ((oppTeam(m) || {}).shortHe || '') : ''))).trim();
+    return t ? `<p class="note good ws-stop mx-ffstop" data-testid="ff-stop-reason">${ico('spark', 'gold')} עצרנו: ${esc(t)}</p>` : '';
+  }
+  if (tut) ctx.holdBadges = true;   // unlock toasts wait for the 'ככה מתחילים אגדה' card
 
+  function normStakes(x) {
+    if (!x || !Array.isArray(x.stakes)) return null;
+    const stakes = x.stakes.filter((q) => q && q.he).slice(0, 2);
+    const g0 = x.goal || x.personal || null;
+    const personal = g0 && g0.he ? { ...g0, rewardStars: Number(g0.rewardStars ?? g0.stars) || 0 } : null;
+    return stakes.length || personal ? { stakes, personal } : null;
+  }
+  function skinHex() {
+    const i = P.look && Number.isFinite(Number(P.look.skin)) ? Number(P.look.skin) : 2;
+    const t = SKIN_TONES[Math.max(0, Math.min(SKIN_TONES.length - 1, i))];
+    return (t && (t.c || t.hex)) || '#D7A078';
+  }
   function kit(t, fallback) {
     const [a, b] = teamColors(t, fallback);
     return { name: (t && (t.shortHe || t.nameHe)) || '', shirt: a, shorts: b, socks: a, trim: b, gk: '#22C55E', fans: [a, a, b, '#F4F4F4'] };
@@ -365,8 +404,10 @@ export function render(root) {
     const minute = x.ev === 'kickoff' ? '' : (x.minute ? x.minute + "'" : '');
     let text = minute ? noMinute(x.textHe) : x.textHe;
     if (x.ev === 'sub' && x.who !== 'me' && (x.inHe || x.outHe) && !text) text = `חילוף: ${x.inHe} ${g('נכנס', 'נכנסת')}, ${x.outHe} ${g('יוצא', 'יוצאת')}`;
-    return `<div class="feed-row mx-row ${cls}"><span class="mx-ico" aria-hidden="true">${evIcon(x)}</span><span class="fm num">${esc(minute)}</span><span class="grow">${esc(text)}</span></div>`;
+    return `<div class="feed-row mx-row ${cls}"><span class="mx-ico" aria-hidden="true">${evIcon(x)}</span><span class="fm num">${esc(minute)}</span><span class="grow">${bidiScores(esc(text))}</span></div>`;
   }
+  /** "1-1" inside Hebrew text: kept left-to-right and on one line (no '1-' / '1' split by the bidi algorithm). */
+  function bidiScores(html) { return String(html).replace(/(\d+)\s*-\s*(\d+)/g, '<bdi dir="ltr" class="sc-nw">$1-$2</bdi>'); }
   function feedHtml(list) {
     if (!list.length) return '<div class="feed mx-feed" aria-live="polite"></div>';
     return `<div class="feed mx-feed" aria-live="polite">${list.slice().reverse().map(feedRow).join('')}</div>`;
@@ -380,7 +421,7 @@ export function render(root) {
   function lower(x, ms = 2600) {
     const el = root.querySelector('.mx-lower');
     if (!el || !x || !x.textHe) return;
-    el.innerHTML = `<span class="mx-lower-min num">${esc(x.minute ? x.minute + "'" : 'LIVE')}</span><span class="mx-lower-ico">${evIcon(x)}</span><span class="mx-lower-t">${esc(x.minute ? noMinute(x.textHe) : x.textHe)}</span>`;
+    el.innerHTML = `<span class="mx-lower-min num">${esc(x.minute ? x.minute + "'" : 'LIVE')}</span><span class="mx-lower-ico">${evIcon(x)}</span><span class="mx-lower-t">${bidiScores(esc(x.minute ? noMinute(x.textHe) : x.textHe))}</span>`;
     el.className = 'mx-lower show ' + (x.ev === 'goal' ? (x.side === 'opp' ? 'opp' : 'own') : x.ev);
     clearTimeout(lower.t);
     lower.t = setTimeout(() => { if (el.isConnected) el.classList.remove('show'); }, ms / Math.max(1, speed / 1.5));
@@ -431,23 +472,38 @@ export function render(root) {
   function preView() {
     const resuming = m.phase === 'live';
     const colors = teamColors(myTeam(m), ['#F4C35A', '#0B1E42']);
-    return `<section class="card mx-pre match-pre">
-      <div class="mx-pre-top"><span class="mx-onair pre"><i></i>יום משחק</span><span class="mx-pre-comp">${esc(m.compHe || '')}${m.roundHe ? ` · ${esc(m.roundHe)}` : ''}</span>${m.big ? '<span class="big-tag">⭐ משחק גדול</span>' : ''}</div>
+    const grid = `<div class="mx-pre-grid">
+        <div class="mx-status ${m.role === 'starter' ? 'starter' : 'bench'}">${statusHtml()}</div>
+        ${formationSVG(P, colors, m.role === 'starter')}
+      </div>`;
+    const btns = `<div class="btn-col mx-pre-btns">
+        <button type="button" class="btn btn-primary btn-gold btn-xl" data-act="start" data-testid="btn-start-match">${resuming ? '▶ המשך לצפות' : tut ? '▶ ' + esc(debutIntro(m).cta || 'שריקת פתיחה') : '▶ שריקת פתיחה'}</button>
+        <button type="button" class="btn btn-ghost${tut ? ' btn-sm mx-tut-skip' : ''}" data-act="auto" data-testid="btn-autoplay">${ico('skip')}לתוצאה</button>
+      </div>`;
+    return `<section class="card mx-pre match-pre${tut ? ' tut' : ''}">
+      <div class="mx-pre-top"><span class="mx-onair pre"><i></i>${tut ? 'הבכורה שלך' : 'יום משחק'}</span><span class="mx-pre-comp">${esc(m.compHe || '')}${m.roundHe ? ` · ${esc(m.roundHe)}` : ''}</span>${m.big ? '<span class="big-tag">⭐ משחק גדול</span>' : ''}</div>
       <div class="mx-vs">
         <div class="mx-side${m.isHome ? ' mine' : ''}">${crest(m.home, 64)}<b>${esc(m.home && (m.home.shortHe || m.home.nameHe))}</b><small>בית</small></div>
         <div class="mx-vs-mid"><span class="mx-vs-badge">VS</span><small>${esc(m.dateHe || '')}</small></div>
         <div class="mx-side${!m.isHome ? ' mine' : ''}">${crest(m.away, 64)}<b>${esc(m.away && (m.away.shortHe || m.away.nameHe))}</b><small>חוץ</small></div>
       </div>
-      <div class="mx-venue">${ico('stadium')} ${esc(venueLine())}</div>
-      <div class="mx-pre-grid">
-        <div class="mx-status ${m.role === 'starter' ? 'starter' : 'bench'}">${statusHtml()}</div>
-        ${formationSVG(P, colors, m.role === 'starter')}
-      </div>
-      ${m.introHe ? `<p class="intro mx-intro">${esc(gt(m.introHe))}</p>` : ''}
-      <div class="btn-col mx-pre-btns">
-        <button type="button" class="btn btn-primary btn-gold btn-xl" data-act="start" data-testid="btn-start-match">${resuming ? '▶ המשך לצפות' : '▶ שריקת פתיחה'}</button>
-        <button type="button" class="btn btn-ghost" data-act="auto" data-testid="btn-autoplay">${ico('skip')}לתוצאה</button>
-      </div></section>`;
+      ${tut ? '' : `<div class="mx-venue">${ico('stadium')} ${esc(venueLine())}</div>`}
+      ${ffStopHtml()}
+      ${energyWarn()}
+      ${tut ? debutBlock() + stakesCard(preStakes) + btns + grid : stakesCard(preStakes) + grid + (m.introHe ? `<p class="intro mx-intro">${esc(gt(m.introHe))}</p>` : '') + btns}
+      </section>`;
+  }
+  /** v2.3 review: a tired player knows why the rating may drop (and what to do about it next week). */
+  function energyWarn() {
+    if (tut || m.phase !== 'pre') return '';
+    let e = null;
+    try { const h = game.getHub(); e = h && h.player ? Number(h.player.energy) : null; } catch { e = null; }
+    if (e === null || !(e < 30)) return '';
+    return `<p class="note warn mx-energy" data-testid="prematch-energy">${ico('battery', 'warn')} ${esc(g('אנרגיה ' + Math.round(e) + ': הציון שלך עלול להיפגע. בשבוע הבא כדאי לנוח', 'אנרגיה ' + Math.round(e) + ': הציון שלך עלול להיפגע. בשבוע הבא כדאי לנוח'))}</p>`;
+  }
+  function debutBlock() {
+    const d = debutIntro(m);
+    return `<div class="mx-debut" data-testid="debut-intro"><span class="mx-debut-tag">${ico('sparkle', 'gold')}${esc(d.title)}</span><p>${esc(d.line)}</p></div>`;
   }
   function replayView() {
     return `<div class="mx-ctrl">
@@ -554,6 +610,8 @@ export function render(root) {
         </div>
         ${(s.effectsHe || []).length ? `<div class="chips">${s.effectsHe.map((t) => `<span class="chip">${esc(gt(t))}</span>`).join('')}</div>` : ''}
       </section>
+      ${stakesResolution(s, preStakes, Math.max(0, starsState().balance - starsBefore))}
+      ${(s.goals || 0) > 0 || s.motm ? `<button type="button" class="btn btn-glass mx-share" data-act="share" data-testid="btn-share-goal">${ico('upload', 'gold')}${esc((s.goals || 0) > 0 ? 'שתף את הגול' : 'שתף את המשחק')}</button>` : ''}
       ${(s.momentsHe || []).length ? `<section class="card"><h2 class="card-title">הרגעים שלך</h2>${s.momentsHe.map((x) => `<div class="feed-row ${x.ok ? 'k-goal_for' : 'k-goal_against'}"><span class="fm num">${esc(x.minute)}'</span><span>${x.ok ? ico('check', 'good') : ico('cross', 'bad')} ${esc(gt(x.textHe))}</span></div>`).join('')}</section>` : ''}
       <button type="button" class="btn btn-primary btn-gold btn-xl" data-act="continue" data-testid="btn-match-continue">המשך</button>
     </div>`;
@@ -561,7 +619,7 @@ export function render(root) {
 
   function draw() {
     if (!alive) return;
-    if (summary) { destroyScene(); crowd.silence(); root.innerHTML = summaryView(); return; }
+    if (summary) { destroyScene(); crowd.silence(); root.innerHTML = summaryView(); if (!tut) ctx.holdBadges = false; return; }
     ensureScene();
     let phase, body;
     if (RP && !RP.done) { phase = 'replay'; body = replayView(); }
@@ -601,9 +659,42 @@ export function render(root) {
     RP = { evs: normEvents(m, P), i: 0, clock: 0, end: 90, own: 0, opp: 0, feed: [], busy: false, done: false, started: true,
       last: performance.now(), timer: 0, waits: new Set(), skipping: false, heroOn: m.role === 'starter' };
     RP.end = RP.evs.some((x) => x.ev === 'et' || x.at > 90.5) ? 120 : 90;
+    RP.live = m.phase === 'live';
+    RP.keys = tut ? 1 : 2;
+    if (tut) { addWarmup(RP.evs); RP.tutFast = m.role !== 'starter'; }
     if (scene) { scene.setHeroOn(RP.heroOn); scene.setSpeed(sceneSpeed()); scene.setScore(0, 0); }
     draw();
     RP.timer = setInterval(tick, 100);
+    ctx.holdBadges = true;
+    if (tut && !tutShown) {
+      tutShown = true;
+      RP.busy = true;
+      // v2.3: the debut runs fast (x4) until the coach calls the player on, then slows to x1 for the big moment
+      const done = () => { if (RP) { RP.busy = false; RP.last = performance.now(); if (RP.tutFast) setSpeed(4); } };
+      setTimeout(() => {
+        if (!alive || !RP) return;
+        coachMarks({ pitch: root.querySelector('.match-canvas'), scorebug: root.querySelector('.mx-bug'), speed: root.querySelector('.mx-speed') }, { bench: m.role !== 'starter', autoSpeed: !!RP.tutFast })
+          .then(done, done);
+      }, 350);
+    }
+  }
+  function addWarmup(evs) {
+    const first = String(P.name || '').split(/\s+/)[0] || '';
+    const T0 = (STR.TUTORIAL && Array.isArray(STR.TUTORIAL.warmup) && STR.TUTORIAL.warmup.length) ? STR.TUTORIAL.warmup : null;
+    const lines = (T0 || [
+      [4, 'הספסל שלנו: ' + first + ' {{יושב|יושבת}} עם החולצה ' + P.num + ' ומחכה'],
+      [13, 'הקהל זיהה אותך על הספסל. היציע שר את השם ' + first],
+      [24, 'המאמן מסתכל לעבר הספסל ומהנהן אליך'],
+      [38, 'עוזר המאמן: "' + first + ', {{תתחיל|תתחילי}} להתחמם"'],
+      [50, first + ' {{מתחמם|מתחממת}} לאורך הקו. כל המצלמות עליך'],
+      [58, 'המאמן קורא לך: "{{תתכונן|תתכונני}}, {{אתה נכנס|את נכנסת}}!"'],
+    ]).map((x) => (Array.isArray(x) ? { minute: Number(x[0]) || 1, he: x[1] } : x)).filter((x) => x && x.he && x.minute < (Number(m.onMinute) || 62));
+    for (const w of lines) {
+      const x = { i: -1, minute: w.minute, at: w.minute, textHe: gt(String(w.he).split('{first}').join(first).split('{num}').join(String(P.num))), kind: 'info', ev: 'info', who: null, side: null, warm: true, raw: {} };
+      let k = evs.findIndex((e) => e.at > x.at);
+      if (k < 0) k = evs.length;
+      evs.splice(k, 0, x);
+    }
   }
   function tick() {
     if (!alive || !RP || RP.done) return;
@@ -611,7 +702,10 @@ export function render(root) {
     const dt = Math.min(0.25, (now - RP.last) / 1000);
     RP.last = now;
     if (RP.busy) return;
-    const target = Math.min(RP.end, RP.clock + dt * MIN_PER_SEC * speed);
+    let target = Math.min(RP.end, RP.clock + dt * MIN_PER_SEC * speed);
+    // a live match (key moments): the clock stops at the next moment until it is resolved
+    const mo = RP.live && m.phase === 'live' ? m.moment : null;
+    if (mo) target = Math.min(target, mo.minute);
     while (RP.i < RP.evs.length && RP.evs[RP.i].at <= target) {
       const x = RP.evs[RP.i++];
       RP.clock = Math.max(RP.clock, x.at);
@@ -625,7 +719,101 @@ export function render(root) {
     }
     RP.clock = target;
     paintClock();
-    if (RP.i >= RP.evs.length && RP.clock >= RP.end) finishReplay();
+    if (mo && RP.i >= RP.evs.length && RP.clock >= mo.minute) {
+      RP.busy = true;
+      handleMoment().catch((e) => console.warn('key moment', e)).finally(() => { if (RP) { RP.busy = false; RP.last = performance.now(); } });
+      return;
+    }
+    if (RP.live && m.phase !== 'live') refreshEvents();
+    if (!RP.live && RP.i >= RP.evs.length && RP.clock >= RP.end) finishReplay();
+  }
+
+  /* ---------------- key moments in watch mode (v2.3 review) ---------------- */
+  function refreshEvents() {
+    if (!RP) return;
+    const evs = normEvents(m, P);
+    if (tut) addWarmup(evs);
+    RP.evs = evs;
+    RP.live = m.phase === 'live';
+    RP.end = evs.some((x) => x.ev === 'et' || x.at > 90.5) ? 120 : 90;
+  }
+  function isKey(mo) {
+    if (!mo || RP.keys <= 0) return false;
+    if (tut) return m.momentIndex === m.momentsTotal - 1;
+    return P.pos === 'GK' ? mo.side === 'gk' && mo.type !== 'gk_distribution' : mo.side === 'att';
+  }
+  async function handleMoment() {
+    const mo = m.moment;
+    let res = null;
+    if (isKey(mo)) {
+      RP.keys--;
+      const idx = await askMoment(mo);
+      if (!alive || !RP || RP.skipping || m.phase !== 'live') return;
+      res = idx >= 0 ? call(() => game.chooseMoment(idx)) : call(() => game.autoMoment());
+      if (res && res.match) m = res.match;
+      if (res && res.outcome) { refreshEvents(); await showOutcome(res.outcome, mo); }
+    } else res = call(() => game.autoMoment());
+    if (!alive || !RP || RP.skipping) return;
+    if (res && res.match) m = res.match;
+    else if (!res) { const r2 = call(() => game.autoPlayMatch()); if (r2) m = r2; }
+    refreshEvents();
+  }
+  function askMoment(mo) {
+    return new Promise((resolve) => {
+      const body = root.querySelector('.match-body');
+      if (!body) { resolve(-1); return; }
+      if (scene) { try { scene.setSpeed(0.35); } catch { /* ignore */ } }
+      buzz([20, 40, 20]);
+      crowd.roar(0.35);
+      const sure = !!mo.sure;
+      const opts = (mo.options || []).map((o) => {
+        const pc = Math.max(3, Math.min(100, Number(o.pct) || 0));
+        return `<button type="button" class="km-opt" data-act="km" data-i="${esc(o.index)}" data-testid="km-opt-${esc(o.index)}">
+          <span class="km-he">${esc(gt(o.he))}</span><span class="km-odds"><i style="width:${pc}%"></i></span><span class="km-pc num">${sure ? '✓' : esc(pc) + '%'}</span></button>`;
+      }).join('');
+      const card = document.createElement('section');
+      card.className = 'card km' + (mo.key ? ' big' : '');
+      card.setAttribute('data-testid', 'key-moment');
+      if (sure) card.setAttribute('data-sure', '1');
+      card.innerHTML = `<div class="km-top"><span class="km-tag">${ico('spark', 'gold')}${esc(mo.key ? 'הרגע הגדול שלך!' : 'רגע מכריע')}</span><span class="num km-min">${esc(mo.minute)}'</span></div>
+        <p class="km-text">${esc(gt(mo.textHe))}</p>
+        <div class="km-opts">${opts}</div>
+        <div class="km-timer"><i></i></div><small class="muted km-hint">${esc(g('בחר מהר! אם לא, השחקן יבחר לבד', 'בחרי מהר! אם לא, השחקנית תבחר לבד'))}</small>`;
+      body.prepend(card);
+      fxBanner(mo.key ? 'הרגע הגדול!' : 'רגע מכריע', `דקה ${mo.minute}`, 'km', 1400);
+      try { card.scrollIntoView({ block: 'nearest' }); } catch { /* ignore */ }
+      const T = 9000;
+      const bar = card.querySelector('.km-timer i');
+      if (bar && !reducedMotion()) { bar.style.transition = `width ${T}ms linear`; requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = '0%'; })); }
+      let done = false;
+      const skipFn = () => fin(-2);
+      const t = setTimeout(() => fin(-1), T);
+      function fin(i) {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        if (RP) RP.waits.delete(skipFn);
+        pendingKm = null;
+        card.classList.add('picked');
+        setTimeout(() => card.remove(), 260);
+        if (scene) { try { scene.setSpeed(sceneSpeed()); } catch { /* ignore */ } }
+        resolve(i);
+      }
+      if (RP) RP.waits.add(skipFn);
+      pendingKm = fin;
+    });
+  }
+  async function showOutcome(o, mo) {
+    if (!o || (o.goalFor && o.code === 'GOAL')) return;   // the goal itself is replayed with the full celebration
+    const ok = !!o.ok;
+    if (scene && !reducedMotion() && speed < 4 && mo && mo.side === 'att' && (o.code === 'MISS' || o.code === 'SAVE')) {
+      scene.play('dribble_shot', o.code === 'MISS' ? 'miss' : 'save', { side: 'home', scorer: 'hero' });
+      await waitScene(6000);
+    }
+    if (o.code === 'ASSIST') return;   // the teammate's goal follows in the replay
+    fxBanner(ok ? 'ככה!' : o.code === 'SAVE' ? 'השוער הציל!' : o.code === 'MISS' ? 'כמעט!' : 'לא הפעם', '', ok ? 'me-in' : 'ht', 1800);
+    if (ok) crowd.roar(0.5);
+    await hold(1800);
   }
   function blocking(x) { return x.ev === 'kickoff' || x.ev === 'goal' || x.ev === 'sub' || x.ev === 'ht' || x.ev === 'et' || x.ev === 'pens' || x.ev === 'ft'; }
   function instant(x) {
@@ -687,7 +875,14 @@ export function render(root) {
       case 'sub':
         applySub(x);
         fxSubBoard(x);
-        if (x.who === 'me') {
+        if (x.who === 'me' && x.subOn && tut && RP && RP.tutFast) {
+          RP.tutFast = false;
+          setSpeed(2);   // x2 from the sub-on: the big moment comes within ~15 s, the key-moment card stops the clock
+          fxAdd(`<div class="mx-subon-in"><small>${esc(g('המאמן קורא לך', 'המאמן קורא לך'))}</small><b>${esc(g('אתה נכנס!', 'את נכנסת!'))}</b><span class="mx-subon-num num">${esc(P.num)}</span><em>${esc(P.name)}</em></div>`, 'mx-subon', 3000);
+          buzz([40, 30, 40, 30, 120]); crowd.roar(0.8);
+          if (scene) scene.say(g('יאללה ילד, תראה להם!', 'יאללה ילדה, תראי להם!'), 'shout');
+          await hold(3000);
+        } else if (x.who === 'me') {
           fxBanner(x.subOn ? 'נכנסת למגרש!' : 'יצאת מהמגרש', x.subOn ? `${P.name} · חולצה ${P.num}` : g('הקהל מוחא לך כפיים', 'הקהל מוחא לך כפיים'), x.subOn ? 'me-in' : 'me-out', 2300);
           if (x.subOn) { buzz([30, 30, 60]); crowd.roar(0.5); if (scene) scene.say(g('יאללה ילד, תראה להם!', 'יאללה ילדה, תראי להם!'), 'shout'); }
           await hold(2500);
@@ -725,14 +920,17 @@ export function render(root) {
     const me = x.who === 'me';
     const team = myTeam(m);
     const colors = teamColors(team, ['#F4C35A', '#0B1E42']);
-    const kind = x.mega ? 'mega' : 'goal';
+    const kind = x.mega || (tut && me) ? 'mega' : 'goal';
     const textHe = me || x.big || x.mega ? 'גוללללל!' : 'גול!';
-    const subHe = me ? `${P.name} · ${x.minute}'` : `${x.scorerHe || (team && team.shortHe) || ''} · ${x.minute}'`;
+    const subHe = me ? `${P.name} · ${x.minute}'${tut ? ' · ' + g('בכורה!', 'בכורה!') : ''}` : `${x.scorerHe || (team && team.shortHe) || ''} · ${x.minute}'`;
+    if (me && RP) RP.meGoal = x;
     if (celebrateFn && !reducedMotion()) {
       let p = null;
-      try { p = celebrateFn({ kind, textHe, subHe, colors }); } catch (e) { console.warn('celebrate', e); }
+      let cos = {};
+      if (me) { try { const v = equippedVis(); cos = { style: v.style || (tut ? 'knee' : undefined), boots: v.boots, skin: skinHex() }; } catch { cos = {}; } }
+      try { p = celebrateFn({ kind, textHe, subHe, colors, ...cos }); } catch (e) { console.warn('celebrate', e); }
       if (p && typeof p.then === 'function') {
-        await Promise.race([p.catch(() => {}), new Promise((r) => setTimeout(r, kind === 'mega' ? 6000 : 4500)), new Promise((r) => { if (RP) RP.waits.add(r); })]);
+        await Promise.race([p.catch(() => {}), new Promise((r) => setTimeout(r, kind === 'mega' ? 7000 : 5200)), new Promise((r) => { if (RP) RP.waits.add(r); })]);
         return;
       }
     }
@@ -754,6 +952,7 @@ export function render(root) {
     if (!RP || RP.done) return;
     RP.skipping = true;
     releaseWaits();
+    if (m.phase === 'live' || m.phase === 'pre') { const r = call(() => game.autoPlayMatch()); if (r) { m = r; refreshEvents(); } }
     const cur = RP.cur;
     const rest = [cur, ...RP.evs.slice(RP.i)].filter(Boolean);
     RP.i = RP.evs.length;
@@ -833,13 +1032,14 @@ export function render(root) {
     draw();
   }
 
-  function cont() {
+  function cont(o = {}) {
     if (busy) return;
     busy = true;
     const r = call(() => game.resumeWeek());
     busy = false;
     if (r && r.ok && r.status === 'match') { m = r.match; summary = null; outcome = null; RP = null; draw(); try { window.scrollTo(0, 0); } catch { /* ignore */ } return; }
-    if (r && r.ok && r.status === 'done') { ctx.pendingSummary = r.summary; navigate('#/hub'); return; }
+    // the debut week: the legend card already told the story, no second recap of the same match
+    if (r && r.ok && r.status === 'done') { ctx.pendingSummary = o.skipSummary && !(r.summary && (r.summary.seasonEnded || r.summary.retiredNow)) ? null : r.summary; navigate('#/hub'); return; }
     if (r && !r.ok && r.error === 'busy') {
       const lm = call(() => game.getMatch(), { quiet: true });
       if (lm) { m = lm; summary = null; RP = null; draw(); return; }
@@ -856,13 +1056,15 @@ export function render(root) {
     if (act === 'mute') { crowd.setSound(!crowd.isOn()); paintMute(); return; }
     if (act === 'speed') { setSpeed(Number(b.dataset.v)); return; }
     if (act === 'skipend') { skipToEnd(); return; }
+    if (act === 'km') { if (pendingKm) pendingKm(Number(b.dataset.i)); return; }
     if (busy) return;
     if (act === 'start') {
       if (decisions) {
         const r = call(() => game.startMatch());
         if (r) { m = r; draw(); }
       } else if (!RP || RP.done) {
-        const r = call(() => game.autoPlayMatch());
+        // key moments: the match runs live (moment by moment); otherwise it is resolved at kick-off and replayed
+        const r = call(() => (keyMoments ? game.startMatch() : game.autoPlayMatch()));
         if (r) { m = r; startReplay(); }
       }
     } else if (act === 'replay') {
@@ -876,8 +1078,10 @@ export function render(root) {
       if (RP && !RP.done) skipToEnd();
       try { lastEvs = normEvents(m, P); } catch { lastEvs = null; }
       const s = call(() => game.finishMatch());
+      import('../core/friends.js').then((m) => m.syncMyCareer({})).catch(() => {});
       if (s) {
         summary = s; RP = null; draw(); try { window.scrollTo(0, 0); } catch { /* ignore */ }
+        if (tut) tutSummary = s;
         // a won final gets the full trophy celebration (C9); a won big match gets the win burst
         const wonFinal = s.final && (s.res === 'W' || /זכיתם בגמר/.test(s.tieHe || ''));
         if (celebrateFn && !reducedMotion() && (wonFinal || (s.big && s.res === 'W'))) {
@@ -888,12 +1092,30 @@ export function render(root) {
         }
       }
       else { const lm = call(() => game.getMatch(), { quiet: true }); if (lm) { m = lm; draw(); } else navigate('#/hub'); }
-    } else if (act === 'continue') cont();
+    } else if (act === 'continue') {
+      if (tut && tutSummary && !legendOpen) {
+        legendOpen = true;
+        showLegendCard(tutSummary, { starsBefore }).then(() => { ctx.tutorial = null; ctx.holdBadges = false; if (alive) cont({ skipSummary: true }); });
+        return;
+      }
+      if (!legendOpen) cont();
+    }
+    else if (act === 'share' && summary) {
+      const sm = summary;
+      import('./sharecard.js').then((mod) => {
+        const opp = sm.isHome ? sm.away : sm.home;
+        const mg = (lastEvs || []).find((x) => x.ev === 'goal' && x.who === 'me');
+        mod.shareMoment({ kind: tut ? 'debut' : mg && mg.mega ? 'mega' : 'goal', titleHe: `${(sm.home && sm.home.shortHe) || ''} ${sm.score[0]}-${sm.score[1]} ${(sm.away && sm.away.shortHe) || ''}`,
+          vars: { opp: (opp && (opp.shortHe || opp.nameHe)) || '', minute: mg ? mg.minute : '', score: sm.score.join('-') } });
+      }).catch(() => {});
+    }
   });
 
   window.__hyMatchDebug = {
     speed: (n) => setSpeed(Number(n)),
     skipToEnd: () => skipToEnd(),
+    // key moment: an option index, or -1 = let the player decide (the auto choice)
+    km: (i) => { if (pendingKm) { pendingKm(Number(i)); return true; } return false; },
     state: () => ({ phase: summary ? 'summary' : RP && !RP.done ? 'replay' : m.phase, clock: RP ? RP.clock : null, event: RP ? RP.i : null, events: RP ? RP.evs.length : null, speed, busy: !!(RP && RP.busy), score: shownScore() }),
     scene: () => scene,
     events: () => normEvents(m, P).map((x) => ({ minute: x.minute, ev: x.ev, who: x.who, side: x.side, big: !!x.big, mega: !!x.mega, textHe: x.textHe })),
@@ -901,9 +1123,12 @@ export function render(root) {
 
   if (crowd.soundWanted()) crowd.setSound(true);
   draw();
+  // v2.3 review: a returning player whose save sits at a pre-match gets the daily reward before kick-off
+  if (m.phase === 'pre' && !tut) setTimeout(() => { try { if (alive && !RP) maybeShowDaily({ allowMatch: true }); } catch { /* ignore */ } }, 500);
   optReady.then(() => { if (!alive || summary) return; if (RP && !RP.done) paintBug(); else draw(); });
   return () => {
     alive = false;
+    ctx.holdBadges = false;
     if (skipWait) skipWait();
     if (RP) { clearInterval(RP.timer); releaseWaits(); }
     destroyScene();

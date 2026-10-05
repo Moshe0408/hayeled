@@ -147,7 +147,7 @@ function closeAllModalsSafe(info) {
 /* ------------------------------------------------------------------ */
 
 route('/title', () => import('./title.js'), { tabs: false, header: false });
-route('/new', () => import('./create.js'), { tabs: false, title: 'קריירה חדשה', back: '#/title' });
+route('/new', () => import('./onboarding.js'), { tabs: false, title: 'קריירה חדשה', back: '#/title' });
 route('/hub', () => import('./hub.js'), { tab: 'hub', title: '{{הילד|הילדה}} מהשכונה', gear: true });
 route('/coach-talk', () => import('./coach-talk.js'), { tab: 'hub', title: 'שיחה עם המאמן', back: '#/hub' });
 route('/match', () => import('./match.js'), { tabs: false, header: false, banners: false });
@@ -163,6 +163,12 @@ route('/profile', () => import('./profile.js'), { tab: 'hub', title: 'הפרופ
 route('/national', () => import('./national.js'), { tab: 'hub', title: 'הנבחרת', back: '#/hub' });
 route('/offers', () => import('./offers.js'), { tab: 'hub', title: 'הצעות וחוזה', back: '#/hub' });
 route('/awards', () => import('./awards.js'), { tab: 'career', title: 'פרסים', back: '#/career' });
+// v2.3: achievements (F5) and the public leaderboard (F11)
+route('/achievements', () => import('./achievements.js'), { tab: 'career', title: 'הישגים', back: '#/career' });
+route('/leaderboard', () => import('./leaderboard.js'), { tab: 'career', title: 'טבלת האגדות', back: 'home' });
+route('/friends', () => import('./friends.js'), { tab: 'career', title: 'ליגת חברים', back: 'home' });
+route('/friends/join', () => import('./friends.js'), { tab: 'career', title: 'הזמנה לליגה', back: '#/friends' });
+route('/friends/:code', () => import('./friends.js'), { tab: 'career', title: 'ליגת חברים', back: '#/friends' });
 route('/shop', () => import('./shop.js'), { tab: 'shop', title: 'החנות', gear: true });
 route('/hof', () => import('./hof.js'), { title: 'היכל התהילה', back: 'home' });
 route('/settings', () => import('./settings.js'), { title: 'הגדרות', back: 'home' });

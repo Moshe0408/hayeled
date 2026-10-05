@@ -1,5 +1,6 @@
 // hub.js: #/hub. Player card hero, next match, training, advance / fast-forward, alerts, ad slot, quick links.
 import * as game from '../engine/game.js';
+import { friendsNotices } from './friends.js';
 import { esc } from './dom.js';
 import { ctx, svc, call, toast, openModal, overlay, hubSafe } from './app.js';
 import { navigate } from './router.js';
@@ -12,6 +13,8 @@ import { g, gtext } from './gender.js';
 import { mountTilt, mountStadium } from './fx.js';
 import { ico } from './icons.js';
 import { intensityRow, previewLine, loadBar, sharpTag, normInt, benchRunHe } from './training.js';
+import { getPathSafe, pathBar, getObjectivesSafe, objectivesCard, getStakesSafe, maybeShowDaily, dailyBanner, showDailySheet } from './progress.js';
+import { rivalBar, shareChallenge } from './leaderboard.js';
 
 const MAIN_BTN = {
   idle: 'שחק{{|י}} את השבוע',
@@ -37,8 +40,12 @@ const QUICK_ICO = {
   inbox: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z"/>',
   awards: '<circle cx="12" cy="9" r="5.5"/><path d="M9 13.8 7.5 21l4.5-2.5 4.5 2.5-1.5-7.2"/>',
   hof: '<path d="M3 21h18M5 18h14M6 18V10M10 18V10M14 18V10M18 18V10M3.5 10h17L12 4z"/>',
+  ach: '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="m12 8.2 1.3 2.6 2.9.4-2.1 2 .5 2.9-2.6-1.4-2.6 1.4.5-2.9-2.1-2 2.9-.4z"/>',
+  board: '<path d="M4 20V11h4v9M10 20V6h4v14M16 20v-6h4v6M3 20.5h18"/>',
 };
-const ALERT_ICO = { contract_expiring: ['pen', 'warn'], injured: ['medic', 'bad'], callup: ['flag', 'teal'], window_open: ['swap', 'teal'], offer: ['mail', 'gold'], energy_low: ['battery', 'warn'], load_high: ['dumbbell', 'warn'], load_burnt: ['dumbbell', 'bad'], suspended: ['card', 'bad'], free_agent: ['briefcase', 'warn'], season_review: ['flag', 'gold'] };
+const ALERT_ICO = { contract_expiring: ['pen', 'warn'], injured: ['medic', 'bad'], callup: ['flag', 'teal'], window_open: ['swap', 'teal'], offer: ['mail', 'gold'], energy_low: ['battery', 'warn'], load_high: ['dumbbell', 'warn'], load_burnt: ['dumbbell', 'bad'], suspended: ['card', 'bad'], free_agent: ['briefcase', 'warn'], season_review: ['flag', 'gold'], friends: ['users', 'teal'] };
+const TRAIN_OPEN = 'hy.hub.train';
+function trainOpen() { try { return localStorage.getItem(TRAIN_OPEN) === '1'; } catch { return false; } }
 const svgI = (d) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 
 export function render(root) {
@@ -104,8 +111,9 @@ export function render(root) {
     const hub = hubSafe();
     if (!hub) return;
     const close = openModal(`<h2 class="modal-title">${ico('ff', 'gold')} קפיצה קדימה</h2>
-      <p class="muted small">${esc(gtext('המשחקים שלך ישוחקו אוטומטית. נעצור אם תגיע הצעה, הודעה חשובה, פציעה או זימון.'))}</p>
+      <p class="muted small">${esc(gtext('המשחקים שלך ישוחקו אוטומטית. נעצור על כל דבר מעניין: הצעה, הודעה, משחק גדול, הישג, פציעה או זימון.'))}</p>
       <div class="btn-col">
+        <button type="button" class="btn btn-gold btn-lg" data-ff="event" data-testid="ff-next-event">${ico('spark')}המשך עד האירוע הבא</button>
         <button type="button" class="btn btn-lg" data-ff="next_match" data-testid="ff-next-match">עד המשחק הבא</button>
         <button type="button" class="btn btn-lg" data-ff="season_end" data-testid="ff-season-end">עד סוף העונה</button>
         ${hub.phase === 'summer' ? '<button type="button" class="btn btn-lg" data-ff="season_start" data-testid="ff-skip-summer">דלג על הקיץ</button>' : ''}
@@ -164,12 +172,12 @@ export function render(root) {
       const upto = goingToMatch ? summaries.length : summaries.length - 1;
       for (let i = 0; i < upto; i++) if (summaries[i].hadMatchday) svc.ads.noteMatchday();
     } catch { /* ignore */ }
-    if (goingToMatch) { navigate('#/match'); return; }
+    if (goingToMatch) { ctx.ffStop = res && res.ok && res.stopped && res.stopped !== 'until' ? { kind: (res.stopInfo && res.stopInfo.kind) || res.stopped, he: (res.stopInfo && res.stopInfo.he) || '' } : null; navigate('#/match'); return; }
     if (hub.status === 'retired' && !last) { navigate('#/retire'); return; }
     if (last) {
       draw();
       const stopped = res && res.ok ? (res.stopped === 'chunk' ? (stopReq ? 'chunk' : null) : res.stopped) : null;
-      showWeekSummary(last, { ffWeeks: weeks, stopped });
+      showWeekSummary(last, { ffWeeks: weeks, stopped, stopInfo: res && res.ok ? res.stopInfo || null : null });
       return;
     }
     if (hub.status === 'review') { navigate('#/season'); return; }
@@ -177,11 +185,21 @@ export function render(root) {
   }
 
   root.addEventListener('click', (e) => {
+    // the folded training card remembers its state at once (a re-render may come before the 'toggle' event)
+    const sum = e.target.closest('summary.tc-sum');
+    if (sum && sum.parentElement) { try { localStorage.setItem(TRAIN_OPEN, sum.parentElement.open ? '0' : '1'); } catch { /* ignore */ } }
     const b = e.target.closest('[data-act]');
     if (!b || !root.contains(b)) return;
     const act = b.dataset.act;
     if (act === 'advance') advance();
     else if (act === 'ff') openFF();
+    else if (act === 'daily') showDailySheet();
+    else if (act === 'rival-share') shareChallenge().catch(() => {});
+    else if (act === 'rest') {
+      const r = call(() => game.setTraining('rest', intensity));
+      if (r && r.ok !== false) { training = 'rest'; toast(gtext('השבוע {{אתה נח|את נחה}}. האנרגיה תעלה'), { tone: 'good' }); }
+      draw();
+    }
     else if (act === 'train') {
       const id = b.dataset.v;
       if (b.disabled) return;
@@ -202,6 +220,9 @@ export function render(root) {
     }
   });
 
+  root.addEventListener('toggle', (e) => {
+    if (e.target && e.target.matches && e.target.matches('details.train-card')) { try { localStorage.setItem(TRAIN_OPEN, e.target.open ? '1' : '0'); } catch { /* ignore */ } }
+  }, true);
   draw();
 
   // Deferred UI from other screens (after a match: week summary; after the first season review: feedback prompt).
@@ -213,6 +234,9 @@ export function render(root) {
     const t = ctx.pendingPrompt;
     ctx.pendingPrompt = null;
     setTimeout(() => maybePromptFeedback(t), 250);
+  } else {
+    // v2.3 (F8): the daily reward sheet on the first hub visit of the day
+    setTimeout(() => { try { if (root.isConnected) maybeShowDaily(); } catch { /* ignore */ } }, 450);
   }
 
   return () => { if (unmountAd) unmountAd(); untilt(); unstadium(); };
@@ -230,14 +254,14 @@ function hero(hub, prof, meta) {
   const cardHtml = playerCard({
     name: p.name, nick: p.nick, ovr: p.ovr, pos: p.pos, gk: p.pos === 'GK', attrs: (prof && prof.attrs) || [],
     meta: meta || {}, gender: meta && meta.gender, club: c, nation: nat,
-  }, { size: 'm', ovrTestid: 'hub-ovr' });
+  }, { size: 's', ovrTestid: 'hub-ovr' });
   return `<section class="hub-hero">
     <canvas class="hero-stadium" aria-hidden="true"></canvas>
     <div class="hh-grid">
       <a class="hh-card" href="#/profile" aria-label="הפרופיל שלי">${cardHtml}</a>
       <div class="hh-info">
         <b class="pname">${esc(p.name)}</b>
-        ${p.nick ? `<span class="pnick">"${esc(p.nick)}"</span>` : ''}
+        ${p.nick && String(p.name || '').split(' ')[0] !== p.nick ? `<span class="pnick">"${esc(p.nick)}"</span>` : ''}
         <div class="hh-sub">${esc(gtext(p.posHe || ''))} · גיל <b class="num">${esc(p.age)}</b></div>
         <div class="hh-sub muted">${esc(gtext(p.stageHe || ''))}</div>
         <div class="pot-line"><span class="lbl">פוטנציאל</span>${stars(p.potStars, 'פוטנציאל')}<span class="muted small num" dir="ltr">${esc(potRange)}</span></div>
@@ -288,6 +312,16 @@ function matchPreview(fx, label) {
   </div>`;
 }
 
+/** v2.3 (F9): one line of what is at stake in this week's match (the full card is on the match screen). */
+function stakesTeaser(fx, status) {
+  if (!fx || fx.result || !(status === 'idle' || status === 'in_week' || status === 'match')) return '';
+  const st = getStakesSafe();
+  if (!st) return '';
+  const first = st.stakes[0];
+  const pg = st.personal;
+  return `<div class="mp-stakes" data-testid="hub-stakes">${first ? `<span class="mps-line">${ico('spark', 'gold')}${esc(gtext(first.he))}</span>` : ''}${pg ? `<span class="mps-goal">${ico('target', 'teal')}${esc(gtext(pg.he))}${pg.rewardStars ? ` <b class="num">+${esc(pg.rewardStars)}⭐</b>` : ''}</span>` : ''}</div>`;
+}
+
 /** v2.2: "לדבר עם המאמן" call-to-action (only when the engine allows a talk). */
 function coachTalkCta(hub) {
   const ct = hub.coachTalk;
@@ -308,13 +342,16 @@ function trainCardHtml(hub, training, intensity) {
   const pv = tr.preview || null;
   const ext = (tr.intensities || []).find((x) => x && x.id === 'extreme');
   const lockExtreme = ext ? !!ext.locked : Number((hub.player || {}).age) < 16;
-  return `<section class="card train-card int-${rest ? 'rest' : esc(intensity)}"><h2 class="card-title"><span>אימון השבוע</span></h2>
+  const open = trainOpen();
+  const intHe0 = { light: 'קל', normal: 'רגיל', hard: 'קשה', extreme: 'קיצוני' }[tr.physioWeek ? 'light' : intensity] || '';
+  return `<details class="card train-card int-${rest ? 'rest' : esc(intensity)}"${open ? ' open' : ''} data-testid="train-card">
+    <summary class="tc-sum" data-testid="hub-train-toggle"><span class="tc-sum-ico">${ico('dumbbell')}</span><span class="grow"><b>אימון השבוע</b><small>${esc(gtext((cur && cur.he) || ''))}${rest ? '' : ' · ' + esc(intHe0)}</small></span><span class="chev" aria-hidden="true">‹</span></summary>
     <div class="tc-label">${ico('target')}<span>פוקוס</span></div>
     <div class="train-grid">${opts.map((o) => `<button type="button" class="train${o.id === training ? ' on' : ''}" data-act="train" data-v="${esc(o.id)}" data-testid="training-${esc(o.id)}" ${o.disabled ? 'disabled' : ''}>${svgI(TRAIN_ICO[o.id] || TRAIN_ICO.balanced)}<span>${esc(gtext(o.he))}</span></button>`).join('')}</div>
     ${rest ? ''
       : `<div class="tc-label">${ico('dumbbell')}<span>עוצמה</span></div>${intensityRow({ current: intensity, lockExtreme, lockHe: 'מגיל 16', titleHe: ext && ext.lockHe })}`}
     ${previewLine(pv, tr.physioWeek ? 'light' : intensity, { rest, noteHe: tr.physioHe || '' })}
-    ${cur && cur.desc ? `<p class="muted small train-desc">${esc(gtext(cur.desc))}</p>` : ''}</section>`;
+    ${cur && cur.desc ? `<p class="muted small train-desc">${esc(gtext(cur.desc))}</p>` : ''}</details>`;
 }
 
 function tpl(hub, training, intensity, prof, meta) {
@@ -327,17 +364,27 @@ function tpl(hub, training, intensity, prof, meta) {
     <h2 class="card-title"><span>${esc(hub.dateHe || '')}</span></h2>
     ${hub.windowOpen ? '<div class="wc-flags"><span class="chip gold">' + ico('swap') + ' חלון העברות פתוח</span></div>' : ''}
     ${nextHtml}
+    ${stakesTeaser(main, status)}
     ${rest}
     ${hub.lastResult && hub.lastResult.textHe ? `<p class="small last-res"><span class="lr-tag">אחרון</span>${esc(hub.lastResult.textHe)}${hub.lastResult.rating ? ' · ציון ' + esc(rating(hub.lastResult.rating)) : ''}</p>` : ''}
-    <div class="wc-actions">
-      <button type="button" class="btn btn-gold btn-xl grow" data-act="advance" data-testid="btn-advance"><span>${esc(gtext(MAIN_BTN[status] || MAIN_BTN.idle))}</span><svg class="i play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14l11-7z"/></svg></button>
-      ${status === 'idle' || status === 'in_week' ? '<button type="button" class="btn btn-ff" data-act="ff" data-testid="btn-ff" aria-label="קפיצה קדימה"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6v12l8-6zM12 6v12l8-6z"/></svg></button>' : ''}
-    </div>
   </section>`;
+  // v2.3 review: the play button + the next fixture live in a dock above the tab bar (always in view, no scrolling)
+  const dfx = main || hub.next || null;
+  const dst = dfx && !dfx.result ? getStakesSafe() : null;
+  const dline = dfx ? `${(dfx.home && (dfx.home.shortHe || dfx.home.nameHe)) || ''} - ${(dfx.away && (dfx.away.shortHe || dfx.away.nameHe)) || ''}` : gtext('שבוע בלי משחק: אתגר באימון');
+  const dsub = dst && dst.stakes[0] ? dst.stakes[0].he : dfx ? (main ? 'השבוע' : (dfx.dateHe || 'המשחק הבא')) : '';
+  const dock = `<div class="hub-dock" data-testid="hub-dock">
+    <div class="hd-fx"><b>${esc(dline)}</b>${dsub ? `<small>${esc(gtext(dsub))}</small>` : ''}</div>
+    <div class="hd-btns">
+      <button type="button" class="btn btn-gold btn-lg grow" data-act="advance" data-testid="btn-advance"><span>${esc(gtext(MAIN_BTN[status] || MAIN_BTN.idle))}</span><svg class="i play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14l11-7z"/></svg></button>
+      ${status === 'idle' || status === 'in_week' ? '<button type="button" class="btn btn-ff" data-act="ff" data-testid="btn-ff" aria-label="קפיצה קדימה"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6v12l8-6zM12 6v12l8-6z"/></svg></button>' : ''}
+    </div></div>`;
 
   const trainCard = trainCardHtml(hub, training, intensity);
 
-  const alerts = (hub.alerts || []).filter((a) => a && a.textHe);
+  let fl = [];
+  try { fl = friendsNotices({ max: 2 }).map((n) => ({ type: 'friends', textHe: n.textHe, route: n.href })); } catch { fl = []; }
+  const alerts = [...fl, ...(hub.alerts || [])].filter((a) => a && a.textHe);
   const alertsHtml = alerts.length ? `<div class="alerts">${alerts.map((a) => `<button type="button" class="alert alert-${esc(a.type)}" ${a.route ? `data-act="go" data-to="${esc(a.route)}"` : 'disabled'}><span class="al-ico">${ico(...(ALERT_ICO[a.type] || ['info', '']))}</span><span class="grow">${esc(gtext(a.textHe))}</span>${a.route ? '<span class="chev">‹</span>' : ''}</button>`).join('')}</div>` : '';
   const notes = (hub.announcementsHe || []).length ? `<div class="notes">${hub.announcementsHe.map((t) => `<p class="note">${ico('mega', 'gold')} ${esc(gtext(t))}</p>`).join('')}</div>` : '';
 
@@ -346,13 +393,20 @@ function tpl(hub, training, intensity, prof, meta) {
     ['#/national', 'national', 'נבחרת', 0],
     ['#/profile', 'profile', 'פרופיל', 0],
     ['#/inbox', 'inbox', 'הודעות', hub.unread || 0],
+    ['#/achievements', 'ach', 'הישגים', 0],
+    ['#/leaderboard', 'board', 'טבלת האגדות', 0],
     ['#/awards', 'awards', 'פרסים', 0],
     ['#/hof', 'hof', 'היכל התהילה', 0],
   ];
   const grid = `<div class="quick-grid">${links.map(([to, ico, he, n]) => `<button type="button" class="quick q-${ico}" data-act="go" data-to="${to}"><span class="q-ico">${svgI(QUICK_ICO[ico])}</span><span>${he}</span>${n ? `<b class="q-badge num">${esc(n)}</b>` : ''}</button>`).join('')}</div>`;
 
-  return `<div data-testid="hub" class="hub">
+  return `<div data-testid="hub" class="hub has-dock">
     ${hero(hub, prof, meta)}
+    ${objectivesCard(getObjectivesSafe(), { compact: true })}
+    ${dailyBanner()}
+    ${pathBar(getPathSafe(), { compact: true })}
+    ${rivalBar()}
+    ${restCta(hub)}
     ${notes}
     ${alertsHtml}
     ${coachTalkCta(hub)}
@@ -361,5 +415,17 @@ function tpl(hub, training, intensity, prof, meta) {
     ${trainCard}
     <div class="ad-slot" data-placement="hub_banner" hidden></div>
     ${grid}
+    ${dock}
   </div>`;
+}
+
+/** v2.3 review: low energy -> one tap to rest this week (the coach benches a tired player anyway). */
+function restCta(hub) {
+  const p = hub.player || {};
+  const st = hub.status;
+  if (!(st === 'idle') || !(Number(p.energy) < 35) || (hub.training && hub.training.current === 'rest')) return '';
+  return `<button type="button" class="rest-cta" data-act="rest" data-testid="btn-rest-week">
+    <span class="ct-cta-ico">${ico('battery', 'warn')}</span>
+    <span class="grow"><b>${esc(gtext('האנרגיה נמוכה: ' + Math.round(p.energy)))}</b><small>${esc(gtext('{{נוח|נוחי}} השבוע ותחזור{{|י}} חזק{{|ה}}: עוד אנרגיה, ציון טוב יותר במשחק הבא'))}</small></span>
+    <span class="chip warn">מנוחה</span></button>`;
 }

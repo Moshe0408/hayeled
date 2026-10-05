@@ -51,9 +51,10 @@ export function render(root, params = {}) {
       ${card(statGrid([
         { label: 'הופעות', value: t.apps ?? 0 }, { label: 'שערים', value: t.goals ?? 0 }, { label: 'בישולים', value: t.assists ?? 0 },
         { label: 'ציון ממוצע', value: rating(t.avgRating) }, { label: 'הופעות בנבחרת', value: t.caps ?? 0 }, { label: 'שערים בנבחרת', value: t.intlGoals ?? 0 },
+        ...(t.youthCaps ? [{ label: 'נבחרות צעירות: הופעות', value: t.youthCaps }, { label: 'נבחרות צעירות: שערים', value: t.youthGoals ?? 0 }] : []),
       ]), { title: 'סה״כ בקריירה' })}
       ${coachCard(c.coach)}
-      <div class="row gap"><a class="btn btn-sm" href="#/profile">${ico('user')}פרופיל</a><a class="btn btn-sm" href="#/awards">${ico('medal')}פרסים</a></div>
+      <div class="row gap career-links"><a class="btn btn-sm" href="#/profile">${ico('user')}פרופיל</a><a class="btn btn-sm" href="#/achievements" data-testid="btn-achievements">${ico('star')}הישגים</a><a class="btn btn-sm" href="#/friends" data-testid="btn-career-friends">${ico('users')}ליגת חברים</a><a class="btn btn-sm" href="#/leaderboard" data-testid="btn-career-board">${ico('table')}טבלת האגדות</a><a class="btn btn-sm" href="#/awards">${ico('medal')}פרסים</a></div>
       ${segmented('tab', [{ id: 'timeline', he: 'ציר זמן' }, { id: 'seasons', he: 'עונות' }, { id: 'trophies', he: 'תארים' }, { id: 'clubs', he: 'מועדונים' }], tab)}
       <div class="tab-body">${body()}</div>
     </div>`;

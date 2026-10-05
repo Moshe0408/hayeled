@@ -2,12 +2,13 @@
 import { fmtMoney } from './util.js';
 // The only module-level mutable state of the engine lives in C: the current career (S + its rng) and the signal list.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;   // v5 (2.3): S.meta (stars, achievements, objectives, cosmetics, tutorial, stakes) + the one-time OVR 60 lift
 
 export const C = {
   S: null,      // current State
   rng: null,    // main Rng bound to S.rng
   sig: [],      // pending telemetry signals (not persisted)
+  int: null,    // v2.3: first "interesting" event since the last fast-forward check (not persisted)
 };
 
 export function emit(name, props) {
@@ -43,6 +44,7 @@ export function createEmptyState() {
     names: { coach: {}, agent: '', journalist: '', friends: ['', '', ''], partner: null },
     ctr: { m: 0, o: 0, t: 0, s: 0 }, retired: null,
     mgr: null,   // v3: coaching career after retirement (js/engine/manager.js)
+    meta: null,  // v5: progression layer (js/engine/meta.js)
   };
 }
 

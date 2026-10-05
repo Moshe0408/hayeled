@@ -6,6 +6,7 @@ import { g, gtext } from './gender.js';
 import { emojiIco } from './icons.js';
 import { COUNTRY_BY_ID } from '../data/countries.js';
 import * as game from '../engine/game.js';
+import { visFor } from './cosmetics.js';
 
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 const safeColor = (c, d) => (typeof c === 'string' && HEX.test(c) ? c : d);
@@ -59,7 +60,10 @@ export function avatarFor(meta = {}, opts = {}) {
   let base = {};
   try { base = avatarFromMeta(meta) || {}; } catch { base = {}; }
   const look = meta.look || {};
-  const o = { gender: meta.gender === 'f' ? 'f' : 'm', ...base, ...(look.skin !== undefined ? { skin: look.skin } : {}), ...(look.hair !== undefined ? { hair: look.hair } : {}), ...(look.hairColor !== undefined ? { hairColor: look.hairColor } : {}), ...opts };
+  // v2.3: the career in memory wears its equipped cosmetics (boots colour, accessory); opts.plain skips them
+  let cos = {};
+  if (!opts.plain) { try { const v = visFor(meta); cos = { ...(v.boots ? { boots: v.boots } : {}), ...(v.acc ? { acc: v.acc, accColors: v.accColors } : {}) }; } catch { cos = {}; } }
+  const o = { gender: meta.gender === 'f' ? 'f' : 'm', ...base, ...cos, ...(look.skin !== undefined ? { skin: look.skin } : {}), ...(look.hair !== undefined ? { hair: look.hair } : {}), ...(look.hairColor !== undefined ? { hairColor: look.hairColor } : {}), ...opts };
   try { return avatarSVG(o) || ''; } catch (e) { console.warn('[hayeled] avatar', e); return ''; }
 }
 
@@ -94,6 +98,9 @@ const CARD_ORDER_GK = ['div', 'han', 'kic', 'ref', 'pac', 'gkp'];
  */
 export function playerCard(p, { size = 'm', tilt = true, testid = '', ovrTestid = '' } = {}) {
   const tier = cardTier(p.ovr);
+  // v2.3 (F6): card frame bought with stars (gold / holo) for the career in memory, or p.frame explicitly
+  let frame = p.frame || '';
+  if (frame === undefined || frame === '') { try { frame = visFor(p.meta || {}).frame || ''; } catch { frame = ''; } }
   const club = p.club || null;
   const kit = club && Array.isArray(club.colors) ? club.colors : (p.nation && p.nation.colors) || ['#1d4ed8', '#ffffff'];
   const num = shirtNumber(p.pos, p.number);
@@ -106,7 +113,7 @@ export function playerCard(p, { size = 'm', tilt = true, testid = '', ovrTestid 
   const parts = String(p.name || '').trim().split(/\s+/);
   const shown = p.nick || parts.slice(1).join(' ') || parts[0] || '';
   const tid = testid ? ` data-testid="${esc(testid)}"` : '';
-  return `<div class="pcard pc-${size} tier-${tier}${tilt ? ' tiltable' : ''}"${tid}>
+  return `<div class="pcard pc-${size} tier-${tier}${frame ? ' pc-frame-' + esc(frame) : ''}${tilt ? ' tiltable' : ''}"${tid}>
     <div class="pc-body">
       <i class="pc-shine" aria-hidden="true"></i>
       <div class="pc-side">

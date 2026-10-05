@@ -69,7 +69,9 @@ function makeOffer(S, rng, club, type, extra = {}) {
   const txt = type === 'renewal' ? ('המועדון רוצה להאריך איתך את החוזה. יש הצעה על השולחן.')
     : type === 'pro' ? ('מזל טוב! ' + clubName(club) + ' מציעה לך חוזה מקצועני ראשון!')
       : (ag + ': יש לי משהו גדול בשבילך... ' + clubName(club) + ' רוצה אותך (' + (TYPE_HE[type] || '') + ').');
-  sysMsg(S, type === 'renewal' || type === 'pro' ? 'club' : 'agent', txt, false);
+  const it = sysMsg(S, type === 'renewal' || type === 'pro' ? 'club' : 'agent', txt, false);
+  // v2.3: the offer message opens the offers screen (the first pro contract is one tap away)
+  if (it) { it.route = '#/offers'; it.link = { route: '#/offers', labelHe: type === 'pro' ? 'לחתימה על החוזה' : 'להצעה' }; }
   return o;
 }
 
@@ -83,7 +85,9 @@ export function generateOffers(S, rng) {
   const ovr = ovrOf(p);
   const age = ageOf(S);
   const teamStr = teamStrOf(S);
-  const lam = clamp(0.15 + 0.15 * Math.max(0, ovr - teamStr) / 5 + (p.agentPush > 0 ? 0.4 : 0) + (p.treq ? 0.4 : 0) + (formAvgOr(p) - 6.8) * 0.2, 0.05, 1.5);
+  // v2.3 (F9): a scout who liked the player's match raises the chance of an offer (and of an offer from his club)
+  const scout = S.meta && S.meta.sc && S.meta.sc.until >= curAw(S) ? S.meta.sc : null;
+  const lam = clamp(0.15 + 0.15 * Math.max(0, ovr - teamStr) / 5 + (p.agentPush > 0 ? 0.4 : 0) + (p.treq ? 0.4 : 0) + (formAvgOr(p) - 6.8) * 0.2 + (scout ? 0.35 : 0), 0.05, 1.5);
   let n = rng.poisson(lam);
   const taken = openOfferClubs(S);
   const parentClub = p.parent ? p.parent.club : null;
@@ -94,7 +98,7 @@ export function generateOffers(S, rng) {
     return c.s >= ovr - 10 && c.s <= ovr + 6 && wageCap(c.b, econOf(S)) >= 0.7 * fairWage(ovr, clubPrestige(S, id), econOf(S));
   });
   for (let i = 0; i < n && cands.length; i++) {
-    const club = rng.weighted(cands, (id) => candWeight(S, id, teamStr));
+    const club = rng.weighted(cands, (id) => candWeight(S, id, teamStr) * (scout && id === scout.club ? 4 : 1));
     cands.splice(cands.indexOf(club), 1);
     let type;
     if (free) type = 'free';
